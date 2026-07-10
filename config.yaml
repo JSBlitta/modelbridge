@@ -1,0 +1,88 @@
+defaults:
+  batch_name_pattern: 3 digits
+  batch_name_pattern_phase_vbw: '{number}{suffix}-{phase}'
+  batch_state: provisional
+  client_name: BLITTA
+
+synonyms:
+  batch:
+  - batch
+  - batch_number
+  - batch_nr
+  - batchnr
+  - levering-productie
+  - levering_productie
+  - productie
+  client_order_id:
+  - client_order_id
+  - montagenummer
+  - order_id
+  - ordernummer
+  - klantreferentie
+  design:
+  - design
+  - element
+  - assembly
+  - design_code
+  - element_code
+  - elementnummer
+  - element_nummer
+  phase:
+  - phase
+  - fase
+  - ohw_verdieping
+  priority:
+  - priority
+  - prioriteit
+  uuid:
+  - uuid
+  - assembly_uuid
+  - constructible_uuid
+  project:
+  - project
+  - project_name
+  - project_number
+  - ohw_naam_project
+  scheduled_prod_date:
+  - scheduled_prod_date
+  - productiedatum
+  - prod_datum
+  - planning_datum
+  superproject:
+  - superproject
+  - super_project
+  - project_order
+  - ohw_order
+
+description_to_suffix:
+  betonvloer: B
+  brandwerend: B
+  dak: D
+  element: E
+  elementen: E
+  gevel: G
+  hsb: H
+  kelderwand: K
+  trap: T
+  vliesgevel: G
+
+client_meta_defaults:
+  gevel:
+  - gevel
+  - facade
+  - richting
+  levering_montage:
+  - levering-montage
+  - levering_montage
+  - montage
+  - assembly_delivery
+  uid_element:
+  - uid-element
+  - uid_element
+  - ifc_uid
+  - uid
+  verdieping:
+  - verdieping
+  - floor
+  - verdiep
+  - etage

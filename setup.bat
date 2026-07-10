@@ -1,0 +1,59 @@
+@echo off
+setlocal
+
+echo.
+echo ============================================
+echo  API Coupler - Setup ^& Build
+echo ============================================
+echo.
+
+:: Check Node is available
+where node >nul 2>&1
+if errorlevel 1 (
+    echo ERROR: Node.js not found. Install from https://nodejs.org
+    exit /b 1
+)
+echo [1/5] Node.js: OK
+
+:: Install backend deps
+echo [2/5] Installing backend dependencies...
+call npm install
+if errorlevel 1 ( echo ERROR: npm install failed. & exit /b 1 )
+
+:: Install frontend deps
+echo [3/5] Installing frontend dependencies...
+cd frontend
+call npm install
+if errorlevel 1 ( echo ERROR: frontend npm install failed. & cd .. & exit /b 1 )
+
+:: Build frontend
+echo [4/5] Building frontend...
+call npm run build
+if errorlevel 1 ( echo ERROR: frontend build failed. & cd .. & exit /b 1 )
+cd ..
+
+:: Check .env exists
+echo [5/5] Checking .env...
+if not exist .env (
+    echo.
+    echo NOTICE: .env not found - copying .env.example to .env
+    copy .env.example .env >nul
+    echo.
+    echo ACTION REQUIRED: Open .env and fill in:
+    echo   PRODUUZIT_REFRESH_TOKEN  -or-  PRODUUZIT_ADMIN_USERNAME + PRODUUZIT_ADMIN_PASSWORD
+    echo   TRIMBLE_CLIENT_ID
+    echo   TRIMBLE_CLIENT_SECRET
+    echo.
+    echo Then run:  node_modules\.bin\tsx src\index.ts
+) else (
+    echo .env found.
+    echo.
+    echo ============================================
+    echo  Setup complete. Start the app with:
+    echo    npm start
+    echo  Or install as a service:
+    echo    See HOSTING.md
+    echo ============================================
+)
+
+endlocal
