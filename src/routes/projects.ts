@@ -12,6 +12,7 @@ interface ProjectDef {
   suggested_suffix: string;
   phase: string;
   client_name?: string | null;
+  batch_numbers?: string[];
 }
 
 function buildFullName(p: ProjectDef): string {
@@ -77,20 +78,71 @@ app.post("/:uuid/phases", async (c) => {
   return c.json({ status: "added", phase, phases: updated.phases ?? updatedPhases });
 });
 
-// Preview: check which projects exist, which are new
+// Preview: check which projects exist, which are new — also checks superproject, phase, and batches
 app.post("/find-or-create", async (c) => {
   const projects = await c.req.json<ProjectDef[]>();
   const all = (await fetchAllPages("/company/projects/")) as Record<string, unknown>[];
   const byName = new Map<string, Record<string, unknown>>();
   for (const p of all) byName.set(p.name as string, p);
 
-  const results = projects.map((p) => {
+  // Determine which superproject numbers are already present in Produuzit
+  const knownSuperprojects = new Set<string>();
+  for (const proj of all) {
+    if (proj.super_project) knownSuperprojects.add(String(proj.super_project));
+    const m = /^(\d+)-/.exec((proj.name as string) ?? "");
+    if (m) knownSuperprojects.add(m[1]);
+  }
+
+  const results = await Promise.all(projects.map(async (p) => {
     const fullName = buildFullName(p);
-    if (byName.has(fullName)) {
-      return { project_key: p.project_key, status: "found", existing: byName.get(fullName) };
+    const superprojectFound = p.superproject ? knownSuperprojects.has(p.superproject) : null;
+
+    if (!byName.has(fullName)) {
+      return {
+        project_key: p.project_key,
+        status: "new",
+        existing: null,
+        superproject_found: superprojectFound,
+        phase_exists: null as boolean | null,
+        batches_found: [] as string[],
+        batches_missing: (p.batch_numbers ?? []) as string[],
+      };
     }
-    return { project_key: p.project_key, status: "new", existing: null };
-  });
+
+    const existing = byName.get(fullName)!;
+    const existingPhases = (existing.phases ?? []) as string[];
+    const phaseExists = p.phase
+      ? existingPhases.some((ep) => String(ep).trim().toLowerCase() === p.phase.trim().toLowerCase())
+      : null;
+
+    let batchesFound: string[] = [];
+    let batchesMissing: string[] = (p.batch_numbers ?? []).map(String);
+
+    const uuid = existing.uuid as string | undefined;
+    if (uuid && batchesMissing.length > 0) {
+      try {
+        const bResp = (await apiGet("/constructibles/batches/", { project: uuid, limit: 500 })) as {
+          results?: Record<string, unknown>[];
+        };
+        const existingNames = new Set((bResp.results ?? []).map((b) => String(b.name ?? "").trim()));
+        batchesFound = batchesMissing.filter((n) => existingNames.has(n));
+        batchesMissing = batchesMissing.filter((n) => !existingNames.has(n));
+      } catch {
+        // Batch check failed — treat all as missing (will be created or skipped if they already exist)
+      }
+    }
+
+    return {
+      project_key: p.project_key,
+      status: "found",
+      existing,
+      superproject_found: superprojectFound,
+      phase_exists: phaseExists,
+      batches_found: batchesFound,
+      batches_missing: batchesMissing,
+    };
+  }));
+
   return c.json(results);
 });
 

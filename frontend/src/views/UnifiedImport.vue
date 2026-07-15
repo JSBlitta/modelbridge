@@ -28,7 +28,26 @@
           <PhaseTable v-model:rows="phaseSuggestions" />
           <div style="margin-top:0.75rem;display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap;">
             <Button label="Check in Produuzit" icon="pi pi-search" @click="checkProjects" :loading="checking" />
-            <span v-if="checkDone" style="color:#374151;">{{ newProjectCount }} new, {{ foundProjectCount }} found</span>
+          </div>
+          <div v-if="checkDone" style="margin-top:0.75rem;">
+            <div v-for="row in phaseSuggestions" :key="row.project_key"
+                 style="display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap;padding:0.3rem 0;border-bottom:1px solid #f3f4f6;font-size:0.82rem;">
+              <code style="font-weight:600;min-width:160px;">{{ row.project_key }}</code>
+              <Tag v-if="row.superproject_found != null"
+                   :severity="row.superproject_found ? 'success' : 'secondary'"
+                   :value="row.superproject_found ? 'Superproject ✓' : 'Superproject ✗'" />
+              <Tag :severity="row.status === 'found' ? 'success' : 'info'"
+                   :value="row.status === 'found' ? 'Project found' : 'Project new'" />
+              <Tag v-if="row.phase_exists === true" severity="success"
+                   :value="'Phase ' + row.suggested_phase + ': exists'" />
+              <Tag v-else-if="row.phase_exists === false" severity="warn"
+                   :value="'Phase ' + row.suggested_phase + ': new'" />
+              <span v-if="row.batches_found !== undefined" style="color:#374151;">
+                Batches:
+                <span style="color:#15803d;font-weight:600;">{{ row.batches_found.length }} found</span>,
+                <span style="color:#b45309;font-weight:600;">{{ row.batches_missing.length }} new</span>
+              </span>
+            </div>
           </div>
         </div>
 
@@ -67,9 +86,9 @@
 
         <div v-if="checkDone && foundProjectCount > 0" style="margin-top:1rem;">
           <Message severity="info" :closable="false" size="small">
-            {{ foundProjectCount }} project(s) already exist. Add phase &amp; create batches?
+            {{ foundProjectCount }} project(s) already exist in Produuzit. Create phase &amp; batches in Produuzit?
           </Message>
-          <Button label="Add Phase &amp; Batches" icon="pi pi-plus-circle" severity="help"
+          <Button label="Create Phase &amp; Batches in Produuzit" icon="pi pi-plus-circle" severity="help"
             @click="addPhasesAndBatches" :loading="addingPhasesBatches"
             style="margin-top:0.5rem;" />
         </div>
@@ -242,7 +261,7 @@ const refreshing = ref(false)
 
 onMounted(async () => {
   try {
-    const res = await api.get('/api/projects/?limit=100')
+    const res = await api.get('/api/projects?limit=100')
     allProjects.value = (res.data.results || []).sort((a, b) => (a.name || '').localeCompare(b.name || ''))
   } catch { /* ignore */ }
 })
@@ -250,7 +269,7 @@ onMounted(async () => {
 async function refreshProjects() {
   refreshing.value = true
   try {
-    const res = await api.get('/api/projects/?limit=100')
+    const res = await api.get('/api/projects?limit=100')
     allProjects.value = (res.data.results || []).sort((a, b) => (a.name || '').localeCompare(b.name || ''))
   } finally { refreshing.value = false }
 }
@@ -302,6 +321,7 @@ function toProjectDefs(rows) {
     description: r.description || null,
     suggested_suffix: r.suggested_suffix || '',
     phase: r.suggested_phase || '',
+    batch_numbers: (r.batches || []).map(b => String(b?.number ?? b)),
   }))
 }
 
@@ -310,13 +330,22 @@ async function checkProjects() {
   try {
     const res = await api.post('/api/projects/find-or-create', toProjectDefs(phaseSuggestions.value))
     const results = res.data || []
-    const foundMap = new Map(results.filter(r => r.status === 'found').map(r => [r.project_key, r.existing?.uuid]))
+    const resultMap = new Map(results.map(r => [r.project_key, r]))
     for (const row of phaseSuggestions.value) {
-      if (foundMap.has(row.project_key)) {
+      const r = resultMap.get(row.project_key)
+      if (r?.status === 'found') {
         row.status = 'found'
-        row.project_uuid = foundMap.get(row.project_key)
+        row.project_uuid = r.existing?.uuid
+        row.superproject_found = r.superproject_found
+        row.phase_exists = r.phase_exists
+        row.batches_found = r.batches_found || []
+        row.batches_missing = r.batches_missing || []
       } else {
         row.status = 'new'
+        row.superproject_found = r?.superproject_found ?? null
+        row.phase_exists = null
+        row.batches_found = []
+        row.batches_missing = (row.batches || []).map(b => String(b?.number ?? b))
       }
     }
     checkDone.value = true
@@ -348,7 +377,10 @@ async function addPhasesAndBatches() {
         await api.post(`/api/projects/${p.project_uuid}/phases`, { phase })
       } catch { /* phase may already exist — ignore */ }
 
-      const batches = (p.batches || []).map(b => ({ name: String(b), phase }))
+      const batches = (p.batches || []).map(b => {
+        const item = (b !== null && typeof b === 'object') ? b : { number: b, stdlibs: [] }
+        return { name: String(item.number), phase, linked_stdlib_names: item.stdlibs ?? [] }
+      })
       if (batches.length) {
         try {
           const res = await api.post('/api/batches/create', { project_uuid: p.project_uuid, batches })

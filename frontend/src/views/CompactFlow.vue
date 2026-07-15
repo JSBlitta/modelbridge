@@ -168,7 +168,7 @@ const totalBlocked = computed(() => previewData.value?.batch_previews.filter(b =
 const canExecute = computed(() => previewData.value?.batch_previews.some(bp => !bp.blocked && (bp.summary.new > 0 || bp.summary.changed > 0)))
 
 onMounted(async () => {
-  const res = await api.get('/api/projects/?limit=100')
+  const res = await api.get('/api/projects?limit=100')
   projects.value = res.data.results || []
   projectsLoaded.value = true
 })

@@ -5,9 +5,9 @@
       <p class="page-subtitle">Browse IFC models, pick properties, map to Produuzit, and push with explicit approval.</p>
     </div>
 
-    <!-- 1: Connect -->
-    <Card class="mb-card">
-      <template #title>1 &middot; Connect</template>
+    <!-- Connect (hidden once authenticated) -->
+    <Card v-if="!authStatus" class="mb-card">
+      <template #title>Connect</template>
       <template #content>
         <div style="display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap;">
           <Tag :severity="authStatus ? 'success' : 'warn'" :value="authStatus ? $t('trimble.connected') : $t('trimble.notConnected')" />
@@ -35,15 +35,15 @@
       </template>
     </Card>
 
-    <!-- 2: Select Model -->
-    <Card class="mb-card">
-      <template #title>2 &middot; Select Model</template>
+    <!-- Select Model (shown once authenticated) -->
+    <Card v-if="authStatus" class="mb-card">
+      <template #title>Select Model</template>
       <template #content>
         <div style="display:flex;gap:1rem;align-items:flex-end;flex-wrap:wrap;">
           <div style="flex:1;min-width:280px;">
             <label class="field-label">Trimble Project</label>
             <Select v-model="selectedProject" :options="trimbleProjects" option-label="name" option-value="id"
-              placeholder="Select project..." class="wide" @change="onProjectChange" :disabled="!authStatus" />
+              placeholder="Select project..." class="wide" @change="onProjectChange" />
           </div>
           <Button :label="$t('trimble.loadFiles')" icon="pi pi-folder-open" @click="loadProjectFiles" :loading="loadingFiles" :disabled="!selectedProject" />
         </div>
@@ -61,7 +61,7 @@
 
     <!-- 3: Select Properties -->
     <Card v-if="psetDefs.length" class="mb-card">
-      <template #title>3 &middot; Property Sets <span class="subtitle-dim">({{ totalSelectedProps }} selected)</span></template>
+      <template #title>Property Sets <span class="subtitle-dim">({{ totalSelectedProps }} selected)</span></template>
       <template #content>
         <div style="margin-bottom:0.75rem;display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
           <Button :label="$t('trimble.selectAll')" icon="pi pi-check-square" text size="small" @click="selectAllProps" />
@@ -89,7 +89,7 @@
 
     <!-- 4: Map to Produuzit -->
     <Card v-if="allSelectedProps.length" class="mb-card">
-      <template #title>4 &middot; Map to Produuzit</template>
+      <template #title>Map to Produuzit</template>
       <template #content>
         <div style="display:flex;gap:1rem;align-items:center;flex-wrap:wrap;margin-bottom:0.75rem;">
           <div>
@@ -117,7 +117,7 @@
 
     <!-- 5: Preview -->
     <Card v-if="allSelectedProps.length && targetProjectUuid" class="mb-card">
-      <template #title>5 &middot; Preview Entities</template>
+      <template #title>Preview Entities</template>
       <template #content>
         <div style="display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap;margin-bottom:0.75rem;">
           <Button :label="$t('trimble.fetchEntities')" icon="pi pi-download" @click="fetchEntities" :loading="fetchingEntities"
@@ -142,7 +142,7 @@
 
     <!-- 6: Preview & Push -->
     <Card v-if="previewEntities.length && hasRequiredMapping" class="mb-card card-warn-border">
-      <template #title>6 &middot; Preview &amp; Push to Produuzit</template>
+      <template #title>Preview &amp; Push to Produuzit</template>
       <template #content>
         <Message severity="warn" :closable="false" style="margin-bottom:1rem;">
           <strong>Explicit confirmation required.</strong> No automatic sync runs.
@@ -325,7 +325,7 @@ async function loadAuthStatus() {
 async function loadProduuzitProjects() {
   produuzitProjectsError.value = ''
   try {
-    const r = await api.get('/api/projects/?limit=200')
+    const r = await api.get('/api/projects?limit=200')
     produuzitProjects.value = r.data.results || []
     if (!produuzitProjects.value.length) console.warn('[api-coupler] /api/projects/ returned 0 results. Full response:', r.data)
   } catch (e) {

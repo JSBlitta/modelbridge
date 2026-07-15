@@ -148,7 +148,7 @@ const filteredDesigns = computed(() => {
 })
 
 onMounted(async () => {
-  const r = await api.get('/api/projects/?limit=100')
+  const r = await api.get('/api/projects?limit=100')
   projects.value = r.data.results || []
 })
 
@@ -156,7 +156,7 @@ async function onProjectChange() {
   batches.value = []; designs.value = []; items.value = []; selectedBatch.value = null; previewData.value = null
   if (!selectedProject.value) return
   const [batchRes, contextRes] = await Promise.all([
-    api.get(`/api/batches/?project_uuid=${selectedProject.value}&limit=200`),
+    api.get(`/api/batches?project_uuid=${selectedProject.value}&limit=200`),
     api.get(`/api/assemblies/context?project_uuid=${selectedProject.value}`),
   ])
   batches.value = batchRes.data.results || []

@@ -134,7 +134,7 @@ async function loadProjects() {
     return
   }
   try {
-    const res = await api.get('/api/projects/?limit=100')
+    const res = await api.get('/api/projects?limit=100')
     _projectsCache = res.data.results || []
     projects.value = _projectsCache
     if (!projects.value.length) console.warn('[api-coupler] /api/projects/ returned 0 results:', res.data)
@@ -173,7 +173,7 @@ async function loadBatches() {
   changedUuids.value = new Set()
   updateResults.value = []
   if (!selectedProject.value) return
-  const res = await api.get(`/api/batches/?project_uuid=${selectedProject.value}&limit=200`)
+  const res = await api.get(`/api/batches?project_uuid=${selectedProject.value}&limit=200`)
   batches.value = res.data.results || []
 }
 

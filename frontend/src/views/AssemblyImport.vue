@@ -210,7 +210,7 @@ onMounted(loadProjects)
 async function loadProjects() {
   loading.value = true
   try {
-    const res = await api.get('/api/projects/?limit=100')
+    const res = await api.get('/api/projects?limit=100')
     projects.value = res.data.results || []
   } finally { loading.value = false }
 }

@@ -298,7 +298,7 @@ onMounted(loadProjects)
 async function loadProjects() {
   loadingProjects.value = true
   try {
-    const res = await api.get('/api/projects/?limit=100')
+    const res = await api.get('/api/projects?limit=100')
     projects.value = res.data.results || []
     if (!projects.value.length) console.warn('[api-coupler] /api/projects/ returned 0 results:', res.data)
   } catch (e) {
@@ -317,7 +317,7 @@ async function loadBatches() {
   previewRows.value = []
   createMsg.value = ''
   const [apiRes, dbRes, projectRes, stdlibRes] = await Promise.all([
-    api.get(`/api/batches/?project_uuid=${selectedProject.value}&limit=200`),
+    api.get(`/api/batches?project_uuid=${selectedProject.value}&limit=200`),
     api.get(`/api/batches/db?project_uuid=${selectedProject.value}`),
     api.get(`/api/projects/${selectedProject.value}`),
     api.get(`/api/projects/${selectedProject.value}/stdlibs`),

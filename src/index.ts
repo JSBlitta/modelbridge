@@ -19,16 +19,6 @@ import config from "./routes/config.js";
 
 const app = new Hono();
 
-// Strip trailing slashes from API routes so /api/projects/ matches /api/projects
-app.use("/api/*", async (c, next) => {
-  const url = new URL(c.req.url);
-  if (url.pathname.endsWith("/") && url.pathname !== "/api/") {
-    url.pathname = url.pathname.replace(/\/+$/, "");
-    return c.redirect(url.toString(), 308);
-  }
-  await next();
-});
-
 // Public routes — no session gate; Produuzit API calls use the company service token
 app.route("/api/health", health);
 app.route("/api/auth", auth);
