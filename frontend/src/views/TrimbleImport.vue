@@ -139,9 +139,12 @@
             <Button :label="$t('trimble.deselectAll')" icon="pi pi-stop" size="small" text @click="deselectAllEntities" />
             <Tag severity="info" :value="$t('trimble.selectedCount', { count: selectedCount })" />
           </div>
-          <div style="display:flex;gap:0.35rem;align-items:center;flex-wrap:wrap;margin-bottom:0.5rem;">
+          <div style="display:flex;gap:0.6rem;align-items:center;flex-wrap:wrap;margin-bottom:0.5rem;">
             <template v-for="[batch, indices] in entityBatchGroups" :key="batch">
-              <Button :label="'[' + batch + ']'" icon="pi pi-check" size="small" text severity="secondary" :class="{ 'batch-btn-selected': batchSelectionState.get(batch) === 'all' }" @click="toggleBatch(batch)" />
+              <div style="display:flex;align-items:center;gap:0.2rem;">
+                <Checkbox :model-value="batchSelectionState.get(batch) === 'all'" :binary="true" @change="toggleBatch(batch)" :input-id="'batch_cb_' + batch" />
+                <label :for="'batch_cb_' + batch" style="font-size:0.82rem;cursor:pointer;">[{{ batch }}]</label>
+              </div>
             </template>
           </div>
         </div>
@@ -667,6 +670,4 @@ function resolveProp(columnMappingObj, target) {
 .chip-changed { background: #fef3c7; color: #92400e; padding: 0.2rem 0.6rem; border-radius: 12px; font-size: 0.8rem; font-weight: 600; }
 .chip-identical { background: #e0e7ff; color: #3730a3; padding: 0.2rem 0.6rem; border-radius: 12px; font-size: 0.8rem; font-weight: 600; }
 .chip-blocked { background: #fce4ec; color: #b91c1c; padding: 0.2rem 0.6rem; border-radius: 12px; font-size: 0.8rem; font-weight: 600; }
-
-.batch-btn-selected .pi-check { color: #22c55e; font-weight: 700; }
 </style>
