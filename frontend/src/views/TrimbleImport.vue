@@ -8,12 +8,12 @@
     <Card v-if="!authStatus" class="mb-card">
       <template #title>{{ $t('trimble.connect') }}</template>
       <template #content>
-        <div style="display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap;">
+        <div class="flex-row gap-md">
           <Tag severity="warn" :value="$t('trimble.notConnected')" />
           <Button :label="$t('trimble.openLogin')" icon="pi pi-external-link" @click="startLogin" :loading="startingLogin" />
           <Button :label="$t('trimble.refreshStatus')" icon="pi pi-refresh" text @click="loadAuthStatus" :loading="loadingStatus" />
         </div>
-        <Message severity="warn" :closable="false" style="margin-top:1rem;">
+        <Message severity="warn" :closable="false" class="mt-sm" style="margin-top:1rem">
           {{ $t('trimble.noAutoPush') }}
         </Message>
       </template>
@@ -22,7 +22,7 @@
     <Card v-if="authStatus" class="mb-card">
       <template #title>{{ $t('trimble.selectModelCard') }}</template>
       <template #content>
-        <div style="display:flex;gap:1rem;align-items:flex-end;flex-wrap:wrap;">
+        <div class="flex-row gap-lg" style="align-items:flex-end">
           <div style="flex:1;min-width:280px;">
             <label class="field-label">{{ $t('trimble.trimbleProject') }}</label>
             <Select v-model="selectedProject" :options="trimbleProjects" option-label="name" option-value="id"
@@ -36,14 +36,14 @@
           {{ $t('trimble.loadFailed', { error: projectsError }) }}
           <Button :label="$t('trimble.retry')" icon="pi pi-refresh" size="small" text @click="loadTrimbleProjects" style="margin-left:0.5rem;" />
         </Message>
-        <div v-if="loadingProjects" style="margin-top:0.5rem;color:#6b7280;font-size:0.85rem;">{{ $t('trimble.loadingProjects') }}</div>
-        <div v-if="loadingFiles" style="margin-top:0.5rem;color:#6b7280;font-size:0.85rem;">{{ $t('trimble.scanningProject') }}</div>
-        <div v-if="modelFiles.length" style="margin-top:0.75rem;">
+        <div v-if="loadingProjects" class="text-dim" style="margin-top:0.5rem">{{ $t('trimble.loadingProjects') }}</div>
+        <div v-if="loadingFiles" class="text-dim" style="margin-top:0.5rem">{{ $t('trimble.scanningProject') }}</div>
+        <div v-if="modelFiles.length" class="mt-sm">
           <label class="field-label">{{ $t('trimble.modelFile') }} <span style="font-weight:400;color:#6b7280;">({{ modelFiles.length }} found)</span></label>
           <Select v-model="selectedFile" :options="modelFiles" option-label="_display" option-value="id"
             :placeholder="$t('trimble.selectIfc')" class="wide" @change="onFileSelected" />
         </div>
-        <Message v-if="selectedProject && !loadingFiles && modelFiles.length === 0" severity="info" :closable="false" style="margin-top:0.75rem;">
+        <Message v-if="selectedProject && !loadingFiles && modelFiles.length === 0" severity="info" :closable="false" class="mt-sm">
           {{ $t('trimble.noIfcFiles') }}
         </Message>
       </template>
@@ -52,7 +52,7 @@
     <Card v-if="psetDefs.length" class="mb-card">
       <template #title>{{ $t('trimble.propertySetsTitle') }} <span class="subtitle-dim">({{ totalSelectedProps }} selected)</span></template>
       <template #content>
-        <div style="margin-bottom:0.75rem;display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
+        <div class="flex-row gap-sm mb-sm" style="margin-bottom:0.75rem">
           <Button :label="$t('trimble.selectAll')" icon="pi pi-check-square" text size="small" @click="selectAllProps" />
           <Button :label="$t('trimble.clearAll')" icon="pi pi-stop" text size="small" @click="clearAllProps" />
           <InputText v-model="psetFilter" :placeholder="$t('trimble.filterPsets')" size="small" style="width:200px;" />
@@ -79,7 +79,7 @@
     <Card v-if="allSelectedProps.length" class="mb-card">
       <template #title>{{ $t('trimble.mapToProduuzit') }}</template>
       <template #content>
-        <div style="display:flex;gap:1rem;align-items:center;flex-wrap:wrap;margin-bottom:0.75rem;">
+        <div class="mb-sm" style="display:flex;gap:1rem;align-items:center;flex-wrap:wrap;margin-bottom:0.75rem;">
           <div>
             <label class="field-label">{{ $t('trimble.targetProject') }}</label>
             <Select v-model="targetProjectUuid" :options="produuzitProjects" option-label="name" option-value="uuid"
@@ -106,7 +106,7 @@
     <Card v-if="allSelectedProps.length && targetProjectUuid" class="mb-card">
       <template #title>{{ $t('trimble.step5') }}</template>
       <template #content>
-        <div style="display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap;margin-bottom:0.75rem;">
+        <div class="flex-row gap-md mb-sm" style="margin-bottom:0.75rem">
           <Button :label="$t('trimble.fetchEntities')" icon="pi pi-download" @click="fetchEntities" :loading="fetchingEntities"
             :disabled="!selectedFile" />
           <Button :label="$t('trimble.rawSample')" icon="pi pi-eye" severity="secondary" size="small" text
@@ -121,25 +121,25 @@
             :placeholder="$t('trimble.selectDedupKey')" style="min-width:200px;font-size:0.82rem;" />
           <Tag v-if="totalEntities > 0" severity="info" :value="$t('trimble.entitiesTag', { preview: previewEntities.length, total: totalEntities })" />
         </div>
-        <details v-if="rawSampleEntity" style="margin-bottom:0.5rem;font-size:0.78rem;">
+        <details v-if="rawSampleEntity" class="mb-sm" style="font-size:0.78rem">
           <summary style="cursor:pointer;color:#6b7280;font-weight:600;">{{ $t('trimble.rawSampleSummary') }}</summary>
           <pre style="background:#f3f4f6;padding:0.5rem;border-radius:4px;overflow-x:auto;max-height:300px;font-size:0.72rem;white-space:pre-wrap;">{{ JSON.stringify(rawSampleEntity, null, 2) }}</pre>
         </details>
-        <details v-if="previewEntities.length" style="margin-bottom:0.5rem;font-size:0.78rem;">
+        <details v-if="previewEntities.length" class="mb-sm" style="font-size:0.78rem">
           <summary style="cursor:pointer;color:#6b7280;">{{ $t('trimble.rawFilteredSummary') }}</summary>
           <pre style="background:#f3f4f6;padding:0.5rem;border-radius:4px;overflow-x:auto;max-height:220px;font-size:0.72rem;white-space:pre-wrap;">{{ JSON.stringify(previewEntities[0], null, 2) }}</pre>
         </details>
-        <Message v-if="uniqueOnly" severity="secondary" :closable="false" size="small" style="margin-bottom:0.5rem;">
+        <Message v-if="uniqueOnly" severity="secondary" :closable="false" size="small" class="mb-sm">
           {{ $t('trimble.dedupInfo', { key: dedupLabel }) }}
         </Message>
 
         <div v-if="previewEntities.length">
-          <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;margin-bottom:0.25rem;">
+          <div class="flex-row gap-sm" style="margin-bottom:0.25rem">
             <Button :label="$t('trimble.selectAllEntities')" icon="pi pi-check-square" size="small" text @click="selectAllEntities" />
             <Button :label="$t('trimble.deselectAll')" icon="pi pi-stop" size="small" text @click="deselectAllEntities" />
             <Tag severity="info" :value="$t('trimble.selectedCount', { count: selectedCount })" />
           </div>
-          <div style="display:flex;gap:0.6rem;align-items:center;flex-wrap:wrap;margin-bottom:0.5rem;">
+          <div class="mb-sm" style="display:flex;gap:0.6rem;align-items:center;flex-wrap:wrap;">
             <template v-for="[batch, indices] in entityBatchGroups" :key="batch">
               <div style="display:flex;align-items:center;gap:0.2rem;">
                 <Checkbox :model-value="batchSelectionState.get(batch) === 'all'" :binary="true" @change="toggleBatch(batch)" :input-id="'batch_cb_' + batch" />
@@ -159,14 +159,14 @@
             <template #body="{ data }">{{ extractProp(data, prop) }}</template>
           </Column>
         </DataTable>
-        <div v-if="!previewEntities.length && !fetchingEntities" style="color:#6b7280;font-size:0.85rem;">{{ $t('trimble.clickFetch') }}</div>
+        <div v-if="!previewEntities.length && !fetchingEntities" class="text-dim">{{ $t('trimble.clickFetch') }}</div>
       </template>
     </Card>
 
     <Card v-if="previewEntities.length && hasRequiredMapping" class="mb-card">
       <template #title>{{ $t('trimble.previewChanges') }}</template>
       <template #content>
-        <div style="display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap;margin-bottom:0.75rem;">
+        <div class="flex-row gap-md mb-sm" style="margin-bottom:0.75rem">
           <div style="display:flex;align-items:center;gap:0.4rem;">
             <Checkbox v-model="uniqueOnlyImport" :binary="true" input-id="unique_toggle_import" />
             <label for="unique_toggle_import" style="font-size:0.85rem;cursor:pointer;">{{ $t('trimble.deduplicate') }}</label>
@@ -174,12 +174,12 @@
           <Button :label="$t('trimble.checkChanges')" icon="pi pi-search" @click="doPreview" :loading="previewing" />
         </div>
 
-        <div v-if="previewing" style="color:#6b7280;font-size:0.85rem;margin-bottom:0.5rem;">
+        <div v-if="previewing" class="text-dim mb-sm">
           <i class="pi pi-spin pi-spinner" style="margin-right:0.4rem;"></i>
           {{ $t('trimble.comparing', { count: selectedEntities.length || previewEntities.length }) }}
         </div>
 
-        <div v-if="previewError" style="margin-bottom:0.5rem;">
+        <div v-if="previewError" class="mb-sm">
           <Message severity="error" :closable="true" @close="previewError = ''">{{ previewError }}</Message>
         </div>
 
@@ -191,7 +191,7 @@
             {{ $t('trimble.designsNotFound', { designs: previewData.unresolved_designs.slice(0, 5).join(', ') + (previewData.unresolved_designs.length > 5 ? '\u2026' : '') }) }}
           </Message>
           <div v-for="bp in previewData.batch_previews" :key="bp.batch_uuid"
-            style="display:flex;gap:0.5rem;align-items:center;padding:0.3rem 0;border-bottom:1px solid #f3f4f6;">
+            class="batch-preview-row">
             <Tag :severity="bp.blocked ? 'danger' : 'secondary'" :value="bp.batch_name" />
             <span class="chip-new">{{ $t('trimble.newChip', { count: bp.summary.new }) }}</span>
             <span class="chip-changed">{{ $t('trimble.changedChip', { count: bp.summary.changed }) }}</span>
@@ -211,14 +211,14 @@
         <Message severity="warn" :closable="false" style="margin-bottom:1rem;">
           <strong>{{ $t('trimble.explicitConfirm') }}</strong>
         </Message>
-        <div v-if="selectedCount" style="margin-bottom:0.75rem;">
+        <div v-if="selectedCount" class="mb-sm" style="margin-bottom:0.75rem">
           <Button :label="$t('trimble.pushSelected')" icon="pi pi-cloud-upload" severity="warning" @click="doImport" :loading="importing" />
         </div>
-        <div v-else style="margin-bottom:0.75rem;">
+        <div v-else class="mb-sm" style="margin-bottom:0.75rem">
           <Button :label="$t('trimble.pushToProduuzit')" icon="pi pi-cloud-upload" severity="warning" @click="doImport" :loading="importing" />
         </div>
 
-        <div v-if="importResults.length" style="margin-top:1rem;">
+        <div v-if="importResults.length" class="mt-sm" style="margin-top:1rem">
           <div class="summary-chips">
             <span class="chip-new">{{ importSummary.created }} {{ $t('trimble.created') }}</span>
             <span class="chip-changed">{{ importSummary.updated }} {{ $t('trimble.updated') }}</span>

@@ -7,7 +7,7 @@
     <Card class="mb-card">
       <template #title>{{ $t('unified.projectSection') }}</template>
       <template #content>
-        <div style="display:flex;gap:1rem;align-items:center;flex-wrap:wrap;margin-bottom:0.75rem;">
+        <div class="flex-row gap-lg" style="margin-bottom:0.75rem;">
           <Select v-model="project" :options="allProjects" option-label="name" option-value="uuid"
             :placeholder="$t('unified.selectProject')" style="min-width:280px" @change="onProjectChange" />
           <Button icon="pi pi-refresh" text size="small" @click="refreshProjects" :loading="refreshing" v-tooltip.top="$t('trimble.reloadProjects')" />
@@ -24,12 +24,12 @@
 
         <div v-if="phaseSuggestions.length" style="margin-top:1rem;">
           <PhaseTable v-model:rows="phaseSuggestions" />
-          <div style="margin-top:0.75rem;display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap;">
+          <div class="mt-sm flex-row gap-md">
             <Button :label="$t('unified.checkBtn')" icon="pi pi-search" @click="checkProjects" :loading="checking" class="btn-preview" />
           </div>
-          <div v-if="checkDone" style="margin-top:0.75rem;">
+          <div v-if="checkDone" class="mt-sm">
             <div v-for="row in phaseSuggestions" :key="row.project_key"
-                 style="display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap;padding:0.3rem 0;border-bottom:1px solid #f3f4f6;font-size:0.82rem;">
+                 class="batch-preview-row gap-xs" style="font-size:0.82rem;">
               <code style="font-weight:600;min-width:160px;">{{ row.project_key }}</code>
               <Tag v-if="row.superproject_found != null"
                    :severity="row.superproject_found ? 'success' : 'secondary'"
@@ -42,7 +42,7 @@
                    :value="$t('unified.phaseNew', { phase: row.suggested_phase })" />
               <span v-if="row.batches_found !== undefined" style="color:#374151;">
                 {{ $t('unified.batchesFound', { found: row.batches_found.length }) }}
-                <span v-if="row.batches_missing.length" style="color:#b45309;font-weight:600;">, {{ $t('unified.batchesNew', { count: row.batches_missing.length }) }}</span>
+                <span v-if="row.batches_missing.length" class="text-changed">, {{ $t('unified.batchesNew', { count: row.batches_missing.length }) }}</span>
               </span>
             </div>
           </div>
@@ -56,8 +56,8 @@
             :rows="confirmProjectRows"
             :columns="[{field:'project_key',header:$t('unified.project')},{field:'superproject',header:$t('unified.superproject')},{field:'suggested_phase',header:$t('unified.phase')}]"
             status-field="status"
-            style="margin-top:0.75rem;"
-          />
+            class="mt-sm"
+            />
           <ConfirmedButton
             :label="$t('unified.createProjectsBtn')"
             icon="pi pi-plus"
@@ -68,7 +68,7 @@
             style="margin-top:0.5rem;" />
         </div>
 
-        <div v-if="createProjectResults.length" style="margin-top:0.75rem;">
+        <div v-if="createProjectResults.length" class="mt-sm">
           <DataTable :value="createProjectResults" size="small">
             <Column field="project_key" :header="$t('unified.project')" />
             <Column field="status" :header="$t('unified.status')">
@@ -102,7 +102,7 @@
         <div style="margin-bottom:0.75rem;">
           <label style="display:block;font-size:0.8rem;font-weight:600;color:#6b7280;margin-bottom:0.25rem;">{{ $t('unified.assemblyCsv') }}</label>
           <FileUpload mode="basic" accept=".csv" :auto="false" :choose-label="$t('unified.selectCsv')" @select="onAsmFileSelect" />
-          <span v-if="parseResult" style="background:#e0f2fe;color:#0369a1;padding:0.2rem 0.5rem;border-radius:999px;font-size:0.78rem;display:inline-block;margin-top:0.4rem;">
+          <span v-if="parseResult" class="badge-info" style="margin-top:0.4rem;">
             {{ parseResult.rows.length }} rows \u00b7 {{ parseResult.headers.length }} columns
           </span>
         </div>
@@ -121,7 +121,7 @@
           </div>
         </div>
 
-        <div v-if="parseResult" style="display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap;margin-bottom:0.75rem;">
+        <div v-if="parseResult" class="flex-row gap-md" style="margin-bottom:0.75rem;">
           <InputText v-model="presetName" :placeholder="$t('unified.presetName')" style="width:180px;" size="small" />
           <Button :label="$t('unified.savePreset')" icon="pi pi-bookmark" size="small" text @click="savePreset" />
           <Select v-if="presets.length" v-model="selectedPreset" :options="presets" option-label="name"
@@ -132,13 +132,13 @@
           <Button :label="$t('unified.previewBtn')" icon="pi pi-search" @click="doPreview" :loading="previewing" class="btn-preview" />
         </div>
 
-        <div v-if="previewData" style="margin-top:0.75rem;">
+        <div v-if="previewData" class="mt-sm">
           <!-- UUID mode: flat row preview -->
           <template v-if="previewData.uuid_mode">
-            <div style="display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap;margin-bottom:0.5rem;">
-              <span style="color:#b45309;font-weight:600;">{{ totalChanged }} {{ $t('unified.changed') }}</span>
-              <span style="color:#6b7280;">{{ totalIdentical }} {{ $t('unified.identical') }}</span>
-              <span v-if="totalBlocked" style="color:#dc2626;font-weight:600;">{{ totalBlocked }} {{ $t('unified.errors') }}</span>
+            <div class="flex-row gap-md mb-sm">
+              <span class="text-changed">{{ totalChanged }} {{ $t('unified.changed') }}</span>
+              <span class="text-identical">{{ totalIdentical }} {{ $t('unified.identical') }}</span>
+              <span v-if="totalBlocked" class="text-blocked">{{ totalBlocked }} {{ $t('unified.errors') }}</span>
             </div>
 
             <Message v-if="previewData.has_errors" severity="error" :closable="false" size="small">
@@ -179,7 +179,7 @@
 
           <!-- Standard mode: batch-grouped preview -->
           <template v-else>
-            <div style="display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap;margin-bottom:0.5rem;">
+            <div class="flex-row gap-md mb-sm">
               <span class="chip-new">{{ $t('compactFlow.newChip', { count: totalNew }) }}</span>
               <span class="chip-changed">{{ $t('compactFlow.changedChip', { count: totalChanged }) }}</span>
               <span class="chip-identical">{{ $t('compactFlow.identicalChip', { count: totalIdentical }) }}</span>
@@ -196,16 +196,16 @@
               {{ $t('unified.designsNotFound', { designs: previewData.unresolved_designs.slice(0,5).join(', ') + (previewData.unresolved_designs.length>5?'\u2026':'') }) }}
             </Message>
 
-            <div v-for="bp in previewData.batch_previews" :key="bp.batch_uuid" style="display:flex;gap:0.5rem;align-items:center;padding:0.25rem 0;border-bottom:1px solid #f3f4f6;">
+            <div v-for="bp in previewData.batch_previews" :key="bp.batch_uuid" class="batch-preview-row">
               <Tag :severity="bp.blocked?'danger':'secondary'" :value="bp.batch_name" />
               <span style="color:#15803d;">{{ bp.summary.new }}\u2191</span>
               <span style="color:#b45309;">{{ bp.summary.changed }}~</span>
-              <span style="color:#6b7280;">{{ bp.summary.identical }}=</span>
+              <span class="text-identical">{{ bp.summary.identical }}=</span>
               <Tag v-if="bp.blocked" severity="danger" :value="$t('compactFlow.definitiveBlocked')" />
             </div>
           </template>
 
-          <div v-if="canExecute" style="margin-top:0.75rem;">
+          <div v-if="canExecute" class="mt-sm">
             <ConfirmedButton
               :label="$t('unified.executeBtn')"
               icon="pi pi-bolt"
@@ -216,12 +216,12 @@
           </div>
         </div>
 
-        <div v-if="importResults.length" style="margin-top:0.75rem;">
+        <div v-if="importResults.length" class="mt-sm">
           <div style="display:flex;gap:1rem;flex-wrap:wrap;">
-            <span v-if="!isUuidMode" style="color:#15803d;font-weight:600;">{{ importResults.filter(r=>r.status==='created').length }} {{ $t('unified.created') }}</span>
-            <span style="color:#b45309;font-weight:600;">{{ importResults.filter(r=>r.status==='updated').length }} {{ $t('unified.updated') }}</span>
-            <span style="color:#6b7280;">{{ importResults.filter(r=>r.status==='skipped').length }} {{ $t('unified.skipped') }}</span>
-            <span style="color:#dc2626;font-weight:600;">{{ importResults.filter(r=>r.status==='error'||r.status==='blocked').length }} {{ $t('unified.errors') }}</span>
+            <span v-if="!isUuidMode" class="text-new">{{ importResults.filter(r=>r.status==='created').length }} {{ $t('unified.created') }}</span>
+            <span class="text-changed">{{ importResults.filter(r=>r.status==='updated').length }} {{ $t('unified.updated') }}</span>
+            <span class="text-identical">{{ importResults.filter(r=>r.status==='skipped').length }} {{ $t('unified.skipped') }}</span>
+            <span class="text-blocked">{{ importResults.filter(r=>r.status==='error'||r.status==='blocked').length }} {{ $t('unified.errors') }}</span>
           </div>
           <DataTable v-if="importResults.some(r=>r.status==='error'||r.status==='blocked')"
             :value="importResults.filter(r=>r.status==='error'||r.status==='blocked')" size="small" style="margin-top:0.5rem;">

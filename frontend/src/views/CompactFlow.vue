@@ -46,7 +46,7 @@
 
     <!-- One-click check + summary banner -->
     <div v-if="hasRequiredMapping" class="panel mt-sm">
-      <div style="display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap;">
+      <div class="flex-row gap-md">
         <Button :label="$t('compactFlow.previewBtn')" icon="pi pi-search" @click="doPreview" :loading="previewing" class="btn-preview" />
         <span v-if="previewData" class="summary-chips">
           <span class="chip-new">{{ $t('compactFlow.newChip', { count: totalNew }) }}</span>
@@ -81,8 +81,8 @@
         </div>
 
         <!-- Execute -->
-        <div v-if="canExecute" style="margin-top:0.75rem;">
-          <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.5rem;">
+        <div v-if="canExecute" class="mt-sm">
+          <div class="flex-row gap-sm mb-sm">
             <Checkbox v-model="confirmImport" :binary="true" input-id="confirm-compact-import" />
             <label for="confirm-compact-import" style="cursor:pointer;font-size:0.85rem;">
               {{ $t('compactFlow.confirmImport', { totalNew, totalChanged }) }}
