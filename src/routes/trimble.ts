@@ -297,7 +297,8 @@ app.post("/models/:modelId/entities", async (c) => {
   const endpoints = getRegionEndpoints();
   const extra: Record<string, string> = { versionId: body.versionId };
   // Must request BOTH psets and psets.name — without psets.name the name field is omitted
-  extra.fields = "psets,psets.name";
+  // Also request type so we can distinguish physical elements from spatial structure
+  extra.fields = "psets,psets.name,type";
   if (body.filters) extra.filters = body.filters;
 
   // Fetch psetdefs and entities in parallel
@@ -312,6 +313,13 @@ app.post("/models/:modelId/entities", async (c) => {
   if (entities.length > 0) {
     console.log(`[trimble] entities: ${entities.length} items, psetdefs: ${psetdefsRaw.length}`);
     console.log("[trimble] first entity (transformed):", JSON.stringify(entities[0], null, 2));
+    // Log entity type breakdown to help identify spatial/structural elements vs physical elements
+    const typeCounts: Record<string, number> = {};
+    for (const e of entities) {
+      const tp = (e.type as string) || "(no type)";
+      typeCounts[tp] = (typeCounts[tp] || 0) + 1;
+    }
+    console.log("[trimble] entity types:", JSON.stringify(typeCounts, null, 2));
   }
 
   if (body.unique_only) {
