@@ -3,17 +3,23 @@
 // Response shape: { data, status, ok }  (mirrors axios res.data / res.status)
 
 let _onUnauthorized = null
+let _onError = null
 
 /** Register a callback invoked when a 401 SESSION_EXPIRED response is received. */
 export function onUnauthorized(fn) {
   _onUnauthorized = fn
 }
 
+/** Register a callback for all non-401 API errors. Receives { message, status, url }. */
+export function onApiError(fn) {
+  _onError = fn
+}
+
 async function request(method, url, body) {
   const opts = { method }
   if (body !== undefined && method !== 'GET') {
     if (body instanceof FormData) {
-      opts.body = body // browser sets Content-Type with boundary automatically
+      opts.body = body
     } else {
       opts.headers = { 'Content-Type': 'application/json' }
       opts.body = JSON.stringify(body)
@@ -30,9 +36,9 @@ async function request(method, url, body) {
   try {
     res = await fetch(url, opts)
   } catch (e) {
-    // network error — throw a normalized error
     const err = new Error(e.message || 'Network error')
     err.response = { status: 0, data: { error: 'Network error' } }
+    if (_onError) _onError({ message: 'Network error', status: 0, url })
     throw err
   }
 
@@ -44,9 +50,12 @@ async function request(method, url, body) {
   }
 
   if (!res.ok) {
-    // Check for session expiry (mirrors the old axios interceptor)
+    // Check for session expiry
     if (res.status === 401 && data?.code === 'SESSION_EXPIRED' && _onUnauthorized) {
       _onUnauthorized()
+    }
+    if (_onError && res.status !== 401) {
+      _onError({ message: data?.error || data?.detail || `HTTP ${res.status}`, status: res.status, url })
     }
     const err = new Error(data?.error || data?.detail || `HTTP ${res.status}`)
     err.response = { status: res.status, data }
@@ -57,7 +66,7 @@ async function request(method, url, body) {
 }
 
 export const api = {
-  get: (url) => request('GET', url),
+  get: (url, opts) => request('GET', url, opts),
   post: (url, body) => request('POST', url, body),
   patch: (url, body) => request('PATCH', url, body),
 }

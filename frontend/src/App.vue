@@ -42,7 +42,7 @@
     <main class="main-content">
       <RouterView />
     </main>
-    <Toast />
+    <Toast position="bottom-right" />
     <ConfirmDialog />
   </div>
 </template>
@@ -51,10 +51,12 @@
 import { ref, onMounted } from 'vue'
 import { RouterLink, RouterView, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { api } from './api.js'
+import { useToast } from 'primevue/usetoast'
+import { api, onApiError, onUnauthorized } from './api.js'
 import ConfirmDialog from 'primevue/confirmdialog'
 
 const router = useRouter()
+const toast = useToast()
 const username = ref('')
 const { t, locale } = useI18n()
 
@@ -62,6 +64,16 @@ function switchLang(lang) {
   locale.value = lang
   localStorage.setItem('lang', lang)
 }
+
+// Register global error toasts — fires on any non-401 API error
+onApiError(({ message }) => {
+  toast.add({ severity: 'error', summary: 'Error', detail: message, life: 5000 })
+})
+
+// Register 401 handler — redirect to login on session expiry
+onUnauthorized(() => {
+  router.push('/login')
+})
 
 onMounted(async () => {
   try {
