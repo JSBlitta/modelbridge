@@ -241,9 +241,5 @@ function downloadCsv() {
 .chip-blocked { color: #dc2626; font-weight: 600; font-size: 0.9rem; }
 .compact-batch-row { display: flex; gap: 0.5rem; align-items: center; padding: 0.3rem 0; border-bottom: 1px solid #f3f4f6; }
 
-/* Button color definitions — single source of truth */
-.btn-preview { background: #6366f1; border-color: #6366f1; color: #fff; }
-.btn-preview:hover { background: #4f46e5; border-color: #4f46e5; }
-.btn-create { background: #e40520; border-color: #e40520; color: #fff; }
-.btn-create:hover { background: #c2041b; border-color: #c2041b; }
+
 </style>

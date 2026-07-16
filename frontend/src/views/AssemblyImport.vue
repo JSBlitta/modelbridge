@@ -341,8 +341,5 @@ function downloadCsv() {
 .changed-fields { font-size: 0.8rem; color: #b45309; font-family: monospace; }
 .dim { color: #d1d5db; }
 .results-summary { display: flex; gap: 1.5rem; padding: 0.5rem 0; }
-.btn-preview { background: #6366f1; border-color: #6366f1; color: #fff; }
-.btn-preview:hover { background: #4f46e5; border-color: #4f46e5; }
-.btn-create { background: #e40520; border-color: #e40520; color: #fff; }
-.btn-create:hover { background: #c2041b; border-color: #c2041b; }
+
 </style>

@@ -180,6 +180,5 @@ async function createProjects() {
 .error-msg { color: #dc2626; margin-top: 0.5rem; }
 .info-text { color: #374151; }
 
-.btn-preview { background: #6366f1; border-color: #6366f1; }
-.btn-preview:hover { background: #4f46e5; border-color: #4f46e5; }
+
 </style>

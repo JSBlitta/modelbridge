@@ -5,6 +5,7 @@ import ToastService from 'primevue/toastservice'
 import ConfirmationService from 'primevue/confirmationservice'
 import i18n from './i18n/index.js'
 import App from './App.vue'
+import './assets/app.css'
 import router from './router/index.js'
 
 import DataTable from 'primevue/datatable'
