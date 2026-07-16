@@ -5,7 +5,6 @@
       <p class="page-subtitle">{{ $t('trimble.subtitle') }}</p>
     </div>
 
-    <!-- Connect (hidden once authenticated) -->
     <Card v-if="!authStatus" class="mb-card">
       <template #title>{{ $t('trimble.connect') }}</template>
       <template #content>
@@ -35,7 +34,6 @@
       </template>
     </Card>
 
-    <!-- Select Model (shown once authenticated) -->
     <Card v-if="authStatus" class="mb-card">
       <template #title>{{ $t('trimble.selectModelCard') }}</template>
       <template #content>
@@ -66,7 +64,6 @@
       </template>
     </Card>
 
-    <!-- 3: Select Properties -->
     <Card v-if="psetDefs.length" class="mb-card">
       <template #title>{{ $t('trimble.propertySetsTitle') }} <span class="subtitle-dim">({{ totalSelectedProps }} selected)</span></template>
       <template #content>
@@ -94,7 +91,6 @@
       </template>
     </Card>
 
-    <!-- 4: Map to Produuzit -->
     <Card v-if="allSelectedProps.length" class="mb-card">
       <template #title>{{ $t('trimble.mapToProduuzit') }}</template>
       <template #content>
@@ -122,7 +118,6 @@
       </template>
     </Card>
 
-    <!-- 5: Preview -->
     <Card v-if="allSelectedProps.length && targetProjectUuid" class="mb-card">
       <template #title>{{ $t('trimble.step5') }}</template>
       <template #content>
@@ -141,12 +136,10 @@
             :placeholder="$t('trimble.selectDedupKey')" style="min-width:200px;font-size:0.82rem;" />
           <Tag v-if="totalEntities > 0" severity="info" :value="$t('trimble.entitiesTag', { preview: previewEntities.length, total: totalEntities })" />
         </div>
-        <!-- Raw sample: one entity fetched without any field filter -->
         <details v-if="rawSampleEntity" style="margin-bottom:0.5rem;font-size:0.78rem;">
           <summary style="cursor:pointer;color:#6b7280;font-weight:600;">{{ $t('trimble.rawSampleSummary') }}</summary>
           <pre style="background:#f3f4f6;padding:0.5rem;border-radius:4px;overflow-x:auto;max-height:300px;font-size:0.72rem;white-space:pre-wrap;">{{ JSON.stringify(rawSampleEntity, null, 2) }}</pre>
         </details>
-        <!-- Raw first entity from current filtered fetch -->
         <details v-if="previewEntities.length" style="margin-bottom:0.5rem;font-size:0.78rem;">
           <summary style="cursor:pointer;color:#6b7280;">{{ $t('trimble.rawFilteredSummary') }}</summary>
           <pre style="background:#f3f4f6;padding:0.5rem;border-radius:4px;overflow-x:auto;max-height:220px;font-size:0.72rem;white-space:pre-wrap;">{{ JSON.stringify(previewEntities[0], null, 2) }}</pre>
@@ -155,13 +148,12 @@
           {{ $t('trimble.dedupInfo', { key: dedupLabel }) }}
         </Message>
 
-        <!-- Entity selection toolbar -->
         <div v-if="previewEntities.length" style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;margin-bottom:0.5rem;">
           <Button :label="$t('trimble.selectAllEntities')" icon="pi pi-check-square" size="small" text @click="selectAllEntities" />
           <Button :label="$t('trimble.deselectAll')" icon="pi pi-stop" size="small" text @click="deselectAllEntities" />
           <Tag v-if="selectedCount" severity="info" :value="$t('trimble.selectedCount', { count: selectedCount })" />
           <template v-for="[batch, indices] in entityBatchGroups" :key="batch">
-            <Button :label="'[' + batch + ']'" size="small" text severity="secondary" @click="selectByBatch(batch)" />
+            <Button :label="'[' + batch + ']'" :icon="batchSelectionState.get(batch) === 'all' ? 'pi pi-check' : undefined" size="small" text :severity="batchSelectionState.get(batch) === 'all' ? 'success' : 'secondary'" @click="toggleBatch(batch)" />
           </template>
         </div>
 
@@ -179,20 +171,15 @@
       </template>
     </Card>
 
-    <!-- 6: Preview & Push -->
-    <Card v-if="previewEntities.length && hasRequiredMapping" class="mb-card card-warn-border">
-      <template #title>{{ $t('trimble.previewPush') }}</template>
+    <Card v-if="previewEntities.length && hasRequiredMapping" class="mb-card">
+      <template #title>{{ $t('trimble.previewChanges') }}</template>
       <template #content>
-        <Message severity="warn" :closable="false" style="margin-bottom:1rem;">
-          <strong>{{ $t('trimble.explicitConfirm') }}</strong>
-        </Message>
         <div style="display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap;margin-bottom:0.75rem;">
           <div style="display:flex;align-items:center;gap:0.4rem;">
             <Checkbox v-model="uniqueOnlyImport" :binary="true" input-id="unique_toggle_import" />
             <label for="unique_toggle_import" style="font-size:0.85rem;cursor:pointer;">{{ $t('trimble.deduplicate') }}</label>
           </div>
           <Button :label="$t('trimble.checkChanges')" icon="pi pi-search" @click="doPreview" :loading="previewing" />
-          <Button v-if="selectedCount" :label="$t('trimble.pushSelected')" icon="pi pi-cloud-upload" severity="warning" @click="doImport" :loading="importing" :disabled="!canExecute" />
         </div>
 
         <div v-if="previewing" style="color:#6b7280;font-size:0.85rem;margin-bottom:0.5rem;">
@@ -204,7 +191,6 @@
           <Message severity="error" :closable="true" @close="previewError = ''">{{ previewError }}</Message>
         </div>
 
-        <!-- Per-batch preview summary -->
         <div v-if="previewData" style="margin-bottom:1rem;">
           <Message v-if="previewData.unresolved_batches?.length" severity="error" :closable="false" size="small">
             {{ $t('trimble.batchesNotMatched', { batches: previewData.unresolved_batches.join(', ') }) }}
@@ -220,12 +206,24 @@
             <span class="chip-identical" style="color:#9ca3af">{{ $t('trimble.identicalChip', { count: bp.summary.identical }) }}</span>
             <Tag v-if="bp.blocked" severity="danger" :value="$t('trimble.blockedChip')" />
           </div>
-          <div v-if="canExecute && !selectedCount" style="margin-top:0.75rem;">
-            <Button :label="$t('trimble.pushToProduuzit')" icon="pi pi-cloud-upload" severity="warning" @click="doImport" :loading="importing" />
-          </div>
-          <Message v-else-if="!canExecute && !selectedCount && previewData" severity="secondary" :closable="false" size="small" style="margin-top:0.5rem;">
+          <Message v-if="!canExecute" severity="secondary" :closable="false" size="small" style="margin-top:0.5rem;">
             {{ $t('trimble.nothingToPushDetail') }}
           </Message>
+        </div>
+      </template>
+    </Card>
+
+    <Card v-if="previewData && canExecute" class="mb-card card-warn-border">
+      <template #title>{{ $t('trimble.pushToProduuzitTitle') }}</template>
+      <template #content>
+        <Message severity="warn" :closable="false" style="margin-bottom:1rem;">
+          <strong>{{ $t('trimble.explicitConfirm') }}</strong>
+        </Message>
+        <div v-if="selectedCount" style="margin-bottom:0.75rem;">
+          <Button :label="$t('trimble.pushSelected')" icon="pi pi-cloud-upload" severity="warning" @click="doImport" :loading="importing" />
+        </div>
+        <div v-else style="margin-bottom:0.75rem;">
+          <Button :label="$t('trimble.pushToProduuzit')" icon="pi pi-cloud-upload" severity="warning" @click="doImport" :loading="importing" />
         </div>
 
         <div v-if="importResults.length" style="margin-top:1rem;">
@@ -339,7 +337,6 @@ const importResults = ref([])
 const importSummary = ref({ created: 0, updated: 0, skipped: 0, blocked: 0, error: 0 })
 const uniqueOnlyImport = ref(true)
 
-// Entity selection state
 const selectedEntityIndices = ref(new Set())
 
 const entityBatchGroups = computed(() => {
@@ -373,10 +370,24 @@ function deselectAllEntities() {
   selectedEntityIndices.value = new Set()
 }
 
-function selectByBatch(batchKey) {
+const batchSelectionState = computed(() => {
+  const state = new Map()
+  for (const [batch, indices] of entityBatchGroups.value) {
+    const count = indices.filter(i => selectedEntityIndices.value.has(i)).length
+    state.set(batch, count === 0 ? 'none' : count === indices.length ? 'all' : 'some')
+  }
+  return state
+})
+
+function toggleBatch(batchKey) {
   const indices = entityBatchGroups.value.get(batchKey) || []
   const s = new Set(selectedEntityIndices.value)
-  indices.forEach(i => s.add(i))
+  const allSelected = indices.every(i => s.has(i))
+  if (allSelected) {
+    indices.forEach(i => s.delete(i))
+  } else {
+    indices.forEach(i => s.add(i))
+  }
   selectedEntityIndices.value = s
 }
 
