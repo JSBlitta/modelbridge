@@ -1,33 +1,31 @@
 <template>
   <div class="unified-import">
-    <h2 class="page-title">Import</h2>
+    <h2 class="page-title">{{ $t('unified.title') }}</h2>
     <p class="page-hint">{{ $t('unified.hint') }}</p>
 
-    <!-- ════════════════════════════════════════════
-         PROJECT SELECTION
-         ════════════════════════════════════════════ -->
+    <!-- PROJECT SELECTION -->
     <Card class="mb-card">
-      <template #title>Project</template>
+      <template #title>{{ $t('unified.projectSection') }}</template>
       <template #content>
         <div style="display:flex;gap:1rem;align-items:center;flex-wrap:wrap;margin-bottom:0.75rem;">
           <Select v-model="project" :options="allProjects" option-label="name" option-value="uuid"
             :placeholder="$t('unified.selectProject')" style="min-width:280px" @change="onProjectChange" />
-          <Button icon="pi pi-refresh" text size="small" @click="refreshProjects" :loading="refreshing" v-tooltip.top="'Refresh'" />
-          <Tag v-if="context" severity="info" :value="`${context.designs?.length||0} designs · ${context.batches?.length||0} batches`" />
+          <Button icon="pi pi-refresh" text size="small" @click="refreshProjects" :loading="refreshing" v-tooltip.top="$t('trimble.reloadProjects')" />
+          <Tag v-if="context" severity="info" :value="`${context.designs?.length||0} designs \u00b7 ${context.batches?.length||0} batches`" />
         </div>
 
-        <Divider align="center"><span style="color:#9ca3af;font-size:0.8rem;">or create from CSV</span></Divider>
+        <Divider align="center"><span style="color:#9ca3af;font-size:0.8rem;">{{ $t('unified.orCreateFromCsv') }}</span></Divider>
 
-        <FileUpload mode="basic" accept=".csv" :auto="false" choose-label="Upload Superproject CSV" @select="onSuperCsvSelect" />
+        <FileUpload mode="basic" accept=".csv" :auto="false" :choose-label="$t('unified.uploadSuperproject')" @select="onSuperCsvSelect" />
         <span v-if="superParseError" style="color:#dc2626;font-size:0.85rem;display:block;margin-top:0.4rem;">{{ superParseError }}</span>
         <span v-if="superNoProjects" style="color:#b45309;font-size:0.85rem;display:block;margin-top:0.4rem;">
-          No <code>project</code> column detected. This CSV may not be a superproject file.
+          {{ $t('unified.noProjectColumn') }}
         </span>
 
         <div v-if="phaseSuggestions.length" style="margin-top:1rem;">
           <PhaseTable v-model:rows="phaseSuggestions" />
           <div style="margin-top:0.75rem;display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap;">
-            <Button label="Check in Produuzit" icon="pi pi-search" @click="checkProjects" :loading="checking" />
+            <Button :label="$t('unified.checkBtn')" icon="pi pi-search" @click="checkProjects" :loading="checking" class="btn-preview" />
           </div>
           <div v-if="checkDone" style="margin-top:0.75rem;">
             <div v-for="row in phaseSuggestions" :key="row.project_key"
@@ -35,17 +33,16 @@
               <code style="font-weight:600;min-width:160px;">{{ row.project_key }}</code>
               <Tag v-if="row.superproject_found != null"
                    :severity="row.superproject_found ? 'success' : 'secondary'"
-                   :value="row.superproject_found ? 'Superproject ✓' : 'Superproject ✗'" />
-              <Tag :severity="row.status === 'found' ? 'success' : 'info'"
-                   :value="row.status === 'found' ? 'Project found' : 'Project new'" />
+                   :value="row.superproject_found ? $t('unified.superprojectFound') : $t('unified.superprojectNotFound')" />
+              <Tag :severity="row.status === 'found' ? 'success' : 'secondary'"
+                   :value="row.status === 'found' ? $t('unified.projectFound') : $t('unified.projectNew')" />
               <Tag v-if="row.phase_exists === true" severity="success"
-                   :value="'Phase ' + row.suggested_phase + ': exists'" />
-              <Tag v-else-if="row.phase_exists === false" severity="warn"
-                   :value="'Phase ' + row.suggested_phase + ': new'" />
+                   :value="$t('unified.phaseExists', { phase: row.suggested_phase })" />
+              <Tag v-else-if="row.phase_exists === false" severity="secondary"
+                   :value="$t('unified.phaseNew', { phase: row.suggested_phase })" />
               <span v-if="row.batches_found !== undefined" style="color:#374151;">
-                Batches:
-                <span style="color:#15803d;font-weight:600;">{{ row.batches_found.length }} found</span>,
-                <span style="color:#b45309;font-weight:600;">{{ row.batches_missing.length }} new</span>
+                {{ $t('unified.batchesFound', { found: row.batches_found.length }) }}
+                <span v-if="row.batches_missing.length" style="color:#b45309;font-weight:600;">, {{ $t('unified.batchesNew', { count: row.batches_missing.length }) }}</span>
               </span>
             </div>
           </div>
@@ -53,22 +50,21 @@
 
         <div v-if="checkDone && newProjectCount > 0" style="margin-top:1rem;">
           <Message severity="warn" :closable="false" size="small">
-            {{ newProjectCount }} new project(s) will be created in Produuzit.
+            {{ $t('unified.newProjects', { count: newProjectCount }) }}
           </Message>
           <ConfirmationTable
             :rows="confirmProjectRows"
-            :columns="[{field:'project_key',header:'Project'},{field:'superproject',header:'Superproject'},{field:'suggested_phase',header:'Phase'}]"
+            :columns="[{field:'project_key',header:$t('unified.project')},{field:'superproject',header:$t('unified.superproject')},{field:'suggested_phase',header:$t('unified.phase')}]"
             status-field="status"
             style="margin-top:0.75rem;"
           />
-          <div style="display:flex;align-items:center;gap:0.5rem;margin-top:0.75rem;">
-            <Checkbox v-model="confirmCreateProjects" :binary="true" input-id="confirm-projects" />
-            <label for="confirm-projects" style="cursor:pointer;font-size:0.85rem;">
-              I confirm — create {{ newProjectCount }} project(s) in Produuzit
-            </label>
-          </div>
-          <Button label="Create Projects" icon="pi pi-plus" severity="success"
-            @click="createProjects" :loading="creatingProjects" :disabled="!confirmCreateProjects"
+          <ConfirmedButton
+            :label="$t('unified.createProjectsBtn')"
+            icon="pi pi-plus"
+            :confirm-label="$t('unified.confirmCreateProjects', { count: newProjectCount })"
+            btn-class="btn-create"
+            :loading="creatingProjects"
+            @action="createProjects"
             style="margin-top:0.5rem;" />
         </div>
 
@@ -86,31 +82,33 @@
 
         <div v-if="checkDone && foundProjectCount > 0" style="margin-top:1rem;">
           <Message severity="info" :closable="false" size="small">
-            {{ foundProjectCount }} project(s) already exist in Produuzit. Create phase &amp; batches in Produuzit?
+            {{ $t('unified.foundProjectInfo', { count: foundProjectCount }) }}
           </Message>
-          <Button label="Create Phase &amp; Batches in Produuzit" icon="pi pi-plus-circle" severity="help"
-            @click="addPhasesAndBatches" :loading="addingPhasesBatches"
+          <ConfirmedButton
+            :label="$t('unified.createPhaseBatchesBtn')"
+            icon="pi pi-plus-circle"
+            btn-class="btn-create"
+            :loading="addingPhasesBatches"
+            @action="addPhasesAndBatches"
             style="margin-top:0.5rem;" />
         </div>
       </template>
     </Card>
 
-    <!-- ════════════════════════════════════════════
-         ASSEMBLY IMPORT
-         ════════════════════════════════════════════ -->
+    <!-- ASSEMBLY IMPORT -->
     <Card v-if="project" class="mb-card">
-      <template #title>Assembly Import</template>
+      <template #title>{{ $t('unified.assemblySection') }}</template>
       <template #content>
         <div style="margin-bottom:0.75rem;">
-          <label style="display:block;font-size:0.8rem;font-weight:600;color:#6b7280;margin-bottom:0.25rem;">Assembly CSV</label>
-          <FileUpload mode="basic" accept=".csv" :auto="false" choose-label="Select CSV" @select="onAsmFileSelect" />
+          <label style="display:block;font-size:0.8rem;font-weight:600;color:#6b7280;margin-bottom:0.25rem;">{{ $t('unified.assemblyCsv') }}</label>
+          <FileUpload mode="basic" accept=".csv" :auto="false" :choose-label="$t('unified.selectCsv')" @select="onAsmFileSelect" />
           <span v-if="parseResult" style="background:#e0f2fe;color:#0369a1;padding:0.2rem 0.5rem;border-radius:999px;font-size:0.78rem;display:inline-block;margin-top:0.4rem;">
-            {{ parseResult.rows.length }} rows · {{ parseResult.headers.length }} columns
+            {{ parseResult.rows.length }} rows \u00b7 {{ parseResult.headers.length }} columns
           </span>
         </div>
 
         <div v-if="parseResult" style="margin-bottom:0.75rem;">
-          <label style="display:block;font-size:0.8rem;font-weight:600;color:#6b7280;margin-bottom:0.25rem;">Column Mapping</label>
+          <label style="display:block;font-size:0.8rem;font-weight:600;color:#6b7280;margin-bottom:0.25rem;">{{ $t('unified.columnMapping') }}</label>
           <ColumnMapper
             :detected-columns="parseResult.headers"
             :auto-mapping="initialMapping"
@@ -124,42 +122,42 @@
         </div>
 
         <div v-if="parseResult" style="display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap;margin-bottom:0.75rem;">
-          <InputText v-model="presetName" placeholder="Preset name..." style="width:180px;" size="small" />
-          <Button label="Save Preset" icon="pi pi-bookmark" size="small" text @click="savePreset" />
+          <InputText v-model="presetName" :placeholder="$t('unified.presetName')" style="width:180px;" size="small" />
+          <Button :label="$t('unified.savePreset')" icon="pi pi-bookmark" size="small" text @click="savePreset" />
           <Select v-if="presets.length" v-model="selectedPreset" :options="presets" option-label="name"
-            placeholder="Load preset..." style="min-width:160px;" size="small" @change="loadPreset" />
+            :placeholder="$t('unified.loadPreset')" style="min-width:160px;" size="small" @change="loadPreset" />
         </div>
 
         <div v-if="hasRequiredMapping">
-          <Button label="Check &amp; Preview" icon="pi pi-search" @click="doPreview" :loading="previewing" />
+          <Button :label="$t('unified.previewBtn')" icon="pi pi-search" @click="doPreview" :loading="previewing" class="btn-preview" />
         </div>
 
         <div v-if="previewData" style="margin-top:0.75rem;">
-          <!-- ══ UUID mode: flat row preview ══ -->
+          <!-- UUID mode: flat row preview -->
           <template v-if="previewData.uuid_mode">
             <div style="display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap;margin-bottom:0.5rem;">
-              <span style="color:#15803d;font-weight:600;">{{ totalChanged }} changed</span>
-              <span style="color:#6b7280;">{{ totalIdentical }} identical</span>
-              <span v-if="totalBlocked" style="color:#dc2626;font-weight:600;">{{ totalBlocked }} errors</span>
+              <span style="color:#b45309;font-weight:600;">{{ totalChanged }} {{ $t('unified.changed') }}</span>
+              <span style="color:#6b7280;">{{ totalIdentical }} {{ $t('unified.identical') }}</span>
+              <span v-if="totalBlocked" style="color:#dc2626;font-weight:600;">{{ totalBlocked }} {{ $t('unified.errors') }}</span>
             </div>
 
             <Message v-if="previewData.has_errors" severity="error" :closable="false" size="small">
-              Validation errors detected — project/superproject mismatch or UUIDs not found. Cannot execute import.
+              {{ $t('unified.validationErrors') }}
             </Message>
             <Message v-if="previewData.warnings?.length" severity="warn" :closable="false" size="small">
-              {{ previewData.warnings.join(' · ') }}
+              {{ previewData.warnings.join(' \u00b7 ') }}
             </Message>
 
             <div style="max-height:300px;overflow-y:auto;border:1px solid #e5e7eb;border-radius:6px;">
               <DataTable :value="previewData.row_previews" size="small">
                 <Column field="uuid" header="UUID">
                   <template #body="{ data }">
-                    <code style="font-size:0.75rem;">{{ data.uuid?.substring(0,8) }}…</code>
+                    <code style="font-size:0.75rem;">{{ data.uuid?.substring(0,8) }}\u2026</code>
                   </template>
                 </Column>
-                <Column field="design_name" header="Design" />
-                <Column field="client_order_id" header="Order ID" />
-                <Column field="status" header="Status">
+                <Column field="design_name" :header="$t('unified.design')" />
+                <Column field="client_order_id" :header="$t('unified.orderPrefix')" />
+                <Column field="status" :header="$t('unified.status')">
                   <template #body="{ data }">
                     <Tag :severity="data.status==='error'?'danger':data.status==='changed'?'warn':'secondary'" :value="data.status" />
                   </template>
@@ -167,10 +165,10 @@
                 <Column field="changed_fields" header="Changed">
                   <template #body="{ data }">
                     <span v-if="data.changed_fields?.length">{{ data.changed_fields.join(', ') }}</span>
-                    <span v-else style="color:#9ca3af;">—</span>
+                    <span v-else style="color:#9ca3af;">\u2014</span>
                   </template>
                 </Column>
-                <Column field="reason" header="Reason">
+                <Column field="reason" :header="$t('unified.reason')">
                   <template #body="{ data }">
                     <span v-if="data.reason" style="color:#dc2626;font-size:0.8rem;">{{ data.reason }}</span>
                   </template>
@@ -179,65 +177,64 @@
             </div>
           </template>
 
-          <!-- ══ Standard mode: batch-grouped preview ══ -->
+          <!-- Standard mode: batch-grouped preview -->
           <template v-else>
             <div style="display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap;margin-bottom:0.5rem;">
-              <span style="color:#15803d;font-weight:600;">{{ totalNew }} new</span>
-              <span style="color:#b45309;font-weight:600;">{{ totalChanged }} changed</span>
-              <span style="color:#6b7280;">{{ totalIdentical }} identical</span>
-              <span v-if="totalBlocked" style="color:#dc2626;font-weight:600;">{{ totalBlocked }} blocked</span>
+              <span class="chip-new">{{ $t('compactFlow.newChip', { count: totalNew }) }}</span>
+              <span class="chip-changed">{{ $t('compactFlow.changedChip', { count: totalChanged }) }}</span>
+              <span class="chip-identical">{{ $t('compactFlow.identicalChip', { count: totalIdentical }) }}</span>
+              <span v-if="totalBlocked" class="chip-blocked">{{ $t('compactFlow.blockedChip', { count: totalBlocked }) }}</span>
             </div>
 
             <Message v-if="previewData.warnings?.length" severity="warn" :closable="false" size="small">
-              {{ previewData.warnings.join(' · ') }}
+              {{ previewData.warnings.join(' \u00b7 ') }}
             </Message>
             <Message v-if="previewData.unresolved_batches?.length" severity="error" :closable="false" size="small">
-              Batch numbers not in project: {{ previewData.unresolved_batches.join(', ') }}
+              {{ $t('unified.batchesNotFound', { batches: previewData.unresolved_batches.join(', ') }) }}
             </Message>
             <Message v-if="previewData.unresolved_designs?.length" severity="error" :closable="false" size="small">
-              Designs not found: {{ previewData.unresolved_designs.slice(0,5).join(', ') }}{{ previewData.unresolved_designs.length>5?'…':'' }}
+              {{ $t('unified.designsNotFound', { designs: previewData.unresolved_designs.slice(0,5).join(', ') + (previewData.unresolved_designs.length>5?'\u2026':'') }) }}
             </Message>
 
             <div v-for="bp in previewData.batch_previews" :key="bp.batch_uuid" style="display:flex;gap:0.5rem;align-items:center;padding:0.25rem 0;border-bottom:1px solid #f3f4f6;">
               <Tag :severity="bp.blocked?'danger':'secondary'" :value="bp.batch_name" />
-              <span style="color:#15803d;">{{ bp.summary.new }}↑</span>
+              <span style="color:#15803d;">{{ bp.summary.new }}\u2191</span>
               <span style="color:#b45309;">{{ bp.summary.changed }}~</span>
               <span style="color:#6b7280;">{{ bp.summary.identical }}=</span>
-              <Tag v-if="bp.blocked" severity="danger" value="BLOCKED" />
+              <Tag v-if="bp.blocked" severity="danger" :value="$t('compactFlow.definitiveBlocked')" />
             </div>
           </template>
 
           <div v-if="canExecute" style="margin-top:0.75rem;">
-            <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.5rem;">
-              <Checkbox v-model="confirmImport" :binary="true" input-id="confirm-import" />
-              <label for="confirm-import" style="cursor:pointer;font-size:0.85rem;">
-                I confirm — {{ isUuidMode ? `update ${totalChanged} assemblies` : `import ${totalNew} new + ${totalChanged} changed assemblies` }}
-              </label>
-            </div>
-            <Button label="Execute Import" icon="pi pi-bolt" severity="success"
-              @click="doImport" :loading="importing" :disabled="!confirmImport" />
+            <ConfirmedButton
+              :label="$t('unified.executeBtn')"
+              icon="pi pi-bolt"
+              :confirm-label="$t('unified.confirmImport', { totalNew, totalChanged })"
+              btn-class="btn-create"
+              :loading="importing"
+              @action="doImport" />
           </div>
         </div>
 
         <div v-if="importResults.length" style="margin-top:0.75rem;">
           <div style="display:flex;gap:1rem;flex-wrap:wrap;">
-            <span v-if="!isUuidMode" style="color:#15803d;font-weight:600;">{{ importResults.filter(r=>r.status==='created').length }} created</span>
-            <span style="color:#b45309;font-weight:600;">{{ importResults.filter(r=>r.status==='updated').length }} updated</span>
-            <span style="color:#6b7280;">{{ importResults.filter(r=>r.status==='skipped').length }} skipped</span>
-            <span style="color:#dc2626;font-weight:600;">{{ importResults.filter(r=>r.status==='error'||r.status==='blocked').length }} errors</span>
+            <span v-if="!isUuidMode" style="color:#15803d;font-weight:600;">{{ importResults.filter(r=>r.status==='created').length }} {{ $t('unified.created') }}</span>
+            <span style="color:#b45309;font-weight:600;">{{ importResults.filter(r=>r.status==='updated').length }} {{ $t('unified.updated') }}</span>
+            <span style="color:#6b7280;">{{ importResults.filter(r=>r.status==='skipped').length }} {{ $t('unified.skipped') }}</span>
+            <span style="color:#dc2626;font-weight:600;">{{ importResults.filter(r=>r.status==='error'||r.status==='blocked').length }} {{ $t('unified.errors') }}</span>
           </div>
           <DataTable v-if="importResults.some(r=>r.status==='error'||r.status==='blocked')"
             :value="importResults.filter(r=>r.status==='error'||r.status==='blocked')" size="small" style="margin-top:0.5rem;">
             <Column field="uuid" header="UUID" v-if="isUuidMode">
               <template #body="{ data }">
-                <code style="font-size:0.75rem;">{{ data.uuid?.substring(0,8) }}…</code>
+                <code style="font-size:0.75rem;">{{ data.uuid?.substring(0,8) }}\u2026</code>
               </template>
             </Column>
             <Column field="design_name" :header="$t('unified.design')" v-if="!isUuidMode" />
             <Column field="batch" :header="$t('unified.batch')" v-if="!isUuidMode" />
             <Column field="reason" :header="$t('unified.reason')" />
           </DataTable>
-          <Button label="Download CSV" icon="pi pi-download" text size="small" style="margin-top:0.5rem;" @click="downloadCsv" />
+          <Button :label="$t('unified.downloadCsv')" icon="pi pi-download" text size="small" style="margin-top:0.5rem;" @click="downloadCsv" />
         </div>
       </template>
     </Card>
@@ -251,165 +248,40 @@ const { t } = useI18n()
 import { api } from '../api.js'
 import PhaseTable from '../components/PhaseTable.vue'
 import ConfirmationTable from '../components/ConfirmationTable.vue'
+import ConfirmedButton from '../components/ConfirmedButton.vue'
 import ColumnMapper from '../components/ColumnMapper.vue'
 
-// ── Project ──
+// Project
 const allProjects = ref([])
 const project = ref(null)
 const context = ref(null)
 const refreshing = ref(false)
 
-onMounted(async () => {
-  try {
-    const res = await api.get('/api/projects?limit=100')
-    allProjects.value = (res.data.results || []).sort((a, b) => (a.name || '').localeCompare(b.name || ''))
-  } catch { /* ignore */ }
-})
-
-async function refreshProjects() {
-  refreshing.value = true
-  try {
-    const res = await api.get('/api/projects?limit=100')
-    allProjects.value = (res.data.results || []).sort((a, b) => (a.name || '').localeCompare(b.name || ''))
-  } finally { refreshing.value = false }
-}
-
-async function onProjectChange() {
-  context.value = null; resetImport()
-  if (!project.value) return
-  try {
-    const res = await api.get(`/api/assemblies/context?project_uuid=${project.value}`)
-    context.value = res.data
-    loadPresets()
-  } catch { /* ignore */ }
-}
-
-// ── Superproject CSV → Create Projects ──
+// Superproject CSV
 const phaseSuggestions = ref([])
 const superParseError = ref('')
 const superNoProjects = ref(false)
 const checking = ref(false)
 const checkDone = ref(false)
-const createProjectResults = ref([])
 const confirmCreateProjects = ref(false)
 const creatingProjects = ref(false)
+const createProjectResults = ref([])
+const addingPhasesBatches = ref(false)
+
+// Assembly CSV
+const parseResult = ref(null)
+const columnMapping = ref({})
+const presetName = ref('')
+const presets = ref([])
+const selectedPreset = ref(null)
+const previewing = ref(false)
+const previewData = ref(null)
+const importing = ref(false)
+const importResults = ref([])
 
 const newProjectCount = computed(() => phaseSuggestions.value.filter(r => r.status === 'new').length)
 const foundProjectCount = computed(() => phaseSuggestions.value.filter(r => r.status === 'found').length)
 const confirmProjectRows = computed(() => phaseSuggestions.value.filter(r => r.status === 'new'))
-
-async function onSuperCsvSelect(e) {
-  const file = e.files?.[0]; if (!file) return
-  phaseSuggestions.value = []; superParseError.value = ''; superNoProjects.value = false
-  checkDone.value = false; createProjectResults.value = []; confirmCreateProjects.value = false
-  const form = new FormData(); form.append('file', file)
-  try {
-    const res = await api.post('/api/csv/parse', form)
-    const suggestions = res.data.phase_suggestions || []
-    if (!suggestions.length) { superNoProjects.value = true; return }
-    phaseSuggestions.value = suggestions
-  } catch (err) {
-    superParseError.value = err.response?.data?.error || 'Failed to parse CSV.'
-  }
-}
-
-function toProjectDefs(rows) {
-  return rows.map(r => ({
-    project_key: r.project_key,
-    superproject: r.superproject || '',
-    letter: r.letter || '',
-    description: r.description || null,
-    suggested_suffix: r.suggested_suffix || '',
-    phase: r.suggested_phase || '',
-    batch_numbers: (r.batches || []).map(b => String(b?.number ?? b)),
-  }))
-}
-
-async function checkProjects() {
-  checking.value = true; checkDone.value = false; confirmCreateProjects.value = false
-  try {
-    const res = await api.post('/api/projects/find-or-create', toProjectDefs(phaseSuggestions.value))
-    const results = res.data || []
-    const resultMap = new Map(results.map(r => [r.project_key, r]))
-    for (const row of phaseSuggestions.value) {
-      const r = resultMap.get(row.project_key)
-      if (r?.status === 'found') {
-        row.status = 'found'
-        row.project_uuid = r.existing?.uuid
-        row.superproject_found = r.superproject_found
-        row.phase_exists = r.phase_exists
-        row.batches_found = r.batches_found || []
-        row.batches_missing = r.batches_missing || []
-      } else {
-        row.status = 'new'
-        row.superproject_found = r?.superproject_found ?? null
-        row.phase_exists = null
-        row.batches_found = []
-        row.batches_missing = (row.batches || []).map(b => String(b?.number ?? b))
-      }
-    }
-    checkDone.value = true
-  } finally { checking.value = false }
-}
-
-async function createProjects() {
-  creatingProjects.value = true
-  try {
-    const toCreate = phaseSuggestions.value.filter(r => r.status === 'new')
-    const res = await api.post('/api/projects/create', toProjectDefs(toCreate))
-    createProjectResults.value = res.data
-    confirmCreateProjects.value = false
-    await refreshProjects()
-  } finally { creatingProjects.value = false }
-}
-
-// ── Add phase + batches for found projects ──
-const addingPhasesBatches = ref(false)
-
-async function addPhasesAndBatches() {
-  addingPhasesBatches.value = true
-  try {
-    const foundProjects = phaseSuggestions.value.filter(r => r.status === 'found' && r.project_uuid)
-    const phaseBatchesResults = []
-    for (const p of foundProjects) {
-      const phase = p.suggested_phase || ''
-      try {
-        await api.post(`/api/projects/${p.project_uuid}/phases`, { phase })
-      } catch { /* phase may already exist — ignore */ }
-
-      const batches = (p.batches || []).map(b => {
-        const item = (b !== null && typeof b === 'object') ? b : { number: b, stdlibs: [] }
-        return { name: String(item.number), phase, linked_stdlib_names: item.stdlibs ?? [] }
-      })
-      if (batches.length) {
-        try {
-          const res = await api.post('/api/batches/create', { project_uuid: p.project_uuid, batches })
-          phaseBatchesResults.push(...(res.data || []))
-        } catch (e) {
-          phaseBatchesResults.push({ project_key: p.project_key, status: 'error', error: String(e) })
-        }
-      }
-    }
-    createProjectResults.value = phaseBatchesResults
-    await refreshProjects()
-  } finally { addingPhasesBatches.value = false }
-}
-
-// ── Assembly Import ──
-const parseResult = ref(null)
-const columnMapping = ref({})
-const previewData = ref(null)
-const previewing = ref(false)
-const importing = ref(false)
-const importResults = ref([])
-const confirmImport = ref(false)
-const presetName = ref('')
-const presets = ref([])
-const selectedPreset = ref(null)
-
-function resetImport() {
-  parseResult.value = null; previewData.value = null; importResults.value = []; confirmImport.value = false
-}
 
 const initialMapping = computed(() => {
   if (!parseResult.value) return {}
@@ -417,70 +289,173 @@ const initialMapping = computed(() => {
   for (const [canonical, csvCol] of Object.entries(parseResult.value.col_map || {})) {
     m[csvCol] = canonical === 'design' ? 'design_name' : canonical === 'batch' ? 'batch_number' : canonical
   }
-  for (const [csvCol, target] of Object.entries(parseResult.value.meta_suggestions || {})) m[csvCol] = target
+  for (const [csvCol, target] of Object.entries(parseResult.value.meta_suggestions || {})) {
+    m[csvCol] = target
+  }
   return m
 })
 
-const isUuidMode = computed(() => Object.values(columnMapping.value).includes('uuid'))
-
 const mappingWarnings = computed(() => {
-  const w = []
   const targets = Object.values(columnMapping.value)
-  if (isUuidMode.value) {
-    if (!targets.includes('uuid')) w.push('No UUID column mapped.')
-    return w
-  }
-  if (!targets.includes('design_name')) w.push('No Design Name column mapped.')
-  if (!targets.includes('batch_number')) w.push('No Batch Number column mapped.')
+  const w = []
+  if (!targets.includes('design_name')) w.push(t('unified.noDesignName'))
+  if (!targets.includes('batch_number')) w.push(t('unified.noBatchNumber'))
   return w
 })
 
-const hasRequiredMapping = computed(() => {
-  if (!project.value || !parseResult.value) return false
-  if (isUuidMode.value) return Object.values(columnMapping.value).includes('uuid')
-  return Object.values(columnMapping.value).includes('design_name') &&
-    Object.values(columnMapping.value).includes('batch_number')
+const hasRequiredMapping = computed(() =>
+  parseResult.value && project.value &&
+  Object.values(columnMapping.value).includes('design_name') &&
+  Object.values(columnMapping.value).includes('batch_number')
+)
+
+const isUuidMode = computed(() => previewData.value?.uuid_mode)
+const totalNew = computed(() => previewData.value?.batch_previews?.reduce((a, b) => a + b.summary.new, 0) ?? 0)
+const totalChanged = computed(() => isUuidMode.value
+  ? (previewData.value?.row_previews?.filter(r => r.status === 'changed').length ?? 0)
+  : (previewData.value?.batch_previews?.reduce((a, b) => a + b.summary.changed, 0) ?? 0))
+const totalIdentical = computed(() => isUuidMode.value
+  ? (previewData.value?.row_previews?.filter(r => r.status === 'identical').length ?? 0)
+  : (previewData.value?.batch_previews?.reduce((a, b) => a + b.summary.identical, 0) ?? 0))
+const totalBlocked = computed(() => isUuidMode.value
+  ? (previewData.value?.row_previews?.filter(r => r.status === 'error').length ?? 0)
+  : (previewData.value?.batch_previews?.filter(b => b.blocked).reduce((a, b) => a + b.rows.length, 0) ?? 0))
+
+const canExecute = computed(() => isUuidMode.value
+  ? (previewData.value && !previewData.value.has_errors && totalChanged.value > 0)
+  : (previewData.value?.batch_previews?.some(bp => !bp.blocked && (bp.summary.new > 0 || bp.summary.changed > 0))))
+
+onMounted(async () => {
+  await refreshProjects()
 })
 
-const totalNew = computed(() => {
-  if (previewData.value?.uuid_mode) return 0
-  return previewData.value?.batch_previews?.reduce((a,b) => a+(b.summary.new||0), 0) ?? 0
-})
-const totalChanged = computed(() => {
-  if (previewData.value?.uuid_mode) return previewData.value?.summary?.changed ?? 0
-  return previewData.value?.batch_previews?.reduce((a,b) => a+(b.summary.changed||0), 0) ?? 0
-})
-const totalIdentical = computed(() => {
-  if (previewData.value?.uuid_mode) return previewData.value?.summary?.identical ?? 0
-  return previewData.value?.batch_previews?.reduce((a,b) => a+(b.summary.identical||0), 0) ?? 0
-})
-const totalBlocked = computed(() => {
-  if (previewData.value?.uuid_mode) return previewData.value?.summary?.errors ?? 0
-  return previewData.value?.batch_previews?.filter(b=>b.blocked).reduce((a,b)=>a+(b.rows?.length||0), 0) ?? 0
-})
+async function refreshProjects() {
+  refreshing.value = true
+  try {
+    const res = await api.get('/api/projects?limit=200')
+    allProjects.value = res.data.results || []
+  } finally { refreshing.value = false }
+}
 
-const canExecute = computed(() => {
-  if (previewData.value?.uuid_mode) {
-    return !previewData.value.has_errors && (previewData.value.summary?.changed > 0)
+async function onProjectChange() {
+  context.value = null
+  if (!project.value) return
+  const res = await api.get(`/api/assemblies/context?project_uuid=${project.value}`)
+  context.value = res.data
+}
+
+async function onSuperCsvSelect(e) {
+  superParseError.value = ''
+  superNoProjects.value = false
+  const file = e.files?.[0]; if (!file) return
+  const form = new FormData(); form.append('file', file)
+  try {
+    const res = await api.post('/api/csv/parse', form)
+    phaseSuggestions.value = res.data.phase_suggestions || []
+    superNoProjects.value = phaseSuggestions.value.length === 0
+    checkDone.value = false; createProjectResults.value = []
+  } catch (err) {
+    superParseError.value = err.response?.data?.detail || err.message
   }
-  return previewData.value?.batch_previews?.some(bp => !bp.blocked && (bp.summary.new > 0 || bp.summary.changed > 0))
-})
+}
 
-async function loadPresets() {
-  try { const res = await api.get('/api/config/presets'); presets.value = res.data || [] } catch {}
+async function checkProjects() {
+  checking.value = true
+  try {
+    const payload = phaseSuggestions.value.map(p => ({
+      project_key: p.project_key,
+      superproject: p.superproject,
+      letter: p.letter,
+      description: p.description,
+      suggested_suffix: p.suggested_suffix,
+      phase: p.suggested_phase || '',
+    }))
+    const res = await api.post('/api/projects/find-or-create', payload)
+    const byKey = {}
+    for (const r of res.data) {
+      byKey[r.project_key] = r
+    }
+    phaseSuggestions.value = phaseSuggestions.value.map(p => {
+      const r = byKey[p.project_key]
+      if (!r) return p
+      return {
+        ...p,
+        status: r.status,
+        superproject_found: r.superproject_found,
+        phase_exists: r.phase_exists,
+        batches_found: r.batches_found || [],
+        batches_missing: r.batches_missing || [],
+      }
+    })
+    checkDone.value = true
+  } catch (err) {
+    superParseError.value = err.response?.data?.detail || err.message
+  } finally {
+    checking.value = false
+  }
+}
+
+async function createProjects() {
+  creatingProjects.value = true
+  const newOnes = phaseSuggestions.value.filter(r => r.status === 'new')
+  try {
+    const res = await api.post('/api/projects/create', newOnes.map(p => ({
+      project_key: p.project_key,
+      superproject: p.superproject,
+      letter: p.letter,
+      description: p.description,
+      suggested_suffix: p.suggested_suffix,
+      phase: p.suggested_phase || '',
+    })))
+    createProjectResults.value = res.data
+    const byKey = {}
+    for (const r of res.data) {
+      byKey[r.project_key] = r.status === 'created' ? 'found' : r.status
+    }
+    phaseSuggestions.value = phaseSuggestions.value.map(p => ({
+      ...p,
+      status: byKey[p.project_key] || p.status,
+    }))
+  } catch (err) {
+    superParseError.value = err.response?.data?.detail || err.message
+  } finally {
+    creatingProjects.value = false
+  }
+}
+
+async function addPhasesAndBatches() {
+  addingPhasesBatches.value = true
+  const existing = phaseSuggestions.value.filter(r => r.status === 'found')
+  const batchDefs = []
+  for (const p of existing) {
+    for (const b of p.batches || []) {
+      batchDefs.push({ project_key: p.project_key, batch_number: b.number, phase: p.suggested_phase || '' })
+    }
+  }
+  try {
+    await api.post('/api/batches/add-for-projects', { phase: existing[0]?.suggested_phase || '', batch_defs: batchDefs })
+  } catch (err) {
+    superParseError.value = err.response?.data?.detail || err.message
+  } finally {
+    addingPhasesBatches.value = false
+  }
 }
 
 async function onAsmFileSelect(e) {
   const file = e.files?.[0]; if (!file) return
   const form = new FormData(); form.append('file', file)
-  const res = await api.post('/api/assemblies/parse-csv', form)
-  parseResult.value = res.data; resetImport()
+  try {
+    const res = await api.post('/api/assemblies/parse-csv', form)
+    parseResult.value = res.data; previewData.value = null; importResults.value = []
+  } catch (err) {
+    /* noop */
+  }
 }
 
-function onMappingUpdated(m) { columnMapping.value = m; previewData.value = null; confirmImport.value = false }
+function onMappingUpdated(m) { columnMapping.value = m; previewData.value = null }
 
 async function doPreview() {
-  previewing.value = true; previewData.value = null; confirmImport.value = false
+  previewing.value = true; previewData.value = null
   try {
     const res = await api.post('/api/assemblies/preview-import', {
       project_uuid: project.value,
@@ -504,25 +479,23 @@ async function doImport() {
 }
 
 async function savePreset() {
-  if (!presetName.value) return
-  await api.post('/api/config/presets', { name: presetName.value, mapping: columnMapping.value })
-  presetName.value = ''
-  await loadPresets()
+  if (!presetName.value.trim() || !parseResult.value) return
+  await api.post('/api/config/save-preset', {
+    name: presetName.value.trim(),
+    mapping: columnMapping.value,
+  })
+  presets.value = (await api.get('/api/config/presets')).data.presets || []
 }
 
-function loadPreset() {
+async function loadPreset() {
   if (!selectedPreset.value) return
-  const preset = presets.value.find(p => p.name === selectedPreset.value)
-  if (preset) columnMapping.value = preset.mapping
+  const p = presets.value.find(x => x.name === selectedPreset.value)
+  if (p?.mapping) columnMapping.value = p.mapping
 }
 
 function downloadCsv() {
-  const isUuid = isUuidMode.value
-  const headers = isUuid ? ['uuid','status','fields','reason'] : ['design_name','batch','status','reason']
-  const rows = importResults.value.map(r => {
-    if (isUuid) return [r.uuid||'', r.status, (r.fields||[]).join(';'), r.reason||'']
-    return [r.design_name||'', r.batch||'', r.status, r.reason||'']
-  })
+  const headers = ['uuid', 'design_name', 'batch', 'status', 'reason']
+  const rows = importResults.value.map(r => [r.uuid||'', r.design_name||'', r.batch||'', r.status, r.reason||''])
   const csv = [headers, ...rows].map(r => r.map(v => `"${String(v).replace(/"/g,'""')}"`).join(',')).join('\n')
   const blob = new Blob([csv], { type: 'text/csv' })
   const url = URL.createObjectURL(blob)
@@ -532,7 +505,18 @@ function downloadCsv() {
 
 <style scoped>
 .unified-import { max-width: 1100px; }
-.page-title { font-size: 1.5rem; font-weight: 700; margin-bottom: 0.25rem; }
-.page-hint { color: #9ca3af; font-size: 0.85rem; margin-bottom: 1.5rem; }
-.mb-card { margin-bottom: 1.25rem; }
+.page-title { font-size: 1.5rem; font-weight: 700; margin-bottom: 0.5rem; }
+.page-hint { color: #6b7280; font-size: 0.9rem; margin-bottom: 1.5rem; }
+.mb-card { margin-bottom: 1rem; }
+
+.chip-new { color: #15803d; font-weight: 600; font-size: 0.9rem; }
+.chip-changed { color: #b45309; font-weight: 600; font-size: 0.9rem; }
+.chip-identical { color: #6b7280; font-size: 0.9rem; }
+.chip-blocked { color: #dc2626; font-weight: 600; font-size: 0.9rem; }
+
+/* Button color definitions */
+.btn-preview { background: #6366f1; border-color: #6366f1; color: #fff; }
+.btn-preview:hover { background: #4f46e5; border-color: #4f46e5; }
+.btn-create { background: #e40520; border-color: #e40520; color: #fff; }
+.btn-create:hover { background: #c2041b; border-color: #c2041b; }
 </style>

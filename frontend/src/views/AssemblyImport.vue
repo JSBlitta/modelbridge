@@ -58,7 +58,7 @@
     <Card v-if="parseResult && selectedProject && hasRequiredMapping" class="mb-card">
       <template #title>4 � Preview</template>
       <template #content>
-        <Button label="Run Idempotency Check" icon="pi pi-search" @click="doPreview" :loading="previewing" />
+        <Button :label="$t('assemblyImport.previewBtn')" icon="pi pi-search" @click="doPreview" :loading="previewing" class="btn-preview" />
 
         <div v-if="previewData" style="margin-top:1rem;">
           <!-- Global warnings -->
@@ -110,13 +110,13 @@
 
           <!-- Execute -->
           <div v-if="canExecute" style="margin-top:1.25rem;">
-            <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.5rem;">
-              <Checkbox v-model="confirmImport" :binary="true" input-id="confirm-import" />
-              <label for="confirm-import" style="cursor:pointer;font-size:0.85rem;">
-                I confirm � import {{ totalNew }} new + {{ totalChanged }} changed assemblies
-              </label>
-            </div>
-            <Button label="Execute Import" icon="pi pi-check" severity="success" @click="doImport" :loading="importing" :disabled="!confirmImport" />
+            <ConfirmedButton
+              :label="$t('assemblyImport.executeBtn')"
+              icon="pi pi-check"
+              :confirm-label="`I confirm \u2014 import ${totalNew} new + ${totalChanged} changed assemblies`"
+              btn-class="btn-create"
+              :loading="importing"
+              @action="doImport" />
           </div>
         </div>
       </template>
@@ -152,6 +152,7 @@ import { useI18n } from 'vue-i18n'
 const { t } = useI18n()
 import { api } from '../api.js'
 import ColumnMapper from '../components/ColumnMapper.vue'
+import ConfirmedButton from '../components/ConfirmedButton.vue'
 
 const projects = ref([])
 const selectedProject = ref(null)
@@ -340,4 +341,8 @@ function downloadCsv() {
 .changed-fields { font-size: 0.8rem; color: #b45309; font-family: monospace; }
 .dim { color: #d1d5db; }
 .results-summary { display: flex; gap: 1.5rem; padding: 0.5rem 0; }
+.btn-preview { background: #6366f1; border-color: #6366f1; color: #fff; }
+.btn-preview:hover { background: #4f46e5; border-color: #4f46e5; }
+.btn-create { background: #e40520; border-color: #e40520; color: #fff; }
+.btn-create:hover { background: #c2041b; border-color: #c2041b; }
 </style>
