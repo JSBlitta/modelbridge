@@ -77,7 +77,7 @@
         <Column field="priority" :header="$t('assemblyUpdate.priority')" />
       </DataTable>
       <template #footer>
-        <Button label="Apply Changes" icon="pi pi-check" severity="success" @click="applyChanges" :loading="applying" />
+        <Button label="Apply Changes" icon="pi pi-check" class="btn-create" @click="applyChanges" :loading="applying" />
         <Button label="Cancel" severity="secondary" @click="showReview = false" />
       </template>
     </Dialog>
@@ -232,4 +232,8 @@ async function applyChanges() {
 .page-title { font-size: 1.5rem; font-weight: 700; margin-bottom: 1.5rem; }
 .mb-card { margin-bottom: 1.25rem; }
 :deep(.row-changed td) { background: #fef9c3 !important; }
+.btn-preview { background: #6366f1; border-color: #6366f1; color: #fff; }
+.btn-preview:hover { background: #4f46e5; border-color: #4f46e5; }
+.btn-create { background: #e40520; border-color: #e40520; color: #fff; }
+.btn-create:hover { background: #c2041b; border-color: #c2041b; }
 </style>

@@ -192,7 +192,7 @@
         </div>
 
         <div v-if="countHasRequiredMapping">
-          <Button label="Check &amp; Preview" icon="pi pi-search" @click="doCountPreview" :loading="countPreviewing" />
+          <Button label="Check &amp; Preview" icon="pi pi-search" class="btn-preview" @click="doCountPreview" :loading="countPreviewing" />
         </div>
 
         <div v-if="countPreviewData" style="margin-top:0.75rem;">
@@ -517,4 +517,8 @@ async function doCountImport() {
 .page-title { font-size: 1.5rem; font-weight: 700; margin-bottom: 1.5rem; }
 .mb-card { margin-bottom: 1.25rem; }
 .info-text { color: #374151; }
+.btn-preview { background: #6366f1; border-color: #6366f1; color: #fff; }
+.btn-preview:hover { background: #4f46e5; border-color: #4f46e5; }
+.btn-create { background: #e40520; border-color: #e40520; color: #fff; }
+.btn-create:hover { background: #c2041b; border-color: #c2041b; }
 </style>
