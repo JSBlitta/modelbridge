@@ -2,27 +2,27 @@
   <div class="compact-flow">
     <div class="compact-header">
       <h2>{{ $t('compactFlow.title') }}</h2>
-      <span class="compact-hint">Upload → Map → Confirm → Done</span>
+      <span class="compact-hint">{{ $t('compactFlow.hint') }}</span>
     </div>
 
     <!-- Row 1: Project + File side by side -->
     <div class="row-two">
       <div class="panel">
-        <label class="panel-label">Project</label>
+        <label class="panel-label">{{ $t('compactFlow.project') }}</label>
         <Select v-model="selectedProject" :options="projects" option-label="name" option-value="uuid"
-          placeholder="Select project..." class="wide" @change="onProjectChange" />
+          :placeholder="$t('compactFlow.selectProject')" class="wide" @change="onProjectChange" />
         <Tag v-if="context && context.batches.length" severity="secondary" style="margin-top:0.4rem;"
-          :value="`${context.designs.length} designs · ${context.batches.length} batches`" />
+          :value="`${context.designs.length} ${$t('compactFlow.designsBatches', { designs: context.designs.length, batches: context.batches.length }).split('·')[0]} · ${context.batches.length} ${$t('compactFlow.designsBatches', { designs: context.designs.length, batches: context.batches.length }).split('·')[1]}`" />
         <Message v-if="projectsLoaded && projects.length === 0" severity="info" :closable="false" size="small" style="margin-top:0.4rem;">
-          No projects found. <RouterLink to="/">Create projects first</RouterLink>.
+          {{ $t('compactFlow.noProjects') }}
         </Message>
         <Message v-if="context && context.batches.length === 0" severity="warn" :closable="false" size="small" style="margin-top:0.4rem;">
-          No batches in this project. <RouterLink to="/batches">Create batches first</RouterLink>.
+          {{ $t('compactFlow.noBatches') }}
         </Message>
       </div>
       <div class="panel">
-        <label class="panel-label">CSV File</label>
-        <FileUpload mode="basic" accept=".csv" :auto="false" choose-label="Select CSV" @select="onFileSelect" />
+        <label class="panel-label">{{ $t('compactFlow.csvFile') }}</label>
+        <FileUpload mode="basic" accept=".csv" :auto="false" :choose-label="$t('compactFlow.selectCsv')" @select="onFileSelect" />
         <span v-if="parseResult" class="badge-info" style="margin-top:0.4rem;">
           {{ parseResult.rows.length }} rows · {{ parseResult.headers.length }} columns
         </span>
@@ -31,7 +31,7 @@
 
     <!-- Column mapping: compact table -->
     <div v-if="parseResult && selectedProject" class="panel mt-sm">
-      <label class="panel-label">Column Mapping</label>
+      <label class="panel-label">{{ $t('compactFlow.columnMapping') }}</label>
       <ColumnMapper
         :detected-columns="parseResult.headers"
         :auto-mapping="initialMapping"
@@ -47,14 +47,14 @@
     <!-- One-click check + summary banner -->
     <div v-if="hasRequiredMapping" class="panel mt-sm">
       <div style="display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap;">
-        <Button label="Check & Preview" icon="pi pi-search" @click="doPreview" :loading="previewing" />
+        <Button :label="$t('compactFlow.previewBtn')" icon="pi pi-search" @click="doPreview" :loading="previewing" class="btn-preview" />
         <span v-if="previewData" class="summary-chips">
-          <span class="chip-new">{{ totalNew }} new</span>
-          <span class="chip-changed">{{ totalChanged }} changed</span>
-          <span class="chip-identical">{{ totalIdentical }} identical</span>
-          <span v-if="totalBlocked" class="chip-blocked">{{ totalBlocked }} blocked</span>
+          <span class="chip-new">{{ $t('compactFlow.newChip', { count: totalNew }) }}</span>
+          <span class="chip-changed">{{ $t('compactFlow.changedChip', { count: totalChanged }) }}</span>
+          <span class="chip-identical">{{ $t('compactFlow.identicalChip', { count: totalIdentical }) }}</span>
+          <span v-if="totalBlocked" class="chip-blocked">{{ $t('compactFlow.blockedChip', { count: totalBlocked }) }}</span>
           <span v-if="previewData.unresolved_batches.length" class="chip-blocked">
-            {{ previewData.unresolved_batches.length }} unresolved batches
+            {{ $t('compactFlow.unresolvedChip', { count: previewData.unresolved_batches.length }) }}
           </span>
         </span>
       </div>
@@ -65,10 +65,10 @@
           {{ previewData.warnings.join(' · ') }}
         </Message>
         <Message v-if="previewData.unresolved_batches.length" severity="error" :closable="false" size="small">
-          Batch numbers not in project: {{ previewData.unresolved_batches.join(', ') }}
+          {{ $t('compactFlow.batchesNotFound', { batches: previewData.unresolved_batches.join(', ') }) }}
         </Message>
         <Message v-if="previewData.unresolved_designs.length" severity="error" :closable="false" size="small">
-          Designs not found: {{ previewData.unresolved_designs.slice(0, 5).join(', ') }}{{ previewData.unresolved_designs.length > 5 ? '…' : '' }}
+          {{ $t('compactFlow.designsNotFound', { designs: previewData.unresolved_designs.slice(0, 5).join(', ') + (previewData.unresolved_designs.length > 5 ? '…' : '') }) }}
         </Message>
 
         <!-- Batch state list: only those with issues or changes -->
@@ -77,7 +77,7 @@
           <span class="chip-new">{{ bp.summary.new }}↑</span>
           <span class="chip-changed">{{ bp.summary.changed }}~</span>
           <span class="chip-identical">{{ bp.summary.identical }}=</span>
-          <Tag v-if="bp.blocked" severity="danger" value="BLOCKED (definitive)" />
+          <Tag v-if="bp.blocked" severity="danger" :value="$t('compactFlow.definitiveBlocked')" />
         </div>
 
         <!-- Execute -->
@@ -85,10 +85,10 @@
           <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.5rem;">
             <Checkbox v-model="confirmImport" :binary="true" input-id="confirm-compact-import" />
             <label for="confirm-compact-import" style="cursor:pointer;font-size:0.85rem;">
-              I confirm — import {{ totalNew }} new + {{ totalChanged }} changed assemblies
+              {{ $t('compactFlow.confirmImport', { totalNew, totalChanged }) }}
             </label>
           </div>
-          <Button label="Execute Import" icon="pi pi-bolt" severity="success" @click="doImport" :loading="importing" :disabled="!confirmImport" />
+          <Button :label="$t('compactFlow.executeBtn')" icon="pi pi-bolt" @click="doImport" :loading="importing" :disabled="!confirmImport" class="btn-create" />
         </div>
       </div>
     </div>
@@ -96,11 +96,11 @@
     <!-- Result bar -->
     <div v-if="importResults.length" class="panel mt-sm">
       <div class="summary-chips">
-        <span class="chip-new">{{ importResults.filter(r=>r.status==='created').length }} created</span>
-        <span class="chip-changed">{{ importResults.filter(r=>r.status==='updated').length }} updated</span>
-        <span class="chip-identical">{{ importResults.filter(r=>r.status==='skipped').length }} skipped</span>
+        <span class="chip-new">{{ importResults.filter(r=>r.status==='created').length }} {{ $t('compactFlow.created') }}</span>
+        <span class="chip-changed">{{ importResults.filter(r=>r.status==='updated').length }} {{ $t('compactFlow.updated') }}</span>
+        <span class="chip-identical">{{ importResults.filter(r=>r.status==='skipped').length }} {{ $t('compactFlow.skipped') }}</span>
         <span v-if="importResults.some(r=>r.status==='error'||r.status==='blocked')" class="chip-blocked">
-          {{ importResults.filter(r=>r.status==='error'||r.status==='blocked').length }} errors
+          {{ importResults.filter(r=>r.status==='error'||r.status==='blocked').length }} {{ $t('compactFlow.errors') }}
         </span>
       </div>
       <DataTable v-if="importResults.some(r=>r.status==='error'||r.status==='blocked')"
@@ -110,7 +110,7 @@
         <Column field="batch" :header="$t('compactFlow.batch')" />
         <Column field="reason" :header="$t('compactFlow.reason')" />
       </DataTable>
-      <Button label="Download CSV" icon="pi pi-download" text size="small" style="margin-top:0.5rem;" @click="downloadCsv" />
+      <Button :label="$t('compactFlow.downloadCsv')" icon="pi pi-download" text size="small" style="margin-top:0.5rem;" @click="downloadCsv" />
     </div>
   </div>
 </template>
@@ -149,8 +149,8 @@ const initialMapping = computed(() => {
 const mappingWarnings = computed(() => {
   const targets = Object.values(columnMapping.value)
   const w = []
-  if (!targets.includes('design_name')) w.push('No Design Name column mapped.')
-  if (!targets.includes('batch_number')) w.push('No Batch Number column mapped.')
+  if (!targets.includes('design_name')) w.push(t('compactFlow.noDesignName'))
+  if (!targets.includes('batch_number')) w.push(t('compactFlow.noBatchNumber'))
   return w
 })
 
@@ -240,4 +240,10 @@ function downloadCsv() {
 .chip-identical { color: #6b7280; font-size: 0.9rem; }
 .chip-blocked { color: #dc2626; font-weight: 600; font-size: 0.9rem; }
 .compact-batch-row { display: flex; gap: 0.5rem; align-items: center; padding: 0.3rem 0; border-bottom: 1px solid #f3f4f6; }
+
+/* Button color definitions — single source of truth */
+.btn-preview { background: #6366f1; border-color: #6366f1; color: #fff; }
+.btn-preview:hover { background: #4f46e5; border-color: #4f46e5; }
+.btn-create { background: #e40520; border-color: #e40520; color: #fff; }
+.btn-create:hover { background: #c2041b; border-color: #c2041b; }
 </style>

@@ -92,6 +92,11 @@ export default {
     selectCsv: 'Select CSV',
     checkProjects: 'Check in Produuzit',
     newFound: '{newCount} new, {foundCount} found',
+    checkBtn: 'Check projects',
+    confirmBtn: 'Confirm project creation',
+    creating: 'Creating...',
+    alreadyExist: '{count} project(s) already exist in Produuzit.',
+    createPhaseBatches: 'Create phase & batches in Produuzit',
   },
   assemblyImport: {
     title: 'Assembly Import',
@@ -256,6 +261,8 @@ export default {
     design: 'Design',
     batch: 'Batch',
     reason: 'Reason',
+    previewBtn: 'Check & preview',
+    executeBtn: 'Execute import',
   },
   countImport: {
     title: 'Production Count',
@@ -468,6 +475,9 @@ export default {
     required: '(required)',
     found: 'found',
     new: 'new',
+    batchHeader: 'Batch',
+    batchStatus: 'Batch status',
+    exists: 'exists',
   },
   common: {
     empty: '\u2014',

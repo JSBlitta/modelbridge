@@ -92,6 +92,11 @@ export default {
     selectCsv: 'Selecteer CSV',
     checkProjects: 'Controleer in Produuzit',
     newFound: '{newCount} nieuw, {foundCount} gevonden',
+    checkBtn: 'Projecten controleren',
+    confirmBtn: 'Projectaanmaak bevestigen',
+    creating: 'Aanmaken...',
+    alreadyExist: '{count} project(en) bestaan al in Produuzit.',
+    createPhaseBatches: 'Fase & batches aanmaken in Produuzit',
   },
   assemblyImport: {
     title: 'Elementen Importeren',
@@ -256,6 +261,8 @@ export default {
     design: 'Ontwerp',
     batch: 'Batch',
     reason: 'Reden',
+    previewBtn: 'Controleren & preview',
+    executeBtn: 'Import uitvoeren',
   },
   countImport: {
     title: 'Productie-aantallen',
@@ -468,6 +475,9 @@ export default {
     required: '(verplicht)',
     found: 'gevonden',
     new: 'nieuw',
+    batchHeader: 'Batch',
+    batchStatus: 'Batchstatus',
+    exists: 'bestaat',
   },
   common: {
     empty: '\u2014',

@@ -20,18 +20,18 @@
           <InputText v-model="data[field]" style="width:5rem" />
         </template>
       </Column>
-      <Column header="Batch" style="width:80px">
+      <Column :header="$t('phaseTable.batchHeader')" style="width:80px">
         <template #body="{ data }">
           <span v-if="data._batch != null" style="font-family:monospace;">{{ data._batch.number }}</span>
           <span v-else style="color:#9ca3af;">—</span>
         </template>
       </Column>
-      <Column header="Batch status" style="width:100px">
+      <Column :header="$t('phaseTable.batchStatus')" style="width:100px">
         <template #body="{ data }">
           <template v-if="data._batch != null && (data.batches_found?.length || data.batches_missing?.length)">
             <Tag
               :severity="data.batches_found?.includes(String(data._batch.number)) ? 'success' : 'info'"
-              :value="data.batches_found?.includes(String(data._batch.number)) ? 'exists' : 'new'"
+              :value="data.batches_found?.includes(String(data._batch.number)) ? $t('phaseTable.exists') : $t('phaseTable.new')"
             />
           </template>
         </template>
@@ -81,7 +81,6 @@ const flatRows = computed(() => {
 
 function onCellEdit(e) {
   const { data, newValue, field } = e
-  // Propagate editable fields (phase, suffix) back to the source project row
   const proj = localRows.value[data._projIdx]
   if (proj) proj[field] = newValue
   emit('update:rows', [...localRows.value])

@@ -1,22 +1,18 @@
 <template>
   <div>
-    <h2 class="page-title">Project Setup</h2>
+    <h2 class="page-title">{{ $t('projectSetup.title') }}</h2>
 
     <Card class="mb-card">
       <template #title>{{ $t('projectSetup.uploadCsv') }}</template>
       <template #content>
         <p style="color:#6b7280;font-size:0.85rem;margin-bottom:0.75rem;">
-          This page creates <strong>projects</strong> in Produuzit. Upload a CSV that has a <code>project</code> column
-          with names like <code>12713-A-Elementen</code> (e.g. <em>superproject_12713.csv</em>).
-          <br/>To import assemblies from <em>structured_data.csv</em>, use
-          <RouterLink to="/compact">{{ $t('projectSetup.quickImport') }}</RouterLink> or
-          <RouterLink to="/import">{{ $t('projectSetup.guidedImport') }}</RouterLink> instead.
+          {{ $t('projectSetup.infoText') }}
         </p>
         <FileUpload
           mode="basic"
           accept=".csv"
           :auto="false"
-          choose-:label="$t('projectSetup.selectCsv')"
+          :choose-label="$t('projectSetup.selectCsv')"
           @select="onFileSelect"
         />
       </template>
@@ -26,35 +22,33 @@
       <template #content>
         <Message v-if="parseError" severity="error" :closable="false">{{ parseError }}</Message>
         <Message v-if="noProjectsFound" severity="warn" :closable="false">
-          No project groups detected. This CSV has no <code>project</code> column with names like
-          <code>12713-A-Elementen</code>. If you're importing assembly data, use
-          <RouterLink to="/compact">{{ $t('projectSetup.quickImport') }}</RouterLink>.
+          {{ $t('projectSetup.noProjects') }}
         </Message>
       </template>
     </Card>
 
     <Card v-if="phaseSuggestions.length" class="mb-card">
-      <template #title>Project Groups ({{ phaseSuggestions.length }} found)</template>
+      <template #title>{{ $t('projectSetup.projectGroups') }} ({{ phaseSuggestions.length }} found)</template>
       <template #content>
         <PhaseTable v-model:rows="phaseSuggestions" />
         <div style="margin-top:1rem; display:flex; gap:0.75rem; align-items:center;">
-          <Button :label="$t('projectSetup.checkProjects')" icon="pi pi-search" @click="checkProjects" :loading="checking" />
+          <Button :label="$t('projectSetup.checkBtn')" icon="pi pi-search" @click="checkProjects" :loading="checking" class="btn-preview" />
           <span v-if="checkDone" class="info-text">
-            {{ newCount }} new, {{ foundCount }} found
+            {{ $t('projectSetup.newFound', { newCount, foundCount }) }}
           </span>
         </div>
       </template>
     </Card>
 
     <Card v-if="checkDone && newCount > 0" class="mb-card">
-      <template #title>Confirm Project Creation</template>
+      <template #title>{{ $t('projectSetup.confirmBtn') }}</template>
       <template #content>
         <Message severity="warn">
-          {{ newCount }} new project(s) will be created in Produuzit.
+          {{ $t('projectSetup.newProjects', { count: newCount }) }}
         </Message>
         <ConfirmationTable
           :rows="confirmRows"
-          :columns="[{field:'project_key',header:'Project'},{field:'superproject',header:'Superproject'},{field:'suggested_phase',header:'Phase'}]"
+          :columns="[{field:'project_key',header:$t('projectSetup.project')},{field:'superproject',header:$t('projectSetup.superproject')},{field:'suggested_phase',header:$t('projectSetup.phase')}]"
           status-field="status"
           @confirm="createProjects"
           @cancel="checkDone = false"
@@ -63,8 +57,16 @@
       </template>
     </Card>
 
+    <Card v-if="checkDone && newCount === 0" class="mb-card">
+      <template #content>
+        <Message severity="success" :closable="false">
+          {{ $t('projectSetup.alreadyExist', { count: foundCount }) }}
+        </Message>
+      </template>
+    </Card>
+
     <Card v-if="createResults.length" class="mb-card">
-      <template #title>Creation Results</template>
+      <template #title>{{ $t('projectSetup.creationResults') }}</template>
       <template #content>
         <DataTable :value="createResults" size="small">
           <Column field="project_key" :header="$t('projectSetup.project')" />
@@ -177,4 +179,7 @@ async function createProjects() {
 .mb-card { margin-bottom: 1.25rem; }
 .error-msg { color: #dc2626; margin-top: 0.5rem; }
 .info-text { color: #374151; }
+
+.btn-preview { background: #6366f1; border-color: #6366f1; }
+.btn-preview:hover { background: #4f46e5; border-color: #4f46e5; }
 </style>
