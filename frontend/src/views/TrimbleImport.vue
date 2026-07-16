@@ -133,13 +133,17 @@
           {{ $t('trimble.dedupInfo', { key: dedupLabel }) }}
         </Message>
 
-        <div v-if="previewEntities.length" style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;margin-bottom:0.5rem;">
-          <Button :label="$t('trimble.selectAllEntities')" icon="pi pi-check-square" size="small" text @click="selectAllEntities" />
-          <Button :label="$t('trimble.deselectAll')" icon="pi pi-stop" size="small" text @click="deselectAllEntities" />
-          <Tag v-if="selectedCount" severity="info" :value="$t('trimble.selectedCount', { count: selectedCount })" />
-          <template v-for="[batch, indices] in entityBatchGroups" :key="batch">
-            <Button :label="'[' + batch + ']'" icon="pi pi-check" size="small" text :severity="batchSelectionState.get(batch) === 'all' ? 'success' : 'secondary'" :class="{ 'batch-btn-hidden-check': batchSelectionState.get(batch) !== 'all' }" @click="toggleBatch(batch)" />
-          </template>
+        <div v-if="previewEntities.length">
+          <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;margin-bottom:0.25rem;">
+            <Button :label="$t('trimble.selectAllEntities')" icon="pi pi-check-square" size="small" text @click="selectAllEntities" />
+            <Button :label="$t('trimble.deselectAll')" icon="pi pi-stop" size="small" text @click="deselectAllEntities" />
+            <Tag severity="info" :value="$t('trimble.selectedCount', { count: selectedCount })" />
+          </div>
+          <div style="display:flex;gap:0.35rem;align-items:center;flex-wrap:wrap;margin-bottom:0.5rem;">
+            <template v-for="[batch, indices] in entityBatchGroups" :key="batch">
+              <Button :label="'[' + batch + ']'" icon="pi pi-check" size="small" text severity="secondary" :class="{ 'batch-btn-selected': batchSelectionState.get(batch) === 'all' }" @click="toggleBatch(batch)" />
+            </template>
+          </div>
         </div>
 
         <DataTable v-if="previewEntities.length" :value="previewEntities" size="small" striped-rows scrollable scroll-height="400px">
@@ -664,5 +668,5 @@ function resolveProp(columnMappingObj, target) {
 .chip-identical { background: #e0e7ff; color: #3730a3; padding: 0.2rem 0.6rem; border-radius: 12px; font-size: 0.8rem; font-weight: 600; }
 .chip-blocked { background: #fce4ec; color: #b91c1c; padding: 0.2rem 0.6rem; border-radius: 12px; font-size: 0.8rem; font-weight: 600; }
 
-.batch-btn-hidden-check .pi-check { visibility: hidden; }
+.batch-btn-selected .pi-check { color: #22c55e; font-weight: 700; }
 </style>
