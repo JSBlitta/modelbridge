@@ -13,6 +13,8 @@ synonyms:
   - levering-productie
   - levering_productie
   - productie
+  - levering-bestelling
+  - levering_bestelling
   client_order_id:
   - client_order_id
   - montagenummer

@@ -1,13 +1,13 @@
 <template>
   <div class="trimble-import">
     <div class="page-header">
-      <h2 class="page-title">Trimble Connect</h2>
-      <p class="page-subtitle">Browse IFC models, pick properties, map to Produuzit, and push with explicit approval.</p>
+      <h2 class="page-title">{{ $t('trimble.title') }}</h2>
+      <p class="page-subtitle">{{ $t('trimble.subtitle') }}</p>
     </div>
 
     <!-- Connect (hidden once authenticated) -->
     <Card v-if="!authStatus" class="mb-card">
-      <template #title>Connect</template>
+      <template #title>{{ $t('trimble.connect') }}</template>
       <template #content>
         <div style="display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap;">
           <Tag :severity="authStatus ? 'success' : 'warn'" :value="authStatus ? $t('trimble.connected') : $t('trimble.notConnected')" />
@@ -22,11 +22,11 @@
           {{ $t('trimble.callbackFallback') }}
         </Message>
         <div v-if="!authStatus && !oauthPolling" style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;margin-top:0.75rem;">
-          <InputText v-model="authCode" placeholder="Paste full URL (http://localhost:PORT/callback/?code=...)" style="min-width:320px;flex:1;" />
+          <InputText v-model="authCode" :placeholder="$t('trimble.pasteUrl')" style="min-width:320px;flex:1;" />
           <Button :label="$t('trimble.exchangeCode')" icon="pi pi-key" severity="secondary" @click="exchangeAuthCode" :loading="exchangingCode" />
         </div>
         <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;margin-top:0.5rem;">
-          <InputText v-model="manualToken" placeholder="Or paste access token directly" style="min-width:320px;flex:1;" />
+          <InputText v-model="manualToken" :placeholder="$t('trimble.pasteToken')" style="min-width:320px;flex:1;" />
           <Button :label="$t('trimble.setToken')" icon="pi pi-lock" text @click="saveManualToken" :loading="savingToken" />
         </div>
         <Message severity="warn" :closable="false" style="margin-top:1rem;">
@@ -37,38 +37,45 @@
 
     <!-- Select Model (shown once authenticated) -->
     <Card v-if="authStatus" class="mb-card">
-      <template #title>Select Model</template>
+      <template #title>{{ $t('trimble.selectModelCard') }}</template>
       <template #content>
         <div style="display:flex;gap:1rem;align-items:flex-end;flex-wrap:wrap;">
           <div style="flex:1;min-width:280px;">
-            <label class="field-label">Trimble Project</label>
+            <label class="field-label">{{ $t('trimble.trimbleProject') }}</label>
             <Select v-model="selectedProject" :options="trimbleProjects" option-label="name" option-value="id"
-              placeholder="Select project..." class="wide" @change="onProjectChange" />
+              :placeholder="$t('trimble.selectProject')" class="wide" @change="onProjectChange" />
           </div>
+          <Button icon="pi pi-refresh" text :loading="loadingProjects" @click="loadTrimbleProjects"
+            v-tooltip.top="$t('trimble.reloadProjects')" />
           <Button :label="$t('trimble.loadFiles')" icon="pi pi-folder-open" @click="loadProjectFiles" :loading="loadingFiles" :disabled="!selectedProject" />
         </div>
-        <div v-if="loadingFiles" style="margin-top:0.5rem;color:#6b7280;font-size:0.85rem;">Scanning project for IFC files&hellip;</div>
+        <Message v-if="projectsError" severity="warn" :closable="false" size="small" style="margin-top:0.5rem;">
+          {{ $t('trimble.loadFailed', { error: projectsError }) }}
+          <Button :label="$t('trimble.retry')" icon="pi pi-refresh" size="small" text @click="loadTrimbleProjects" style="margin-left:0.5rem;" />
+        </Message>
+        <div v-if="loadingProjects" style="margin-top:0.5rem;color:#6b7280;font-size:0.85rem;">{{ $t('trimble.loadingProjects') }}</div>
+        <div v-if="loadingFiles" style="margin-top:0.5rem;color:#6b7280;font-size:0.85rem;">{{ $t('trimble.scanningProject') }}</div>
         <div v-if="modelFiles.length" style="margin-top:0.75rem;">
-          <label class="field-label">IFC Model File <span style="font-weight:400;color:#6b7280;">({{ modelFiles.length }} found)</span></label>
+          <label class="field-label">{{ $t('trimble.modelFile') }} <span style="font-weight:400;color:#6b7280;">({{ modelFiles.length }} found)</span></label>
           <Select v-model="selectedFile" :options="modelFiles" option-label="_display" option-value="id"
-            placeholder="Select an IFC file..." class="wide" @change="onFileSelected" />
+            :placeholder="$t('trimble.selectIfc')" class="wide" @change="onFileSelected" />
         </div>
         <Message v-if="selectedProject && !loadingFiles && modelFiles.length === 0" severity="info" :closable="false" style="margin-top:0.75rem;">
-          No IFC files found in this project. Try a different project.
+          {{ $t('trimble.noIfcFiles') }}
         </Message>
       </template>
     </Card>
 
     <!-- 3: Select Properties -->
     <Card v-if="psetDefs.length" class="mb-card">
-      <template #title>Property Sets <span class="subtitle-dim">({{ totalSelectedProps }} selected)</span></template>
+      <template #title>{{ $t('trimble.propertySetsTitle') }} <span class="subtitle-dim">({{ totalSelectedProps }} selected)</span></template>
       <template #content>
         <div style="margin-bottom:0.75rem;display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;">
           <Button :label="$t('trimble.selectAll')" icon="pi pi-check-square" text size="small" @click="selectAllProps" />
           <Button :label="$t('trimble.clearAll')" icon="pi pi-stop" text size="small" @click="clearAllProps" />
-          <InputText v-model="psetFilter" placeholder="Filter psets..." size="small" style="width:200px;" />
+          <InputText v-model="psetFilter" :placeholder="$t('trimble.filterPsets')" size="small" style="width:200px;" />
         </div>
-        <Message v-if="!psetDefs.length" severity="info" :closable="false">No property sets found for this model.</Message>
+        <Message v-if="!psetDefs.length" severity="info" :closable="false">{{ $t('trimble.noPsets') }}</Message>
         <div v-for="pset in filteredPsets" :key="pset.name" class="pset-block">
           <div class="pset-header">
             <Checkbox v-model="psetChecks[pset.name]" :binary="true" @change="onPsetToggle(pset)" :input-id="'pset_' + pset.name" />
@@ -89,19 +96,19 @@
 
     <!-- 4: Map to Produuzit -->
     <Card v-if="allSelectedProps.length" class="mb-card">
-      <template #title>Map to Produuzit</template>
+      <template #title>{{ $t('trimble.mapToProduuzit') }}</template>
       <template #content>
         <div style="display:flex;gap:1rem;align-items:center;flex-wrap:wrap;margin-bottom:0.75rem;">
           <div>
-            <label class="field-label">Target Produuzit Project</label>
+            <label class="field-label">{{ $t('trimble.targetProject') }}</label>
             <Select v-model="targetProjectUuid" :options="produuzitProjects" option-label="name" option-value="uuid"
-              placeholder="Select Produuzit project..." style="min-width:280px;" @change="loadProduuzitContext" />
+              :placeholder="$t('trimble.selectProduuzit')" style="min-width:280px;" @change="loadProduuzitContext" />
             <small v-if="produuzitProjectsError" style="color:#ef4444;display:block;margin-top:2px;">
               ⚠ {{ produuzitProjectsError }}
             </small>
           </div>
           <Tag v-if="produuzitContext" severity="secondary"
-            :value="`${produuzitContext.designs?.length || 0} designs | ${produuzitContext.batches?.length || 0} batches`" />
+            :value="$t('trimble.contextTag', { designs: produuzitContext.designs?.length || 0, batches: produuzitContext.batches?.length || 0 })" />
         </div>
         <ColumnMapper
           :detected-columns="allSelectedProps"
@@ -117,75 +124,117 @@
 
     <!-- 5: Preview -->
     <Card v-if="allSelectedProps.length && targetProjectUuid" class="mb-card">
-      <template #title>Preview Entities</template>
+      <template #title>{{ $t('trimble.step5') }}</template>
       <template #content>
         <div style="display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap;margin-bottom:0.75rem;">
           <Button :label="$t('trimble.fetchEntities')" icon="pi pi-download" @click="fetchEntities" :loading="fetchingEntities"
             :disabled="!selectedFile" />
+          <Button :label="$t('trimble.rawSample')" icon="pi pi-eye" severity="secondary" size="small" text
+            @click="fetchRawSample" :loading="fetchingRawSample" :disabled="!selectedFile" />
           <div style="display:flex;align-items:center;gap:0.4rem;">
             <Checkbox v-model="uniqueOnly" :binary="true" input-id="unique_toggle" />
-            <label for="unique_toggle" style="font-size:0.85rem;cursor:pointer;">Unique records only</label>
+            <label for="unique_toggle" style="font-size:0.85rem;cursor:pointer;">{{ $t('trimble.deduplicateOn') }}</label>
           </div>
-          <Tag v-if="totalEntities > 0" severity="info" :value="`${previewEntities.length} of ${totalEntities} entities`" />
+          <Select v-if="uniqueOnly" v-model="uniqueKeyProp"
+            :options="[{label:'— entity id (fallback)',value:''}, ...allSelectedProps.map(p=>({label:p.split('.').pop(),value:p}))]"
+            option-label="label" option-value="value"
+            :placeholder="$t('trimble.selectDedupKey')" style="min-width:200px;font-size:0.82rem;" />
+          <Tag v-if="totalEntities > 0" severity="info" :value="$t('trimble.entitiesTag', { preview: previewEntities.length, total: totalEntities })" />
         </div>
+        <!-- Raw sample: one entity fetched without any field filter -->
+        <details v-if="rawSampleEntity" style="margin-bottom:0.5rem;font-size:0.78rem;">
+          <summary style="cursor:pointer;color:#6b7280;font-weight:600;">{{ $t('trimble.rawSampleSummary') }}</summary>
+          <pre style="background:#f3f4f6;padding:0.5rem;border-radius:4px;overflow-x:auto;max-height:300px;font-size:0.72rem;white-space:pre-wrap;">{{ JSON.stringify(rawSampleEntity, null, 2) }}</pre>
+        </details>
+        <!-- Raw first entity from current filtered fetch -->
+        <details v-if="previewEntities.length" style="margin-bottom:0.5rem;font-size:0.78rem;">
+          <summary style="cursor:pointer;color:#6b7280;">{{ $t('trimble.rawFilteredSummary') }}</summary>
+          <pre style="background:#f3f4f6;padding:0.5rem;border-radius:4px;overflow-x:auto;max-height:220px;font-size:0.72rem;white-space:pre-wrap;">{{ JSON.stringify(previewEntities[0], null, 2) }}</pre>
+        </details>
         <Message v-if="uniqueOnly" severity="secondary" :closable="false" size="small" style="margin-bottom:0.5rem;">
-          Unique mode: duplicate (batch &times; design) combos collapsed to first instance only.
+          {{ $t('trimble.dedupInfo', { key: dedupLabel }) }}
         </Message>
-        <DataTable v-if="previewEntities.length" :value="previewEntities.slice(0, 20)" size="small" striped-rows scrollable scroll-height="400px">
+
+        <!-- Entity selection toolbar -->
+        <div v-if="previewEntities.length" style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;margin-bottom:0.5rem;">
+          <Button :label="$t('trimble.selectAllEntities')" icon="pi pi-check-square" size="small" text @click="selectAllEntities" />
+          <Button :label="$t('trimble.deselectAll')" icon="pi pi-stop" size="small" text @click="deselectAllEntities" />
+          <Tag v-if="selectedCount" severity="info" :value="$t('trimble.selectedCount', { count: selectedCount })" />
+          <template v-for="[batch, indices] in entityBatchGroups" :key="batch">
+            <Button :label="'[' + batch + ']'" size="small" text severity="secondary" @click="selectByBatch(batch)" />
+          </template>
+        </div>
+
+        <DataTable v-if="previewEntities.length" :value="previewEntities" size="small" striped-rows scrollable scroll-height="400px">
+          <Column :header="$t('trimble.selectAllEntities')" style="width:3rem;">
+            <template #body="{ index }">
+              <Checkbox :model-value="selectedEntityIndices.has(index)" :binary="true" @change="toggleEntity(index)" />
+            </template>
+          </Column>
           <Column v-for="prop in allSelectedProps.slice(0, 8)" :key="prop" :field="prop" :header="prop.split('.').pop()" style="min-width:120px;">
             <template #body="{ data }">{{ extractProp(data, prop) }}</template>
           </Column>
         </DataTable>
-        <div v-if="!previewEntities.length && !fetchingEntities" style="color:#6b7280;font-size:0.85rem;">Click Fetch Entities.</div>
+        <div v-if="!previewEntities.length && !fetchingEntities" style="color:#6b7280;font-size:0.85rem;">{{ $t('trimble.clickFetch') }}</div>
       </template>
     </Card>
 
     <!-- 6: Preview & Push -->
     <Card v-if="previewEntities.length && hasRequiredMapping" class="mb-card card-warn-border">
-      <template #title>Preview &amp; Push to Produuzit</template>
+      <template #title>{{ $t('trimble.previewPush') }}</template>
       <template #content>
         <Message severity="warn" :closable="false" style="margin-bottom:1rem;">
-          <strong>Explicit confirmation required.</strong> No automatic sync runs.
+          <strong>{{ $t('trimble.explicitConfirm') }}</strong>
         </Message>
         <div style="display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap;margin-bottom:0.75rem;">
           <div style="display:flex;align-items:center;gap:0.4rem;">
             <Checkbox v-model="uniqueOnlyImport" :binary="true" input-id="unique_toggle_import" />
-            <label for="unique_toggle_import" style="font-size:0.85rem;cursor:pointer;">Deduplicate before import</label>
+            <label for="unique_toggle_import" style="font-size:0.85rem;cursor:pointer;">{{ $t('trimble.deduplicate') }}</label>
           </div>
           <Button :label="$t('trimble.checkChanges')" icon="pi pi-search" @click="doPreview" :loading="previewing" />
+          <Button v-if="selectedCount" :label="$t('trimble.pushSelected')" icon="pi pi-cloud-upload" severity="warning" @click="doImport" :loading="importing" :disabled="!canExecute" />
+        </div>
+
+        <div v-if="previewing" style="color:#6b7280;font-size:0.85rem;margin-bottom:0.5rem;">
+          <i class="pi pi-spin pi-spinner" style="margin-right:0.4rem;"></i>
+          {{ $t('trimble.comparing', { count: selectedEntities.length || previewEntities.length }) }}
+        </div>
+
+        <div v-if="previewError" style="margin-bottom:0.5rem;">
+          <Message severity="error" :closable="true" @close="previewError = ''">{{ previewError }}</Message>
         </div>
 
         <!-- Per-batch preview summary -->
         <div v-if="previewData" style="margin-bottom:1rem;">
           <Message v-if="previewData.unresolved_batches?.length" severity="error" :closable="false" size="small">
-            Batch numbers not matched: {{ previewData.unresolved_batches.join(', ') }}
+            {{ $t('trimble.batchesNotMatched', { batches: previewData.unresolved_batches.join(', ') }) }}
           </Message>
           <Message v-if="previewData.unresolved_designs?.length" severity="error" :closable="false" size="small">
-            Designs not found: {{ previewData.unresolved_designs.slice(0, 5).join(', ') }}{{ previewData.unresolved_designs.length > 5 ? '…' : '' }}
+            {{ $t('trimble.designsNotFound', { designs: previewData.unresolved_designs.slice(0, 5).join(', ') + (previewData.unresolved_designs.length > 5 ? '…' : '') }) }}
           </Message>
           <div v-for="bp in previewData.batch_previews" :key="bp.batch_uuid"
             style="display:flex;gap:0.5rem;align-items:center;padding:0.3rem 0;border-bottom:1px solid #f3f4f6;">
             <Tag :severity="bp.blocked ? 'danger' : 'secondary'" :value="bp.batch_name" />
-            <span class="chip-new">{{ bp.summary.new }}↑ new</span>
-            <span class="chip-changed">{{ bp.summary.changed }}~ changed</span>
-            <span class="chip-identical" style="color:#9ca3af">{{ bp.summary.identical }}= identical</span>
-            <Tag v-if="bp.blocked" severity="danger" value="BLOCKED" />
+            <span class="chip-new">{{ $t('trimble.newChip', { count: bp.summary.new }) }}</span>
+            <span class="chip-changed">{{ $t('trimble.changedChip', { count: bp.summary.changed }) }}</span>
+            <span class="chip-identical" style="color:#9ca3af">{{ $t('trimble.identicalChip', { count: bp.summary.identical }) }}</span>
+            <Tag v-if="bp.blocked" severity="danger" :value="$t('trimble.blockedChip')" />
           </div>
-          <div v-if="canExecute" style="margin-top:0.75rem;">
+          <div v-if="canExecute && !selectedCount" style="margin-top:0.75rem;">
             <Button :label="$t('trimble.pushToProduuzit')" icon="pi pi-cloud-upload" severity="warning" @click="doImport" :loading="importing" />
           </div>
-          <Message v-else-if="previewData" severity="secondary" :closable="false" size="small" style="margin-top:0.5rem;">
-            Nothing to push — all batches are blocked or identical.
+          <Message v-else-if="!canExecute && !selectedCount && previewData" severity="secondary" :closable="false" size="small" style="margin-top:0.5rem;">
+            {{ $t('trimble.nothingToPushDetail') }}
           </Message>
         </div>
 
         <div v-if="importResults.length" style="margin-top:1rem;">
           <div class="summary-chips">
-            <span class="chip-new">{{ importSummary.created }} created</span>
-            <span class="chip-changed">{{ importSummary.updated }} updated</span>
-            <span class="chip-identical">{{ importSummary.skipped }} skipped</span>
-            <span v-if="importSummary.blocked" class="chip-blocked">{{ importSummary.blocked }} blocked</span>
-            <span v-if="importSummary.error" class="chip-blocked">{{ importSummary.error }} errors</span>
+            <span class="chip-new">{{ importSummary.created }} {{ $t('trimble.created') }}</span>
+            <span class="chip-changed">{{ importSummary.updated }} {{ $t('trimble.updated') }}</span>
+            <span class="chip-identical">{{ importSummary.skipped }} {{ $t('trimble.skipped') }}</span>
+            <span v-if="importSummary.blocked" class="chip-blocked">{{ importSummary.blocked }} {{ $t('trimble.blocked') }}</span>
+            <span v-if="importSummary.error" class="chip-blocked">{{ importSummary.error }} {{ $t('trimble.errors') }}</span>
           </div>
           <DataTable v-if="importResults.some(r => r.status === 'error' || r.status === 'blocked')"
             :value="importResults.filter(r => r.status === 'error' || r.status === 'blocked')" size="small" style="margin-top:0.5rem;">
@@ -218,6 +267,8 @@ let oauthPollTimer = null
 const oauthPolling = ref(false)
 
 const trimbleProjects = ref([])
+const loadingProjects = ref(false)
+const projectsError = ref('')
 const modelFiles = ref([])
 const selectedProject = ref(null)
 const selectedFile = ref(null)
@@ -249,7 +300,7 @@ const initialIfcMapping = computed(() => {
     const leaf = prop.split('.').pop()?.toLowerCase() || ''
     if ((leaf.includes('element') || leaf.includes('nummer') || leaf.includes('name')) && !Object.values(m).includes('design_name'))
       m[prop] = 'design_name'
-    else if ((leaf.includes('batch') || leaf.includes('levering') || leaf.includes('productie')) && !Object.values(m).includes('batch_number'))
+    else if ((leaf.includes('batch') || leaf.includes('levering') || leaf.includes('productie')) && !leaf.includes('bestelling') && !Object.values(m).includes('batch_number'))
       m[prop] = 'batch_number'
   }
   return m
@@ -258,8 +309,8 @@ const initialIfcMapping = computed(() => {
 const mappingWarnings = computed(() => {
   const targets = Object.values(columnMapping.value)
   const w = []
-  if (!targets.includes('design_name')) w.push('No Design Name mapped (required)')
-  if (!targets.includes('batch_number')) w.push('No Batch Number mapped (required)')
+  if (!targets.includes('design_name')) w.push(t('trimble.noDesignName'))
+  if (!targets.includes('batch_number')) w.push(t('trimble.noBatchNumber'))
   return w
 })
 
@@ -267,17 +318,67 @@ const hasRequiredMapping = computed(() =>
   Object.values(columnMapping.value).includes('design_name') &&
   Object.values(columnMapping.value).includes('batch_number'))
 
+const dedupLabel = computed(() => {
+  if (uniqueKeyProp.value) return uniqueKeyProp.value.split('.').pop()
+  return 'entity id (no key selected)'
+})
+
 const previewEntities = ref([])
 const totalEntities = ref(0)
 const fetchingEntities = ref(false)
-const uniqueOnly = ref(true)
+const uniqueOnly = ref(false)
+const uniqueKeyProp = ref('')
+const rawSampleEntity = ref(null)
+const fetchingRawSample = ref(false)
 
 const importing = ref(false)
 const previewing = ref(false)
 const previewData = ref(null)
+const previewError = ref('')
 const importResults = ref([])
 const importSummary = ref({ created: 0, updated: 0, skipped: 0, blocked: 0, error: 0 })
 const uniqueOnlyImport = ref(true)
+
+// Entity selection state
+const selectedEntityIndices = ref(new Set())
+
+const entityBatchGroups = computed(() => {
+  const groups = new Map()
+  const batchProp = resolveProp(columnMapping.value, 'batch_number')
+  previewEntities.value.forEach((e, i) => {
+    const batch = batchProp ? extractProp(e, batchProp) || '__no_batch__' : '__no_batch__'
+    if (!groups.has(batch)) groups.set(batch, [])
+    groups.get(batch).push(i)
+  })
+  return groups
+})
+
+const selectedCount = computed(() => selectedEntityIndices.value.size)
+
+const selectedEntities = computed(() =>
+  previewEntities.value.filter((_, i) => selectedEntityIndices.value.has(i))
+)
+
+function toggleEntity(index) {
+  const s = new Set(selectedEntityIndices.value)
+  s.has(index) ? s.delete(index) : s.add(index)
+  selectedEntityIndices.value = s
+}
+
+function selectAllEntities() {
+  selectedEntityIndices.value = new Set(previewEntities.value.map((_, i) => i))
+}
+
+function deselectAllEntities() {
+  selectedEntityIndices.value = new Set()
+}
+
+function selectByBatch(batchKey) {
+  const indices = entityBatchGroups.value.get(batchKey) || []
+  const s = new Set(selectedEntityIndices.value)
+  indices.forEach(i => s.add(i))
+  selectedEntityIndices.value = s
+}
 
 const canExecute = computed(() =>
   previewData.value?.batch_previews?.some(bp => !bp.blocked && (bp.summary.new > 0 || bp.summary.changed > 0))
@@ -340,7 +441,6 @@ async function startLogin() {
   try {
     const r = await api.get('/api/trimble/auth/start')
     window.open(r.data.url, '_blank', 'noopener,noreferrer')
-    // Start polling for OAuth callback completion
     startOauthPolling()
   } finally { startingLogin.value = false }
 }
@@ -349,7 +449,7 @@ function startOauthPolling() {
   stopOauthPolling()
   oauthPolling.value = true
   let attempts = 0
-  const maxAttempts = 120 // 4 minutes at 2s intervals
+  const maxAttempts = 120
 
   oauthPollTimer = setInterval(async () => {
     attempts++
@@ -363,7 +463,6 @@ function startOauthPolling() {
         } else if (r.data.error) {
           console.warn('OAuth callback error:', r.data.error)
         }
-        // Stop the server
         await api.post('/api/trimble/auth/stop-server').catch(() => {})
         return
       }
@@ -386,16 +485,15 @@ function stopOauthPolling() {
 }
 
 async function saveManualToken() {
-  const t = manualToken.value.trim(); if (!t) return
+  const tk = manualToken.value.trim(); if (!tk) return
   savingToken.value = true
-  try { await api.post('/api/trimble/auth/token', { token: t }); manualToken.value = ''; await loadAuthStatus(); await loadTrimbleProjects() }
+  try { await api.post('/api/trimble/auth/token', { token: tk }); manualToken.value = ''; await loadAuthStatus(); await loadTrimbleProjects() }
   finally { savingToken.value = false }
 }
 
 async function exchangeAuthCode() {
   let raw = authCode.value.trim()
   if (!raw) return
-  // Accept full URL like http://localhost/?code=xxx&state=yyy — extract just the code
   const urlMatch = raw.match(/[?&]code=([^&#]+)/)
   const code = urlMatch ? decodeURIComponent(urlMatch[1]) : raw
   exchangingCode.value = true
@@ -404,19 +502,34 @@ async function exchangeAuthCode() {
 }
 
 async function loadTrimbleProjects() {
-  try { const r = await api.get('/api/trimble/projects'); trimbleProjects.value = Array.isArray(r.data) ? r.data : (r.data?.results || []) }
-  catch { /* noop */ }
+  loadingProjects.value = true
+  projectsError.value = ''
+  try {
+    const r = await api.get('/api/trimble/projects')
+    trimbleProjects.value = Array.isArray(r.data) ? r.data : (r.data?.results || [])
+  } catch (e) {
+    const msg = e?.response?.data?.detail || e?.response?.data?.error || e?.message || String(e)
+    const isTokenError = /invalid.*(token|refresh)|token.*invalid|401/i.test(msg)
+    if (isTokenError) {
+      await api.post('/api/trimble/auth/disconnect').catch(() => {})
+      authStatus.value = false
+      projectsError.value = ''
+    } else {
+      projectsError.value = msg
+      console.error('[trimble] loadTrimbleProjects failed:', msg)
+    }
+  } finally { loadingProjects.value = false }
 }
 
 async function onProjectChange() {
-  modelFiles.value = []; psetDefs.value = []; previewEntities.value = []; importResults.value = []
+  modelFiles.value = []; psetDefs.value = []; previewEntities.value = []; importResults.value = []; selectedEntityIndices.value = new Set()
   selectedFile.value = null; selectedFileVersionId.value = null
 }
 
 async function loadProjectFiles() {
   if (!selectedProject.value) return
   loadingFiles.value = true
-  modelFiles.value = []; psetDefs.value = []; previewEntities.value = []  ; importResults.value = []
+  modelFiles.value = []; psetDefs.value = []; previewEntities.value = []; importResults.value = []; selectedEntityIndices.value = new Set()
   selectedFile.value = null; selectedFileVersionId.value = null
   try {
     const r = await api.get(`/api/trimble/projects/${selectedProject.value}/tree`)
@@ -429,7 +542,7 @@ async function loadProjectFiles() {
 }
 
 function onFileSelected() {
-  psetDefs.value = []; previewEntities.value = []; importResults.value = []
+  psetDefs.value = []; previewEntities.value = []; importResults.value = []; selectedEntityIndices.value = new Set()
   const f = modelFiles.value.find(x => x.id === selectedFile.value)
   selectedFileVersionId.value = f?.versionId || null
   if (selectedFile.value) loadPsetDefs()
@@ -514,43 +627,80 @@ function extractProp(entity, propPathStr) {
   for (const p of parts) {
     if (val === null || val === undefined) return ''
     if (Array.isArray(val)) {
-      const match = val.find(item => (typeof item === 'object' && item !== null) && (item.pset_name === p || item.name === p))
-      val = match || ''
-    } else if (typeof val === 'object') { val = val[p] }
-    else { return '' }
+      const match = val.find(item => typeof item === 'object' && item !== null && (item.pset_name === p || item.name === p))
+      if (match !== undefined) { val = match } else { return '' }
+    } else if (typeof val === 'object') {
+      if (p in val) {
+        val = val[p]
+      } else {
+        const sub = val.props ?? val.properties ?? val.values
+        if (sub && typeof sub === 'object') {
+          if (Array.isArray(sub)) {
+            const found = sub.find(pr => typeof pr === 'string' ? pr === p : (pr?.name === p || pr?.propertyName === p))
+            val = found === undefined ? '' : (typeof found === 'string' ? found : (found?.value ?? found?.nominalValue ?? ''))
+          } else { val = sub[p] ?? '' }
+        } else { return '' }
+      }
+    } else { return '' }
   }
   return val !== null && val !== undefined ? String(val) : ''
 }
 
+async function fetchRawSample() {
+  if (!selectedFile.value) return
+  fetchingRawSample.value = true
+  rawSampleEntity.value = null
+  try {
+    const versionId = selectedFileVersionId.value || selectedFile.value
+    const r = await api.get(`/api/trimble/models/${selectedFile.value}/entities/sample`, { params: { versionId } })
+    rawSampleEntity.value = r.data
+  } catch (e) {
+    rawSampleEntity.value = { error: e?.response?.data || e?.message || String(e) }
+  } finally { fetchingRawSample.value = false }
+}
+
 async function fetchEntities() {
   if (!selectedFile.value || !allSelectedProps.value.length) return
-  fetchingEntities.value = true; previewEntities.value = []; totalEntities.value = 0
+  fetchingEntities.value = true; previewEntities.value = []; totalEntities.value = 0; selectedEntityIndices.value = new Set()
   try {
-    const body = { versionId: selectedFile.value, fields: allSelectedProps.value, unique_only: uniqueOnly.value, column_mapping: columnMapping.value }
+    const body = { versionId: selectedFileVersionId.value || selectedFile.value, fields: allSelectedProps.value, unique_only: uniqueOnly.value, unique_key_prop: uniqueKeyProp.value || undefined, column_mapping: columnMapping.value }
     const r = await api.post(`/api/trimble/models/${selectedFile.value}/entities`, body)
     previewEntities.value = r.data.entities || []
     totalEntities.value = r.data.total || previewEntities.value.length
+    if (previewEntities.value.length) console.log('[trimble] sample entity structure:', JSON.stringify(previewEntities.value[0], null, 2))
   } finally { fetchingEntities.value = false }
 }
 
 async function doPreview() {
-  previewing.value = true; previewData.value = null
+  previewing.value = true; previewData.value = null; previewError.value = ''
   try {
-    const body = { project_uuid: targetProjectUuid.value, column_mapping: columnMapping.value, entities: previewEntities.value, unique_only: uniqueOnlyImport.value }
+    const ents = selectedEntities.value.length ? selectedEntities.value : previewEntities.value
+    const body = { project_uuid: targetProjectUuid.value, column_mapping: columnMapping.value, entities: ents, unique_only: uniqueOnlyImport.value }
     const r = await api.post('/api/trimble/preview-import', body)
     previewData.value = r.data
+  } catch (e) {
+    previewError.value = e?.response?.data?.detail || e?.response?.data?.error || e?.message || String(e)
+    console.error('[trimble] preview failed:', previewError.value)
   } finally { previewing.value = false }
 }
 
 async function doImport() {
   importing.value = true; importResults.value = []
   try {
-    const body = { project_uuid: targetProjectUuid.value, column_mapping: columnMapping.value, entities: previewEntities.value, unique_only: uniqueOnlyImport.value }
+    const ents = selectedEntities.value.length ? selectedEntities.value : previewEntities.value
+    const body = { project_uuid: targetProjectUuid.value, column_mapping: columnMapping.value, entities: ents, unique_only: uniqueOnlyImport.value }
     const r = await api.post('/api/trimble/import', body)
     importResults.value = r.data.results || []
     importSummary.value = r.data.summary || { created: 0, updated: 0, skipped: 0, blocked: 0, error: 0 }
     previewData.value = null
   } finally { importing.value = false }
+}
+
+function resolveProp(columnMappingObj, target) {
+  for (const [ifcProp, prodTarget] of Object.entries(columnMappingObj)) {
+    if (prodTarget === target) return ifcProp
+  }
+  return ''
 }
 </script>
 
