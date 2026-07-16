@@ -138,7 +138,7 @@
           <Button :label="$t('trimble.deselectAll')" icon="pi pi-stop" size="small" text @click="deselectAllEntities" />
           <Tag v-if="selectedCount" severity="info" :value="$t('trimble.selectedCount', { count: selectedCount })" />
           <template v-for="[batch, indices] in entityBatchGroups" :key="batch">
-            <Button :label="'[' + batch + ']'" :icon="batchSelectionState.get(batch) === 'all' ? 'pi pi-check' : undefined" size="small" text :severity="batchSelectionState.get(batch) === 'all' ? 'success' : 'secondary'" @click="toggleBatch(batch)" />
+            <Button :label="'[' + batch + ']'" icon="pi pi-check" size="small" text :severity="batchSelectionState.get(batch) === 'all' ? 'success' : 'secondary'" :class="{ 'batch-btn-hidden-check': batchSelectionState.get(batch) !== 'all' }" @click="toggleBatch(batch)" />
           </template>
         </div>
 
@@ -400,7 +400,6 @@ const previewRowsForMapping = computed(() => {
 })
 
 onMounted(async () => {
-  // Detect OAuth callback via URL param (same-tab flow)
   if (route.query.auth === 'success') {
     await loadAuthStatus()
     if (authStatus.value) await loadTrimbleProjects()
@@ -433,7 +432,6 @@ async function startLogin() {
   startingLogin.value = true
   try {
     const r = await api.get('/api/trimble/auth/start')
-    // Same-tab redirect: Trimble auth completes, then callback redirects back to /trimble?auth=success
     window.location.href = r.data.url
   } finally { startingLogin.value = false }
 }
@@ -642,7 +640,7 @@ function resolveProp(columnMappingObj, target) {
 </script>
 
 <style scoped>
-.trimble-import { max-width: 960px; }
+.trimble-import { max-width: 1440px; margin: 0 auto; }
 .page-header { margin-bottom: 1.25rem; }
 .page-subtitle { color: #6b7280; font-size: 0.9rem; margin-top: 0.25rem; }
 .subtitle-dim { font-weight: 400; font-size: 0.85rem; color: #6b7280; }
@@ -665,4 +663,6 @@ function resolveProp(columnMappingObj, target) {
 .chip-changed { background: #fef3c7; color: #92400e; padding: 0.2rem 0.6rem; border-radius: 12px; font-size: 0.8rem; font-weight: 600; }
 .chip-identical { background: #e0e7ff; color: #3730a3; padding: 0.2rem 0.6rem; border-radius: 12px; font-size: 0.8rem; font-weight: 600; }
 .chip-blocked { background: #fce4ec; color: #b91c1c; padding: 0.2rem 0.6rem; border-radius: 12px; font-size: 0.8rem; font-weight: 600; }
+
+.batch-btn-hidden-check .pi-check { visibility: hidden; }
 </style>
