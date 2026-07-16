@@ -87,6 +87,7 @@
           <ConfirmedButton
             :label="$t('unified.createPhaseBatchesBtn')"
             icon="pi pi-plus-circle"
+            :confirm-label="$t('unified.confirmCreateProjects', { count: foundProjectCount })"
             btn-class="btn-create"
             :loading="addingPhasesBatches"
             @action="addPhasesAndBatches"
