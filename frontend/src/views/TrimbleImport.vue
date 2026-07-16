@@ -9,24 +9,9 @@
       <template #title>{{ $t('trimble.connect') }}</template>
       <template #content>
         <div style="display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap;">
-          <Tag :severity="authStatus ? 'success' : 'warn'" :value="authStatus ? $t('trimble.connected') : $t('trimble.notConnected')" />
+          <Tag severity="warn" :value="$t('trimble.notConnected')" />
           <Button :label="$t('trimble.openLogin')" icon="pi pi-external-link" @click="startLogin" :loading="startingLogin" />
-          <Tag v-if="oauthPolling" severity="info" :value="$t('trimble.waitingLogin')" />
           <Button :label="$t('trimble.refreshStatus')" icon="pi pi-refresh" text @click="loadAuthStatus" :loading="loadingStatus" />
-        </div>
-        <Message v-if="oauthPolling" severity="info" :closable="false" size="small" style="margin-top:0.5rem;">
-          {{ $t('trimble.callbackInfo') }}
-        </Message>
-        <Message v-if="!authStatus && !oauthPolling" severity="secondary" :closable="false" size="small" style="margin-top:0.5rem;">
-          {{ $t('trimble.callbackFallback') }}
-        </Message>
-        <div v-if="!authStatus && !oauthPolling" style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;margin-top:0.75rem;">
-          <InputText v-model="authCode" :placeholder="$t('trimble.pasteUrl')" style="min-width:320px;flex:1;" />
-          <Button :label="$t('trimble.exchangeCode')" icon="pi pi-key" severity="secondary" @click="exchangeAuthCode" :loading="exchangingCode" />
-        </div>
-        <div style="display:flex;gap:0.5rem;align-items:center;flex-wrap:wrap;margin-top:0.5rem;">
-          <InputText v-model="manualToken" :placeholder="$t('trimble.pasteToken')" style="min-width:320px;flex:1;" />
-          <Button :label="$t('trimble.setToken')" icon="pi pi-lock" text @click="saveManualToken" :loading="savingToken" />
         </div>
         <Message severity="warn" :closable="false" style="margin-top:1rem;">
           {{ $t('trimble.noAutoPush') }}
@@ -196,7 +181,7 @@
             {{ $t('trimble.batchesNotMatched', { batches: previewData.unresolved_batches.join(', ') }) }}
           </Message>
           <Message v-if="previewData.unresolved_designs?.length" severity="error" :closable="false" size="small">
-            {{ $t('trimble.designsNotFound', { designs: previewData.unresolved_designs.slice(0, 5).join(', ') + (previewData.unresolved_designs.length > 5 ? '…' : '') }) }}
+            {{ $t('trimble.designsNotFound', { designs: previewData.unresolved_designs.slice(0, 5).join(', ') + (previewData.unresolved_designs.length > 5 ? '\u2026' : '') }) }}
           </Message>
           <div v-for="bp in previewData.batch_previews" :key="bp.batch_uuid"
             style="display:flex;gap:0.5rem;align-items:center;padding:0.3rem 0;border-bottom:1px solid #f3f4f6;">
@@ -248,21 +233,17 @@
 </template>
 
 <script setup>
-import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute } from 'vue-router'
 const { t } = useI18n()
+const route = useRoute()
 import { api } from '../api.js'
 import ColumnMapper from '../components/ColumnMapper.vue'
 
 const authStatus = ref(false)
 const loadingStatus = ref(false)
 const startingLogin = ref(false)
-const savingToken = ref(false)
-const manualToken = ref('')
-const authCode = ref('')
-const exchangingCode = ref(false)
-let oauthPollTimer = null
-const oauthPolling = ref(false)
 
 const trimbleProjects = ref([])
 const loadingProjects = ref(false)
@@ -419,12 +400,13 @@ const previewRowsForMapping = computed(() => {
 })
 
 onMounted(async () => {
+  // Detect OAuth callback via URL param (same-tab flow)
+  if (route.query.auth === 'success') {
+    await loadAuthStatus()
+    if (authStatus.value) await loadTrimbleProjects()
+  }
   await Promise.all([loadAuthStatus(), loadProduuzitProjects()])
   if (authStatus.value) await loadTrimbleProjects()
-})
-
-onUnmounted(() => {
-  stopOauthPolling()
 })
 
 async function loadAuthStatus() {
@@ -451,65 +433,9 @@ async function startLogin() {
   startingLogin.value = true
   try {
     const r = await api.get('/api/trimble/auth/start')
-    window.open(r.data.url, '_blank', 'noopener,noreferrer')
-    startOauthPolling()
+    // Same-tab redirect: Trimble auth completes, then callback redirects back to /trimble?auth=success
+    window.location.href = r.data.url
   } finally { startingLogin.value = false }
-}
-
-function startOauthPolling() {
-  stopOauthPolling()
-  oauthPolling.value = true
-  let attempts = 0
-  const maxAttempts = 120
-
-  oauthPollTimer = setInterval(async () => {
-    attempts++
-    try {
-      const r = await api.get('/api/trimble/auth/callback-status')
-      if (r.data.completed) {
-        stopOauthPolling()
-        if (r.data.authenticated) {
-          authStatus.value = true
-          await loadTrimbleProjects()
-        } else if (r.data.error) {
-          console.warn('OAuth callback error:', r.data.error)
-        }
-        await api.post('/api/trimble/auth/stop-server').catch(() => {})
-        return
-      }
-      if (attempts >= maxAttempts) {
-        stopOauthPolling()
-        await api.post('/api/trimble/auth/stop-server').catch(() => {})
-      }
-    } catch {
-      if (attempts >= maxAttempts) stopOauthPolling()
-    }
-  }, 2000)
-}
-
-function stopOauthPolling() {
-  if (oauthPollTimer) {
-    clearInterval(oauthPollTimer)
-    oauthPollTimer = null
-  }
-  oauthPolling.value = false
-}
-
-async function saveManualToken() {
-  const tk = manualToken.value.trim(); if (!tk) return
-  savingToken.value = true
-  try { await api.post('/api/trimble/auth/token', { token: tk }); manualToken.value = ''; await loadAuthStatus(); await loadTrimbleProjects() }
-  finally { savingToken.value = false }
-}
-
-async function exchangeAuthCode() {
-  let raw = authCode.value.trim()
-  if (!raw) return
-  const urlMatch = raw.match(/[?&]code=([^&#]+)/)
-  const code = urlMatch ? decodeURIComponent(urlMatch[1]) : raw
-  exchangingCode.value = true
-  try { await api.post('/api/trimble/auth/exchange-code', { code }); authCode.value = ''; await loadAuthStatus(); await loadTrimbleProjects() }
-  finally { exchangingCode.value = false }
 }
 
 async function loadTrimbleProjects() {
