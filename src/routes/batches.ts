@@ -189,6 +189,7 @@ app.post("/add-for-projects", async (c) => {
     // Check if batch already exists for THIS phase (not just any phase)
     const batchName = String(b.batch_number);
     const existingResp = (await apiGet("/constructibles/batches/", { project: projectUuid, limit: 200 })) as { results: Record<string, unknown>[] };
+    console.log(`[add-for-projects] checking batch "${batchName}" phase="${b.phase}" against`, (existingResp.results ?? []).map(x => ({ name: x.name, phase: x.phase })));
     const existsForPhase = (existingResp.results ?? []).some(
       (x) => String(x.name ?? "").trim() === batchName && String(x.phase ?? "").trim().toLowerCase() === b.phase.trim().toLowerCase()
     );

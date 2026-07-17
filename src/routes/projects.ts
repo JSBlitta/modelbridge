@@ -117,25 +117,26 @@ app.post("/find-or-create", async (c) => {
       : null;
 
     let batchesFound: string[] = [];
-    let batchesMissing: string[] = (p.batch_numbers ?? []).map(String);
+    let batchesMissing: string[] = [];
 
     // Batches are always children of a phase — if the phase doesn't exist,
     // the batches can't exist yet either, regardless of name matches.
     const uuid = existing.uuid as string | undefined;
-    if (uuid && batchesMissing.length > 0 && phaseExists !== false) {
+    const specs = (p as any).batch_specs as { number: string | number; phase: string }[] | undefined;
+    if (uuid && specs?.length && phaseExists !== false) {
       try {
         const bResp = (await apiGet("/constructibles/batches/", { project: uuid, limit: 500 })) as {
           results?: Record<string, unknown>[];
         };
-        // Only consider batches that belong to THIS phase
-        const phaseNorm = p.phase.trim().toLowerCase();
-        const phaseBatchNames = new Set(
-          (bResp.results ?? [])
-            .filter((b) => String(b.phase ?? "").trim().toLowerCase() === phaseNorm)
-            .map((b) => String(b.name ?? "").trim())
-        );
-        batchesFound = batchesMissing.filter((n) => phaseBatchNames.has(n));
-        batchesMissing = batchesMissing.filter((n) => !phaseBatchNames.has(n));
+        const allBatches = (bResp.results ?? []) as Record<string, unknown>[];
+        for (const spec of specs) {
+          const phaseNorm = (spec.phase || p.phase).trim().toLowerCase();
+          const exists = allBatches.some(
+            (b) => String(b.name ?? "").trim() === String(spec.number) && String(b.phase ?? "").trim().toLowerCase() === phaseNorm
+          );
+          if (exists) batchesFound.push(String(spec.number));
+          else batchesMissing.push(String(spec.number));
+        }
       } catch {
         // Batch check failed — treat all as missing (will be created or skipped if they already exist)
       }

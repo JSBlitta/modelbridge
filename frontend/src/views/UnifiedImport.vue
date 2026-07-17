@@ -25,7 +25,7 @@
         <div v-if="phaseSuggestions.length" style="margin-top:1rem;">
           <PhaseTable v-model:rows="phaseSuggestions" />
           <div class="mt-sm flex-row gap-md">
-            <Button :label="$t('unified.checkBtn')" icon="pi pi-search" @click="checkProjects" :loading="checking" class="btn-preview" />
+            <Button :label="$t('unified.checkBtn')" icon="pi pi-search" @click="doCheck" :loading="checking" class="btn-preview" />
           </div>
           <div v-if="checkDone" class="mt-sm">
             <div v-for="row in phaseSuggestions" :key="row.project_key"
@@ -252,6 +252,7 @@ import { useToast } from 'primevue/usetoast'
 const toast = useToast()
 import { api } from '../api.js'
 import { useProduuzitProjects } from '../composables/useProduuzitProjects.js'
+import { useProjectChecker } from '../composables/useProjectChecker.js'
 import PhaseTable from '../components/PhaseTable.vue'
 import ConfirmationTable from '../components/ConfirmationTable.vue'
 import ConfirmedButton from '../components/ConfirmedButton.vue'
@@ -266,8 +267,7 @@ const context = ref(null)
 const phaseSuggestions = ref([])
 const superParseError = ref('')
 const superNoProjects = ref(false)
-const checking = ref(false)
-const checkDone = ref(false)
+const { checking, checkDone, checkProjects } = useProjectChecker()
 const confirmCreateProjects = ref(false)
 const creatingProjects = ref(false)
 const createProjectResults = ref([])
@@ -369,42 +369,7 @@ async function onSuperCsvSelect(e) {
   }
 }
 
-async function checkProjects() {
-  checking.value = true
-  try {
-    const payload = phaseSuggestions.value.map(p => ({
-      project_key: p.project_key,
-      superproject: p.superproject,
-      letter: p.letter,
-      description: p.description,
-      suggested_suffix: p.suggested_suffix,
-      phase: p.suggested_phase || '',
-      batch_numbers: (p.batches || []).map(b => b.number),
-    }))
-    const res = await api.post('/api/projects/find-or-create', payload)
-    const byKey = {}
-    for (const r of res.data) {
-      byKey[r.project_key] = r
-    }
-    phaseSuggestions.value = phaseSuggestions.value.map(p => {
-      const r = byKey[p.project_key]
-      if (!r) return p
-      return {
-        ...p,
-        status: r.status,
-        superproject_found: r.superproject_found,
-        phase_exists: r.phase_exists,
-        batches_found: r.batches_found || [],
-        batches_missing: r.batches_missing || [],
-      }
-    })
-    checkDone.value = true
-  } catch (err) {
-    superParseError.value = err.response?.data?.detail || err.message
-  } finally {
-    checking.value = false
-  }
-}
+const doCheck = () => { superParseError.value = ''; checkProjects(phaseSuggestions) }
 
 async function createProjects() {
   creatingProjects.value = true

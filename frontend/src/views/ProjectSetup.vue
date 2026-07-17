@@ -32,7 +32,7 @@
       <template #content>
         <PhaseTable v-model:rows="phaseSuggestions" />
         <div style="margin-top:1rem; display:flex; gap:0.75rem; align-items:center;">
-          <Button :label="$t('projectSetup.checkBtn')" icon="pi pi-search" @click="checkProjects" :loading="checking" class="btn-preview" />
+          <Button :label="$t('projectSetup.checkBtn')" icon="pi pi-search" @click="doCheck" :loading="checking" class="btn-preview" />
           <span v-if="checkDone" class="info-text">
             {{ $t('projectSetup.newFound', { newCount, foundCount }) }}
           </span>
@@ -89,12 +89,12 @@ const { t } = useI18n()
 import { api } from '../api.js'
 import PhaseTable from '../components/PhaseTable.vue'
 import ConfirmationTable from '../components/ConfirmationTable.vue'
+import { useProjectChecker } from '../composables/useProjectChecker.js'
 
 const phaseSuggestions = ref([])
 const parseError = ref('')
 const noProjectsFound = ref(false)
-const checking = ref(false)
-const checkDone = ref(false)
+const { checking, checkDone, checkProjects } = useProjectChecker()
 const createResults = ref([])
 
 const newCount = computed(() => phaseSuggestions.value.filter(r => r.status === 'new').length)
@@ -119,42 +119,7 @@ async function onFileSelect(e) {
   }
 }
 
-async function checkProjects() {
-  checking.value = true
-  try {
-    const payload = phaseSuggestions.value.map(p => ({
-      project_key: p.project_key,
-      superproject: p.superproject,
-      letter: p.letter,
-      description: p.description,
-      suggested_suffix: p.suggested_suffix,
-      phase: p.suggested_phase || '',
-      batch_numbers: (p.batches || []).map(b => b.number),
-    }))
-    const res = await api.post('/api/projects/find-or-create', payload)
-    const byKey = {}
-    for (const r of res.data) {
-      byKey[r.project_key] = r
-    }
-    phaseSuggestions.value = phaseSuggestions.value.map(p => {
-      const r = byKey[p.project_key]
-      if (!r) return p
-      return {
-        ...p,
-        status: r.status,
-        superproject_found: r.superproject_found,
-        phase_exists: r.phase_exists,
-        batches_found: r.batches_found || [],
-        batches_missing: r.batches_missing || [],
-      }
-    })
-    checkDone.value = true
-  } catch (err) {
-    parseError.value = err.response?.data?.detail || err.message
-  } finally {
-    checking.value = false
-  }
-}
+const doCheck = () => { parseError.value = ''; checkProjects(phaseSuggestions) }
 
 async function createProjects() {
   const newOnes = phaseSuggestions.value.filter(r => r.status === 'new')
