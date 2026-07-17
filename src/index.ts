@@ -5,6 +5,7 @@ import { Hono } from "hono";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { env } from "./env.js";
 import { loadConfig } from "./config.js";
+import { initLogger, logger } from "./logger.js";
 import { initDb, pruneExpiredSessions } from "./db.js";
 
 import health from "./routes/health.js";
@@ -44,20 +45,21 @@ app.get("/assets/*", serveStatic({ root: "./frontend-dist" }));
 app.get("/*", serveStatic({ root: "./frontend-dist", path: "index.html" }));
 
 loadConfig();
+initLogger(env.LOG_LEVEL);
 initDb();
 pruneExpiredSessions();
 setInterval(pruneExpiredSessions, 60 * 60 * 1000);
 
-console.log(`API Coupler starting on port ${env.PORT}`);
-console.log(`  Produuzit: ${env.PRODUUZIT_BASE_URL}`);
+logger.info(`API Coupler starting on port ${env.PORT}`);
+logger.info(`  Produuzit: ${env.PRODUUZIT_BASE_URL}`);
 if (env.PRODUUZIT_REFRESH_TOKEN) {
-  console.log(`  Service token: configured via PRODUUZIT_REFRESH_TOKEN`);
+  logger.info(`  Service token: configured via PRODUUZIT_REFRESH_TOKEN`);
 } else if (env.PRODUUZIT_ADMIN_USERNAME) {
-  console.log(`  Service token: will bootstrap from admin credentials on first API call`);
+  logger.info(`  Service token: will bootstrap from admin credentials on first API call`);
 } else {
-  console.log(`  ⚠ No service token configured — set PRODUUZIT_REFRESH_TOKEN in .env`);
+  logger.warn(`  No service token configured — set PRODUUZIT_REFRESH_TOKEN in .env`);
 }
 
 serve({ fetch: app.fetch, port: env.PORT }, (info) => {
-  console.log(`API Coupler listening on http://localhost:${info.port}`);
+  logger.info(`API Coupler listening on http://localhost:${info.port}`);
 });

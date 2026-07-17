@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { apiGet, apiPost, apiPatch, fetchAllPages } from "../produuzit-client.js";
 import { getConfig } from "../config.js";
+import { logger } from "../logger.js";
 
 const app = new Hono();
 

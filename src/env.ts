@@ -44,4 +44,7 @@ export const env = {
   TRIMBLE_TOKEN_URI: optional("TRIMBLE_TOKEN_URI", "https://id.trimble.com/oauth/token"),
   TRIMBLE_CALLBACK_URLS: optional("TRIMBLE_CALLBACK_URLS", "http://localhost/api/trimble/auth/callback")
     .split(",").map((u) => u.trim()).filter(Boolean),
+
+  // Logging: error | warn | info | debug (default: info)
+  LOG_LEVEL: optional("LOG_LEVEL", "info"),
 };

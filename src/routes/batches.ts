@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { apiGet, apiPatch, apiPost } from "../produuzit-client.js";
 import { compareBatches } from "../lib/idempotency.js";
 import * as db from "../db.js";
+import { logger } from "../logger.js";
 
 const app = new Hono();
 
@@ -63,7 +64,7 @@ app.post("/create", async (c) => {
         if (pnum) stdlibNameToUuid.set(pnum, uuid);
       }
     } catch (e) {
-      console.warn("[batches] stdlib name resolution failed:", e);
+      logger.warn("[batches/create] stdlib name resolution failed:", e);
     }
   }
 
@@ -74,7 +75,7 @@ app.post("/create", async (c) => {
       resolvedStdlibs = b.linked_stdlib_names
         .map((n) => {
           const uuid = stdlibNameToUuid.get(n.toLowerCase());
-          if (!uuid) console.warn(`[batches] stdlib not found: "${n}"`);
+          if (!uuid) logger.warn(`[batches/create] stdlib not found: "${n}"`);
           return uuid;
         })
         .filter((u): u is string => !!u);
@@ -95,7 +96,7 @@ app.post("/create", async (c) => {
             results.push({ name: b.name, status: "updated_stdlibs", previous: existingStdlibs, updated: newStdlibs });
             continue;
           } catch (e) {
-            console.warn(`[batches] stdlib patch failed for "${b.name}":`, e);
+            logger.warn(`[batches/create] stdlib patch failed for "${b.name}":`, e);
           }
         }
         results.push({ name: b.name, status: "already_exists", data: match });
@@ -161,7 +162,7 @@ app.post("/add-for-projects", async (c) => {
         if (pnum) stdlibNameToUuid.set(pnum, uuid);
       }
     } catch (e) {
-      console.warn("[batches] stdlib name resolution failed:", e);
+      logger.warn("[batches/add-for-projects] stdlib name resolution failed:", e);
     }
   }
 
@@ -183,13 +184,13 @@ app.post("/add-for-projects", async (c) => {
         await apiPatch(`/company/projects/${projectUuid}/`, { phases: updatedPhases });
       }
     } catch (e) {
-      console.warn(`[batches] phase check failed for ${b.project_key}:`, e);
+      logger.warn(`[batches/add-for-projects] phase check failed for ${b.project_key}:`, e);
     }
 
     // Check if batch already exists for THIS phase (not just any phase)
     const batchName = String(b.batch_number);
     const existingResp = (await apiGet("/constructibles/batches/", { project: projectUuid, limit: 200 })) as { results: Record<string, unknown>[] };
-    console.log(`[add-for-projects] checking batch "${batchName}" phase="${b.phase}" against`, (existingResp.results ?? []).map(x => ({ name: x.name, phase: x.phase })));
+    logger.debug(`[add-for-projects] checking batch "${batchName}" phase="${b.phase}" against`, (existingResp.results ?? []).map(x => ({ name: x.name, phase: x.phase })));
     const existsForPhase = (existingResp.results ?? []).some(
       (x) => String(x.name ?? "").trim() === batchName && String(x.phase ?? "").trim().toLowerCase() === b.phase.trim().toLowerCase()
     );

@@ -54,21 +54,34 @@ const mapping = ref({})
 const newMetaKeys = ref({})
 
 // Fixed target options
-const targetOptions = computed(() => [
-  { name: '', label: t('columnMapper.ignore') },
-  { name: 'design_name', label: t('columnMapper.designName') },
-  { name: 'batch_number', label: t('columnMapper.batchNumber') },
-  { name: 'client_order_id', label: t('columnMapper.clientOrderId') },
-  { name: 'scheduled_prod_date', label: t('columnMapper.scheduledProdDate') },
-  { name: 'priority', label: t('columnMapper.priority') },
-  { name: 'uuid', label: t('columnMapper.assemblyUuid') },
-  { name: 'client_meta', label: t('columnMapper.clientMetaJson') },
-  { name: 'client_meta.gevel', label: t('columnMapper.clientMeta_gevel') },
-  { name: 'client_meta.verdieping', label: t('columnMapper.clientMeta_verdieping') },
-  { name: 'client_meta.levering_montage', label: t('columnMapper.clientMeta_levering') },
-  { name: 'client_meta.uid_element', label: t('columnMapper.clientMeta_uid') },
-  { name: '__new_meta__', label: t('columnMapper.newMetaKey') },
-])
+const targetOptions = computed(() => {
+  const standard = [
+    { name: '', label: t('columnMapper.ignore') },
+    { name: 'design_name', label: t('columnMapper.designName') },
+    { name: 'batch_number', label: t('columnMapper.batchNumber') },
+    { name: 'client_order_id', label: t('columnMapper.clientOrderId') },
+    { name: 'scheduled_prod_date', label: t('columnMapper.scheduledProdDate') },
+    { name: 'priority', label: t('columnMapper.priority') },
+    { name: 'uuid', label: t('columnMapper.assemblyUuid') },
+    { name: 'superproject', label: 'Superproject' },
+    { name: 'phase', label: 'Phase' },
+    { name: 'project', label: 'Project' },
+    { name: 'stdlib', label: 'Standard Library' },
+    { name: 'client_meta', label: t('columnMapper.clientMetaJson') },
+    { name: 'client_meta.gevel', label: t('columnMapper.clientMeta_gevel') },
+    { name: 'client_meta.verdieping', label: t('columnMapper.clientMeta_verdieping') },
+    { name: 'client_meta.levering_montage', label: t('columnMapper.clientMeta_levering') },
+    { name: 'client_meta.uid_element', label: t('columnMapper.clientMeta_uid') },
+    { name: '__new_meta__', label: t('columnMapper.newMetaKey') },
+  ]
+  // Add any auto-mapped targets not in the standard list
+  for (const target of Object.values(props.autoMapping)) {
+    if (target && !standard.some(o => o.name === target)) {
+      standard.push({ name: target, label: target })
+    }
+  }
+  return standard
+})
 
 const WARN_RE = /["\\\n\r]/
 
