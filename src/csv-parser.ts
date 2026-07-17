@@ -41,8 +41,9 @@ export function parseProjectCsv(
   const superprojectCol = colMap.superproject;
   const batchCol = colMap.batch;
   const phaseCol = colMap.phase;
+  const stdlibCol = colMap.stdlib;
 
-  const projectGroups: Record<string, { rows: Record<string, string>[]; batches: (number | string)[]; phases: Set<string> }> = {};
+  const projectGroups: Record<string, { rows: Record<string, string>[]; batches: { number: number | string; stdlibs: string[]; phase: string }[]; phases: Set<string> }> = {};
 
   for (const row of rows) {
     const projVal = (projectCol ? row[projectCol] ?? "" : "").trim();
@@ -50,16 +51,24 @@ export function parseProjectCsv(
     if (!projectGroups[projVal]) projectGroups[projVal] = { rows: [], batches: [], phases: new Set() };
     projectGroups[projVal].rows.push(row);
 
+    const rowPhase = (phaseCol ? (row[phaseCol] ?? "").trim() : "");
+    if (rowPhase) projectGroups[projVal].phases.add(rowPhase);
+
     if (batchCol) {
       const bv = (row[batchCol] ?? "").trim();
       if (bv) {
         const num = parseInt(bv, 10);
-        projectGroups[projVal].batches.push(isNaN(num) ? bv : num);
+        const batchNum = (!isNaN(num) && String(num) === bv) ? num : bv;
+        let stdlibs: string[] = [];
+        if (stdlibCol) {
+          const sv = (row[stdlibCol] ?? "").trim();
+          if (sv) {
+            try { stdlibs = JSON.parse(sv); } catch { /* ignore */ }
+            if (!Array.isArray(stdlibs)) stdlibs = [];
+          }
+        }
+        projectGroups[projVal].batches.push({ number: batchNum, stdlibs, phase: rowPhase });
       }
-    }
-    if (phaseCol) {
-      const pv = (row[phaseCol] ?? "").trim();
-      if (pv) projectGroups[projVal].phases.add(pv);
     }
   }
 
@@ -87,10 +96,16 @@ export function parseProjectCsv(
 
     const phases = [...data.phases];
     const suggestedPhase = phases.length === 1 ? phases[0] : phases[0] ?? null;
-    const batchNums = [...new Set(data.batches)].sort((a, b) => {
-      if (typeof a === "number" && typeof b === "number") return a - b;
-      return String(a).localeCompare(String(b));
-    });
+    const seenNums = new Map<number | string, { stdlibs: string[]; phase: string }>();
+    for (const b of data.batches) {
+      if (!seenNums.has(b.number)) seenNums.set(b.number, { stdlibs: b.stdlibs, phase: b.phase });
+    }
+    const batchNums = [...seenNums.entries()]
+      .sort(([a], [b]) => {
+        if (typeof a === "number" && typeof b === "number") return a - b;
+        return String(a).localeCompare(String(b));
+      })
+      .map(([number, info]) => ({ number, stdlibs: info.stdlibs, phase: info.phase }));
 
     return {
       project_key: projKey,

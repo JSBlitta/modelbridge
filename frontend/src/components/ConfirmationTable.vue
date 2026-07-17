@@ -8,7 +8,7 @@
         </template>
       </Column>
     </DataTable>
-    <div class="actions" style="margin-top:1rem; display:flex; gap:0.75rem;">
+    <div v-if="showActions" class="actions" style="margin-top:1rem; display:flex; gap:0.75rem;">
       <Button :label="$t('confirmationTable.confirm')" icon="pi pi-check" @click="$emit('confirm')" />
       <Button :label="$t('confirmationTable.cancel')" icon="pi pi-times" severity="secondary" @click="$emit('cancel')" />
     </div>
@@ -22,6 +22,7 @@ const props = defineProps({
   rows: { type: Array, default: () => [] },
   columns: { type: Array, default: () => [] },
   statusField: { type: String, default: 'status' },
+  showActions: { type: Boolean, default: true },
 })
 defineEmits(['confirm', 'cancel'])
 

@@ -79,14 +79,27 @@
     <Card v-if="allSelectedProps.length" class="mb-card">
       <template #title>{{ $t('trimble.mapToProduuzit') }}</template>
       <template #content>
-        <div class="mb-sm" style="display:flex;gap:1rem;align-items:center;flex-wrap:wrap;margin-bottom:0.75rem;">
+        <div class="mb-sm" style="display:flex;gap:1rem;align-items:flex-start;flex-wrap:wrap;margin-bottom:0.75rem;">
           <div>
-            <label class="field-label">{{ $t('trimble.targetProject') }}</label>
-            <Select v-model="targetProjectUuid" :options="produuzitProjects" option-label="name" option-value="uuid"
-              :placeholder="$t('trimble.selectProduuzit')" style="min-width:280px;" @change="loadProduuzitContext" />
+            <label class="field-label">{{ $t('trimble.superproject') }}</label>
+            <Select v-model="selectedSuperproject" :options="superprojects"
+              :placeholder="$t('trimble.selectSuperproject')" style="min-width:220px;"
+              @change="onSuperprojectChange" :loading="projectsLoading" />
             <small v-if="produuzitProjectsError" style="color:#ef4444;display:block;margin-top:2px;">
               ⚠ {{ produuzitProjectsError }}
             </small>
+          </div>
+          <div v-if="selectedSuperproject" style="flex:1;min-width:280px;">
+            <label class="field-label">{{ $t('trimble.targetProjects') }}
+              <span style="font-weight:400;color:#6b7280;">({{ filteredProjects.length }} found)</span>
+            </label>
+            <div class="project-checklist" style="max-height:180px;overflow-y:auto;border:1px solid #e5e7eb;border-radius:6px;padding:0.4rem 0.6rem;">
+              <div v-for="proj in filteredProjects" :key="proj.uuid" style="display:flex;align-items:center;gap:0.4rem;padding:0.15rem 0;">
+                <Checkbox :model-value="selectedProjectUuids.has(proj.uuid)" :binary="true"
+                  @change="toggleProject(proj.uuid)" :input-id="'proj_' + proj.uuid" />
+                <label :for="'proj_' + proj.uuid" style="font-size:0.85rem;cursor:pointer;">{{ proj.name }}</label>
+              </div>
+            </div>
           </div>
           <Tag v-if="produuzitContext" severity="secondary"
             :value="$t('trimble.contextTag', { designs: produuzitContext.designs?.length || 0, batches: produuzitContext.batches?.length || 0 })" />
@@ -103,7 +116,7 @@
       </template>
     </Card>
 
-    <Card v-if="allSelectedProps.length && targetProjectUuid" class="mb-card">
+    <Card v-if="allSelectedProps.length && hasSelectedProjects" class="mb-card">
       <template #title>{{ $t('trimble.step5') }}</template>
       <template #content>
         <div class="flex-row gap-md mb-sm" style="margin-bottom:0.75rem">
@@ -116,9 +129,13 @@
             <label for="unique_toggle" style="font-size:0.85rem;cursor:pointer;">{{ $t('trimble.deduplicateOn') }}</label>
           </div>
           <Select v-if="uniqueOnly" v-model="uniqueKeyProp"
-            :options="[{label:'— entity id (fallback)',value:''}, ...allSelectedProps.map(p=>({label:p.split('.').pop(),value:p}))]"
+            :options="[{label:'\u2014 entity id (fallback)',value:''}, ...allSelectedProps.map(p=>({label:p.split('.').pop(),value:p}))]"
             option-label="label" option-value="value"
             :placeholder="$t('trimble.selectDedupKey')" style="min-width:200px;font-size:0.82rem;" />
+          <div style="display:flex;align-items:center;gap:0.4rem;">
+            <Checkbox v-model="includeAssemblies" :binary="true" input-id="include_assemblies" />
+            <label for="include_assemblies" style="font-size:0.85rem;cursor:pointer;">{{ $t('trimble.includeAssemblies') }}</label>
+          </div>
           <Tag v-if="totalEntities > 0" severity="info" :value="$t('trimble.entitiesTag', { preview: previewEntities.length, total: totalEntities })" />
         </div>
         <details v-if="rawSampleEntity" class="mb-sm" style="font-size:0.78rem">
@@ -240,13 +257,14 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 const { t } = useI18n()
 const route = useRoute()
 import { api } from '../api.js'
 import ColumnMapper from '../components/ColumnMapper.vue'
+import { useProduuzitProjects } from '../composables/useProduuzitProjects.js'
 
 const authStatus = ref(false)
 const loadingStatus = ref(false)
@@ -266,10 +284,17 @@ const psetFilter = ref('')
 const psetChecks = ref({})
 const propChecks = ref({})
 
-const produuzitProjects = ref([])
-const produuzitProjectsError = ref('')
-const targetProjectUuid = ref(null)
+const { projects: produuzitProjects, superprojects, loading: projectsLoading, error: produuzitProjectsError, projectsForSuperproject } = useProduuzitProjects()
+const selectedSuperproject = ref('')
+const selectedProjectUuids = ref(new Set())
 const produuzitContext = ref(null)
+
+const filteredProjects = computed(() =>
+  selectedSuperproject.value ? projectsForSuperproject(selectedSuperproject.value) : []
+)
+
+const hasSelectedProjects = computed(() => selectedProjectUuids.value.size > 0)
+const selectedTargetProjects = computed(() => filteredProjects.value.filter(p => selectedProjectUuids.value.has(p.uuid)))
 
 const columnMapping = ref({})
 
@@ -309,11 +334,18 @@ const dedupLabel = computed(() => {
   return 'entity id (no key selected)'
 })
 
-const previewEntities = ref([])
+const _rawEntities = ref([])
+const previewEntities = computed(() =>
+  includeAssemblies.value
+    ? _rawEntities.value
+    : _rawEntities.value.filter(e => String(e.type || '').toUpperCase() !== 'IFCELEMENTASSEMBLY')
+)
 const totalEntities = ref(0)
 const fetchingEntities = ref(false)
 const uniqueOnly = ref(false)
 const uniqueKeyProp = ref('')
+const includeAssemblies = ref(true)
+watch(includeAssemblies, () => { selectedEntityIndices.value = new Set() })
 const rawSampleEntity = ref(null)
 const fetchingRawSample = ref(false)
 
@@ -383,10 +415,6 @@ const canExecute = computed(() =>
   previewData.value?.batch_previews?.some(bp => !bp.blocked && (bp.summary.new > 0 || bp.summary.changed > 0))
 )
 
-const targetProjectName = computed(() => {
-  const p = produuzitProjects.value.find(x => x.uuid === targetProjectUuid.value)
-  return p?.name || targetProjectUuid.value || ''
-})
 
 const totalSelectedProps = computed(() => allSelectedProps.value.length)
 
@@ -411,7 +439,7 @@ onMounted(async () => {
     await loadAuthStatus()
     if (authStatus.value) await loadTrimbleProjects()
   }
-  await Promise.all([loadAuthStatus(), loadProduuzitProjects()])
+  await Promise.all([loadAuthStatus()])
   if (authStatus.value) await loadTrimbleProjects()
 })
 
@@ -422,18 +450,7 @@ async function loadAuthStatus() {
   finally { loadingStatus.value = false }
 }
 
-async function loadProduuzitProjects() {
-  produuzitProjectsError.value = ''
-  try {
-    const r = await api.get('/api/projects?limit=200')
-    produuzitProjects.value = r.data.results || []
-    if (!produuzitProjects.value.length) console.warn('[api-coupler] /api/projects/ returned 0 results. Full response:', r.data)
-  } catch (e) {
-    const msg = e?.response?.data?.detail || e?.response?.data?.error || e?.message || String(e)
-    produuzitProjectsError.value = msg
-    console.error('[api-coupler] loadProduuzitProjects failed:', msg, e?.response?.data)
-  }
-}
+
 
 async function startLogin() {
   startingLogin.value = true
@@ -464,14 +481,14 @@ async function loadTrimbleProjects() {
 }
 
 async function onProjectChange() {
-  modelFiles.value = []; psetDefs.value = []; previewEntities.value = []; importResults.value = []; selectedEntityIndices.value = new Set()
+  modelFiles.value = []; psetDefs.value = []; _rawEntities.value = []; importResults.value = []; selectedEntityIndices.value = new Set()
   selectedFile.value = null; selectedFileVersionId.value = null
 }
 
 async function loadProjectFiles() {
   if (!selectedProject.value) return
   loadingFiles.value = true
-  modelFiles.value = []; psetDefs.value = []; previewEntities.value = []; importResults.value = []; selectedEntityIndices.value = new Set()
+  modelFiles.value = []; psetDefs.value = []; _rawEntities.value = []; importResults.value = []; selectedEntityIndices.value = new Set()
   selectedFile.value = null; selectedFileVersionId.value = null
   try {
     const r = await api.get(`/api/trimble/projects/${selectedProject.value}/tree`)
@@ -484,7 +501,7 @@ async function loadProjectFiles() {
 }
 
 function onFileSelected() {
-  psetDefs.value = []; previewEntities.value = []; importResults.value = []; selectedEntityIndices.value = new Set()
+  psetDefs.value = []; _rawEntities.value = []; importResults.value = []; selectedEntityIndices.value = new Set()
   const f = modelFiles.value.find(x => x.id === selectedFile.value)
   selectedFileVersionId.value = f?.versionId || null
   if (selectedFile.value) loadPsetDefs()
@@ -552,10 +569,24 @@ function clearAllProps() { psetChecks.value = {}; propChecks.value = {} }
 function onPsetToggle(pset) { const c = psetChecks.value[pset.name]; for (const prop of propsOfPset(pset)) propChecks.value[propPath(pset.name, prop)] = c }
 function emitPropSelection() { /* reactive */ }
 
-async function loadProduuzitContext() {
-  if (!targetProjectUuid.value) return
-  try { const r = await api.get(`/api/assemblies/context?project_uuid=${targetProjectUuid.value}`); produuzitContext.value = r.data }
+async function loadProduuzitContext(projectUuid) {
+  if (!projectUuid) return
+  try { const r = await api.get(`/api/assemblies/context?project_uuid=${projectUuid}`); produuzitContext.value = r.data }
   catch { /* noop */ }
+}
+
+function toggleProject(uuid) {
+  const s = new Set(selectedProjectUuids.value)
+  s.has(uuid) ? s.delete(uuid) : s.add(uuid)
+  selectedProjectUuids.value = s
+  // Load context for the last toggled-on project (or clear if none)
+  const arr = [...s]
+  loadProduuzitContext(arr.length ? arr[arr.length - 1] : null)
+}
+
+function onSuperprojectChange() {
+  selectedProjectUuids.value = new Set()
+  produuzitContext.value = null
 }
 
 function onMappingUpdated(m) { columnMapping.value = m }
@@ -603,12 +634,13 @@ async function fetchRawSample() {
 
 async function fetchEntities() {
   if (!selectedFile.value || !allSelectedProps.value.length) return
-  fetchingEntities.value = true; previewEntities.value = []; totalEntities.value = 0; selectedEntityIndices.value = new Set()
+  fetchingEntities.value = true; _rawEntities.value = []; totalEntities.value = 0; selectedEntityIndices.value = new Set()
   try {
-    const body = { versionId: selectedFileVersionId.value || selectedFile.value, fields: allSelectedProps.value, unique_only: uniqueOnly.value, unique_key_prop: uniqueKeyProp.value || undefined, column_mapping: columnMapping.value }
+    // Always fetch with assemblies — client-side toggle filters instantly
+    const body = { versionId: selectedFileVersionId.value || selectedFile.value, fields: allSelectedProps.value, unique_only: uniqueOnly.value, unique_key_prop: uniqueKeyProp.value || undefined, include_assemblies: true, column_mapping: columnMapping.value }
     const r = await api.post(`/api/trimble/models/${selectedFile.value}/entities`, body)
-    previewEntities.value = r.data.entities || []
-    totalEntities.value = r.data.total || previewEntities.value.length
+    _rawEntities.value = r.data.entities || []
+    totalEntities.value = r.data.total || _rawEntities.value.length
     if (previewEntities.value.length) console.log('[trimble] sample entity structure:', JSON.stringify(previewEntities.value[0], null, 2))
   } finally { fetchingEntities.value = false }
 }
@@ -617,7 +649,8 @@ async function doPreview() {
   previewing.value = true; previewData.value = null; previewError.value = ''
   try {
     const ents = selectedEntities.value.length ? selectedEntities.value : previewEntities.value
-    const body = { project_uuid: targetProjectUuid.value, column_mapping: columnMapping.value, entities: ents, unique_only: uniqueOnlyImport.value }
+    const projectUuid = [...selectedProjectUuids.value][0]
+    const body = { project_uuid: projectUuid, column_mapping: columnMapping.value, entities: ents, unique_only: uniqueOnlyImport.value }
     const r = await api.post('/api/trimble/preview-import', body)
     previewData.value = r.data
   } catch (e) {
@@ -630,7 +663,8 @@ async function doImport() {
   importing.value = true; importResults.value = []
   try {
     const ents = selectedEntities.value.length ? selectedEntities.value : previewEntities.value
-    const body = { project_uuid: targetProjectUuid.value, column_mapping: columnMapping.value, entities: ents, unique_only: uniqueOnlyImport.value }
+    const projectUuid = [...selectedProjectUuids.value][0]
+    const body = { project_uuid: projectUuid, column_mapping: columnMapping.value, entities: ents, unique_only: uniqueOnlyImport.value }
     const r = await api.post('/api/trimble/import', body)
     importResults.value = r.data.results || []
     importSummary.value = r.data.summary || { created: 0, updated: 0, skipped: 0, blocked: 0, error: 0 }

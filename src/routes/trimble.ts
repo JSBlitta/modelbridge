@@ -289,6 +289,7 @@ app.post("/models/:modelId/entities", async (c) => {
     filters?: string;
     unique_only?: boolean;
     unique_key_prop?: string;
+    include_assemblies?: boolean;
     column_mapping?: Record<string, string>;
   }>();
 
@@ -309,6 +310,21 @@ app.post("/models/:modelId/entities", async (c) => {
 
   const psetDefMap = buildPsetDefMap(psetdefsRaw);
   let entities = rawEntities.map(e => transformEntityPsets(e, psetDefMap));
+
+  // Filter out spatial structure types that are never physical elements.
+  // IfcElementAssembly is NOT filtered here — it may represent real assemblies
+  // in production models. Use includeAssemblies in the request body to toggle.
+  const SPATIAL_TYPES = new Set(["IFCSITE", "IFCBUILDING", "IFCPROJECT", "IFCBUILDINGSTOREY"]);
+  const filteredBefore = entities.length;
+  entities = entities.filter(e => {
+    const tp = (e.type as string || "").toUpperCase();
+    if (SPATIAL_TYPES.has(tp)) return false;
+    if (tp === "IFCELEMENTASSEMBLY") return body.include_assemblies !== false;
+    return true;
+  });
+  if (entities.length < filteredBefore) {
+    console.log(`[trimble] filtered out ${filteredBefore - entities.length} spatial/assembly entities (${filteredBefore} → ${entities.length})`);
+  }
 
   if (entities.length > 0) {
     console.log(`[trimble] entities: ${entities.length} items, psetdefs: ${psetdefsRaw.length}`);

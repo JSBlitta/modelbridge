@@ -12,8 +12,8 @@
       </Column>
       <Column field="suggested_phase" :header="$t('phaseTable.phase')" style="width:100px">
         <template #body="{ data }">
-          <span :style="!data.suggested_phase ? 'color:#dc2626;font-style:italic' : ''">
-            {{ data.suggested_phase || $t('phaseTable.required') }}
+          <span :style="!(data._batch?.phase || data.suggested_phase) ? 'color:#dc2626;font-style:italic' : ''">
+            {{ data._batch?.phase || data.suggested_phase || $t('phaseTable.required') }}
           </span>
         </template>
         <template #editor="{ data, field }">

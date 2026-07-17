@@ -31,7 +31,10 @@ export function loadConfig(): AppConfig {
       batch_name_pattern_phase_vbw: parsed?.defaults?.batch_name_pattern_phase_vbw ?? "{number}{suffix}-{phase}",
       batch_state: parsed?.defaults?.batch_state ?? "provisional",
     },
-    synonyms: parsed?.synonyms ?? {},
+    synonyms: {
+      stdlib: ["stdlib", "standard_library", "std_lib", "stdlibs"],
+      ...(parsed?.synonyms ?? {}),
+    },
     description_to_suffix: parsed?.description_to_suffix ?? {},
     client_meta_defaults: parsed?.client_meta_defaults ?? {},
   };

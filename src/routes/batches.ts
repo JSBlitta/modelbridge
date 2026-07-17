@@ -126,4 +126,99 @@ app.patch("/state", async (c) => {
   return c.json({ updated: body.batch_uuids.length, state: body.state });
 });
 
+// Add phases & batches across multiple projects (used by unified import flow)
+app.post("/add-for-projects", async (c) => {
+  const body = await c.req.json<{
+    phase: string;
+    batch_defs: { project_key: string; batch_number: string | number; phase: string; stdlibs?: string[] }[];
+  }>();
+
+  // Resolve project_key -> uuid by name
+  const allProjects = (await apiGet("/company/projects/", { limit: 500 })) as { results: Record<string, unknown>[] };
+  const nameToUuid = new Map<string, string>();
+  for (const p of allProjects.results ?? []) {
+    const n = (p.name as string ?? "").trim();
+    if (n) nameToUuid.set(n, p.uuid as string);
+    // Also index by project_number
+    const pnum = (p.project_number as string ?? "").trim();
+    if (pnum) nameToUuid.set(pnum, p.uuid as string);
+  }
+
+  // Resolve stdlib names to UUIDs
+  const allStdlibNames = new Set<string>();
+  for (const b of body.batch_defs) {
+    if (b.stdlibs?.length) for (const s of b.stdlibs) allStdlibNames.add(s);
+  }
+  const stdlibNameToUuid = new Map<string, string>();
+  if (allStdlibNames.size) {
+    try {
+      const resp = (await apiGet("/company/projects/", { standard_library: true, limit: 200 })) as { results: Record<string, unknown>[] };
+      for (const p of resp.results ?? []) {
+        const uuid = p.uuid as string; if (!uuid) continue;
+        const name = (p.name as string ?? "").toLowerCase();
+        const pnum = (p.project_number as string ?? "").toLowerCase();
+        if (name) stdlibNameToUuid.set(name, uuid);
+        if (pnum) stdlibNameToUuid.set(pnum, uuid);
+      }
+    } catch (e) {
+      console.warn("[batches] stdlib name resolution failed:", e);
+    }
+  }
+
+  const results: Record<string, unknown>[] = [];
+  for (const b of body.batch_defs) {
+    const projectUuid = nameToUuid.get(b.project_key);
+    if (!projectUuid) {
+      results.push({ project_key: b.project_key, batch_number: b.batch_number, status: "error", error: "Project not found: " + b.project_key });
+      continue;
+    }
+
+    // Ensure phase exists on the project
+    try {
+      const project = (await apiGet(`/company/projects/${projectUuid}/`)) as Record<string, unknown>;
+      const existingPhases = (project.phases ?? []) as string[];
+      const phaseNormalized = b.phase.trim().toLowerCase();
+      if (!existingPhases.some((ep) => String(ep).trim().toLowerCase() === phaseNormalized)) {
+        const updatedPhases = [...existingPhases, b.phase];
+        await apiPatch(`/company/projects/${projectUuid}/`, { phases: updatedPhases });
+      }
+    } catch (e) {
+      console.warn(`[batches] phase check failed for ${b.project_key}:`, e);
+    }
+
+    // Check if batch already exists for THIS phase (not just any phase)
+    const batchName = String(b.batch_number);
+    const existingResp = (await apiGet("/constructibles/batches/", { project: projectUuid, limit: 200 })) as { results: Record<string, unknown>[] };
+    const existsForPhase = (existingResp.results ?? []).some(
+      (x) => String(x.name ?? "").trim() === batchName && String(x.phase ?? "").trim().toLowerCase() === b.phase.trim().toLowerCase()
+    );
+
+    if (existsForPhase) {
+      results.push({ project_key: b.project_key, batch_number: batchName, status: "already_exists" });
+      continue;
+    }
+
+    // Resolve stdlibs
+    let resolvedStdlibs: string[] | null = null;
+    if (b.stdlibs?.length) {
+      resolvedStdlibs = b.stdlibs
+        .map((n) => stdlibNameToUuid.get(n.toLowerCase()))
+        .filter((u): u is string => !!u);
+    }
+
+    // Create the batch
+    const apiBody: Record<string, unknown> = { name: batchName, project: projectUuid, phase: b.phase };
+    if (resolvedStdlibs?.length) apiBody.meta = { linked_stdlibs: resolvedStdlibs };
+
+    try {
+      const created = (await apiPost("/constructibles/batches/", apiBody)) as Record<string, unknown>;
+      db.upsertBatch(created.uuid as string, created.name as string, projectUuid, b.phase, resolvedStdlibs);
+      results.push({ project_key: b.project_key, batch_number: batchName, status: "created", data: created });
+    } catch (e) {
+      results.push({ project_key: b.project_key, batch_number: batchName, status: "error", error: String(e) });
+    }
+  }
+  return c.json(results);
+});
+
 export default app;

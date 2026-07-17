@@ -129,16 +129,25 @@ async function checkProjects() {
       description: p.description,
       suggested_suffix: p.suggested_suffix,
       phase: p.suggested_phase || '',
+      batch_numbers: (p.batches || []).map(b => b.number),
     }))
     const res = await api.post('/api/projects/find-or-create', payload)
-    const statusMap = {}
+    const byKey = {}
     for (const r of res.data) {
-      statusMap[r.project_key] = r.status
+      byKey[r.project_key] = r
     }
-    phaseSuggestions.value = phaseSuggestions.value.map(p => ({
-      ...p,
-      status: statusMap[p.project_key] || p.status,
-    }))
+    phaseSuggestions.value = phaseSuggestions.value.map(p => {
+      const r = byKey[p.project_key]
+      if (!r) return p
+      return {
+        ...p,
+        status: r.status,
+        superproject_found: r.superproject_found,
+        phase_exists: r.phase_exists,
+        batches_found: r.batches_found || [],
+        batches_missing: r.batches_missing || [],
+      }
+    })
     checkDone.value = true
   } catch (err) {
     parseError.value = err.response?.data?.detail || err.message

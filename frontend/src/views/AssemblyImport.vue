@@ -9,10 +9,10 @@
         <div style="display:flex;gap:1rem;align-items:center;flex-wrap:wrap;">
           <Select v-model="selectedProject" :options="projects" option-label="name" option-value="uuid"
             placeholder="Select project..." style="min-width:280px" @change="onProjectChange" />
-          <Button icon="pi pi-refresh" text @click="loadProjects" :loading="loading" />
+          <Button icon="pi pi-refresh" text @click="loadProjects" :loading="projectsLoading" />
           <Tag v-if="context" severity="info" :value="`${context.designs.length} designs � ${context.batches.length} batches`" />
         </div>
-        <Message v-if="!loading && projects.length === 0" severity="info" :closable="false" style="margin-top:0.75rem;">
+        <Message v-if="!projectsLoading && projects.length === 0" severity="info" :closable="false" style="margin-top:0.75rem;">
           {{ $t('assemblyImport.noProjects') }}
         </Message>
         <Message v-if="context && context.batches.length === 0" severity="warn" :closable="false" style="margin-top:0.75rem;">
@@ -147,16 +147,16 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 const { t } = useI18n()
 import { api } from '../api.js'
+import { useProduuzitProjects } from '../composables/useProduuzitProjects.js'
 import ColumnMapper from '../components/ColumnMapper.vue'
 import ConfirmedButton from '../components/ConfirmedButton.vue'
 
-const projects = ref([])
+const { projects, loading: projectsLoading, error: projectsError, fetchProjects } = useProduuzitProjects()
 const selectedProject = ref(null)
-const loading = ref(false)
 const context = ref(null)
 const parseResult = ref(null)
 const columnMapping = ref({})
@@ -206,15 +206,7 @@ const canExecute = computed(() => {
 const totalNew = computed(() => previewData.value?.batch_previews.reduce((a, b) => a + (b.summary.new || 0), 0) ?? 0)
 const totalChanged = computed(() => previewData.value?.batch_previews.reduce((a, b) => a + (b.summary.changed || 0), 0) ?? 0)
 
-onMounted(loadProjects)
-
-async function loadProjects() {
-  loading.value = true
-  try {
-    const res = await api.get('/api/projects?limit=100')
-    projects.value = res.data.results || []
-  } finally { loading.value = false }
-}
+function loadProjects() { fetchProjects(true) }
 
 async function onProjectChange() {
   context.value = null

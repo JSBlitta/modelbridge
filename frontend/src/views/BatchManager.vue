@@ -232,20 +232,20 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 const { t } = useI18n()
 import { api } from '../api.js'
+import { useProduuzitProjects } from '../composables/useProduuzitProjects.js'
 import { useConfirm } from 'primevue/useconfirm'
 
 const confirm = useConfirm()
 
-const projects = ref([])
+const { projects, loading: loadingProjects, error: projectsError, fetchProjects } = useProduuzitProjects()
 const selectedProject = ref(null)
 const apiBatches = ref([])
 const dbBatches = ref([])
 const selectedBatches = ref([])
-const loadingProjects = ref(false)
 const batchFrom = ref(101)
 const batchTo = ref(110)
 const projectPhases = ref([])
@@ -293,20 +293,7 @@ const mergedBatches = computed(() => {
   }))
 })
 
-onMounted(loadProjects)
-
-async function loadProjects() {
-  loadingProjects.value = true
-  try {
-    const res = await api.get('/api/projects?limit=100')
-    projects.value = res.data.results || []
-    if (!projects.value.length) console.warn('[api-coupler] /api/projects/ returned 0 results:', res.data)
-  } catch (e) {
-    console.error('[api-coupler] Failed to load projects:', e?.response?.data || e?.message)
-  } finally {
-    loadingProjects.value = false
-  }
-}
+function loadProjects() { fetchProjects(true) }
 
 async function loadBatches() {
   if (!selectedProject.value) return

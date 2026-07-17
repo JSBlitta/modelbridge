@@ -13,7 +13,7 @@
           :placeholder="$t('compactFlow.selectProject')" class="wide" @change="onProjectChange" />
         <Tag v-if="context && context.batches.length" severity="secondary" style="margin-top:0.4rem;"
           :value="`${context.designs.length} ${$t('compactFlow.designsBatches', { designs: context.designs.length, batches: context.batches.length }).split('·')[0]} · ${context.batches.length} ${$t('compactFlow.designsBatches', { designs: context.designs.length, batches: context.batches.length }).split('·')[1]}`" />
-        <Message v-if="projectsLoaded && projects.length === 0" severity="info" :closable="false" size="small" style="margin-top:0.4rem;">
+        <Message v-if="!projectsLoading && projects.length === 0" severity="info" :closable="false" size="small" style="margin-top:0.4rem;">
           {{ $t('compactFlow.noProjects') }}
         </Message>
         <Message v-if="context && context.batches.length === 0" severity="warn" :closable="false" size="small" style="margin-top:0.4rem;">
@@ -116,16 +116,16 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 const { t } = useI18n()
 import { api } from '../api.js'
+import { useProduuzitProjects } from '../composables/useProduuzitProjects.js'
 import ColumnMapper from '../components/ColumnMapper.vue'
 
-const projects = ref([])
+const { projects, loading: projectsLoading, error: projectsError } = useProduuzitProjects()
 const selectedProject = ref(null)
 const context = ref(null)
-const projectsLoaded = ref(false)
 const parseResult = ref(null)
 const columnMapping = ref({})
 const previewData = ref(null)
@@ -166,12 +166,6 @@ const totalIdentical = computed(() => previewData.value?.batch_previews.reduce((
 const totalBlocked = computed(() => previewData.value?.batch_previews.filter(b => b.blocked).reduce((a, b) => a + b.rows.length, 0) ?? 0)
 
 const canExecute = computed(() => previewData.value?.batch_previews.some(bp => !bp.blocked && (bp.summary.new > 0 || bp.summary.changed > 0)))
-
-onMounted(async () => {
-  const res = await api.get('/api/projects?limit=100')
-  projects.value = res.data.results || []
-  projectsLoaded.value = true
-})
 
 async function onProjectChange() {
   context.value = null; parseResult.value = null; previewData.value = null; importResults.value = []; confirmImport.value = false

@@ -29,21 +29,22 @@
           </div>
           <div v-if="checkDone" class="mt-sm">
             <div v-for="row in phaseSuggestions" :key="row.project_key"
-                 class="batch-preview-row gap-xs" style="font-size:0.82rem;">
+                 class="batch-preview-row gap-xs" style="font-size:0.82rem;flex-wrap:wrap;">
               <code style="font-weight:600;min-width:160px;">{{ row.project_key }}</code>
               <Tag v-if="row.superproject_found != null"
                    :severity="row.superproject_found ? 'success' : 'secondary'"
-                   :value="row.superproject_found ? $t('unified.superprojectFound') : $t('unified.superprojectNotFound')" />
+                   :value="row.superproject_found ? $t('unified.superprojectFound') : $t('unified.superprojectNew')" />
               <Tag :severity="row.status === 'found' ? 'success' : 'secondary'"
                    :value="row.status === 'found' ? $t('unified.projectFound') : $t('unified.projectNew')" />
-              <Tag v-if="row.phase_exists === true" severity="success"
-                   :value="$t('unified.phaseExists', { phase: row.suggested_phase })" />
-              <Tag v-else-if="row.phase_exists === false" severity="secondary"
-                   :value="$t('unified.phaseNew', { phase: row.suggested_phase })" />
-              <span v-if="row.batches_found !== undefined" style="color:#374151;">
-                {{ $t('unified.batchesFound', { found: row.batches_found.length }) }}
-                <span v-if="row.batches_missing.length" class="text-changed">, {{ $t('unified.batchesNew', { count: row.batches_missing.length }) }}</span>
-              </span>
+              <Tag v-if="row.phase_exists != null"
+                   :severity="row.phase_exists ? 'success' : 'secondary'"
+                   :value="row.phase_exists ? $t('unified.phaseExists', { phase: row.suggested_phase }) : $t('unified.phaseNew', { phase: row.suggested_phase })" />
+              <Tag v-if="row.batches_found !== undefined && row.batches_found.length"
+                   severity="success"
+                   :value="$t('unified.batchesFound', { found: row.batches_found.length })" />
+              <Tag v-if="row.batches_missing && row.batches_missing.length"
+                   severity="secondary"
+                   :value="$t('unified.batchesNew', { count: row.batches_missing.length })" />
             </div>
           </div>
         </div>
@@ -56,6 +57,7 @@
             :rows="confirmProjectRows"
             :columns="[{field:'project_key',header:$t('unified.project')},{field:'superproject',header:$t('unified.superproject')},{field:'suggested_phase',header:$t('unified.phase')}]"
             status-field="status"
+            :show-actions="false"
             class="mt-sm"
             />
           <ConfirmedButton
@@ -80,14 +82,14 @@
           </DataTable>
         </div>
 
-        <div v-if="checkDone && foundProjectCount > 0" style="margin-top:1rem;">
+        <div v-if="checkDone && foundProjectCount > 0 && hasMissingItems" style="margin-top:1rem;">
           <Message severity="info" :closable="false" size="small">
             {{ $t('unified.foundProjectInfo', { count: foundProjectCount }) }}
           </Message>
           <ConfirmedButton
             :label="$t('unified.createPhaseBatchesBtn')"
             icon="pi pi-plus-circle"
-            :confirm-label="$t('unified.confirmCreateProjects', { count: foundProjectCount })"
+            :confirm-label="$t('unified.confirmCreateItems', { items: createItemsLabel })"
             btn-class="btn-create"
             :loading="addingPhasesBatches"
             @action="addPhasesAndBatches"
@@ -243,20 +245,22 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 const { t } = useI18n()
+import { useToast } from 'primevue/usetoast'
+const toast = useToast()
 import { api } from '../api.js'
+import { useProduuzitProjects } from '../composables/useProduuzitProjects.js'
 import PhaseTable from '../components/PhaseTable.vue'
 import ConfirmationTable from '../components/ConfirmationTable.vue'
 import ConfirmedButton from '../components/ConfirmedButton.vue'
 import ColumnMapper from '../components/ColumnMapper.vue'
 
 // Project
-const allProjects = ref([])
+const { projects: allProjects, loading: refreshing, error: projectsError, fetchProjects } = useProduuzitProjects()
 const project = ref(null)
 const context = ref(null)
-const refreshing = ref(false)
 
 // Superproject CSV
 const phaseSuggestions = ref([])
@@ -283,6 +287,21 @@ const importResults = ref([])
 const newProjectCount = computed(() => phaseSuggestions.value.filter(r => r.status === 'new').length)
 const foundProjectCount = computed(() => phaseSuggestions.value.filter(r => r.status === 'found').length)
 const confirmProjectRows = computed(() => phaseSuggestions.value.filter(r => r.status === 'new'))
+
+const missingPhaseCount = computed(() =>
+  phaseSuggestions.value.filter(r => r.status === 'found' && r.phase_exists === false).length
+)
+const missingBatchCount = computed(() =>
+  phaseSuggestions.value.reduce((sum, r) => r.status === 'found' ? sum + (r.batches_missing?.length || 0) : sum, 0)
+)
+const hasMissingItems = computed(() => missingPhaseCount.value > 0 || missingBatchCount.value > 0)
+
+const createItemsLabel = computed(() => {
+  const parts = []
+  if (missingPhaseCount.value) parts.push(t('unified.phaseCreateCount', { count: missingPhaseCount.value }))
+  if (missingBatchCount.value) parts.push(t('unified.batchCreateCount', { count: missingBatchCount.value }))
+  return parts.join(' + ')
+})
 
 const initialMapping = computed(() => {
   if (!parseResult.value) return {}
@@ -326,17 +345,7 @@ const canExecute = computed(() => isUuidMode.value
   ? (previewData.value && !previewData.value.has_errors && totalChanged.value > 0)
   : (previewData.value?.batch_previews?.some(bp => !bp.blocked && (bp.summary.new > 0 || bp.summary.changed > 0))))
 
-onMounted(async () => {
-  await refreshProjects()
-})
-
-async function refreshProjects() {
-  refreshing.value = true
-  try {
-    const res = await api.get('/api/projects?limit=200')
-    allProjects.value = res.data.results || []
-  } finally { refreshing.value = false }
-}
+function refreshProjects() { fetchProjects(true) }
 
 async function onProjectChange() {
   context.value = null
@@ -370,6 +379,7 @@ async function checkProjects() {
       description: p.description,
       suggested_suffix: p.suggested_suffix,
       phase: p.suggested_phase || '',
+      batch_numbers: (p.batches || []).map(b => b.number),
     }))
     const res = await api.post('/api/projects/find-or-create', payload)
     const byKey = {}
@@ -429,12 +439,27 @@ async function addPhasesAndBatches() {
   const existing = phaseSuggestions.value.filter(r => r.status === 'found')
   const batchDefs = []
   for (const p of existing) {
+    const missing = new Set(p.batches_missing?.map(String) || [])
     for (const b of p.batches || []) {
-      batchDefs.push({ project_key: p.project_key, batch_number: b.number, phase: p.suggested_phase || '' })
+      if (missing.has(String(b.number))) {
+        batchDefs.push({ project_key: p.project_key, batch_number: b.number, phase: b.phase || p.suggested_phase || '', stdlibs: b.stdlibs || [] })
+      }
     }
   }
+  if (!batchDefs.length && !missingPhaseCount.value) {
+    addingPhasesBatches.value = false
+    return
+  }
   try {
-    await api.post('/api/batches/add-for-projects', { phase: existing[0]?.suggested_phase || '', batch_defs: batchDefs })
+    const res = await api.post('/api/batches/add-for-projects', { phase: existing[0]?.suggested_phase || '', batch_defs: batchDefs })
+    const results = res.data || []
+    const created = results.filter(r => r.status === 'created').length
+    const existed = results.filter(r => r.status === 'already_exists').length
+    const errors = results.filter(r => r.status === 'error').length
+    if (created) toast.add({ severity: 'success', summary: t('unified.created'), detail: t('unified.createdDetail', { created, existed }), life: 5000 })
+    if (errors) toast.add({ severity: 'error', summary: t('unified.error'), detail: t('unified.errorsDetail', { errors }), life: 8000 })
+    // Re-check so the UI updates to show phases/batches as existing
+    await checkProjects()
   } catch (err) {
     superParseError.value = err.response?.data?.detail || err.message
   } finally {

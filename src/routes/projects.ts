@@ -95,9 +95,11 @@ app.post("/find-or-create", async (c) => {
 
   const results = await Promise.all(projects.map(async (p) => {
     const fullName = buildFullName(p);
+    const lookupName = p.letter ? fullName : p.project_key;
+    const existing = byName.get(lookupName) ?? byName.get(fullName);
     const superprojectFound = p.superproject ? knownSuperprojects.has(p.superproject) : null;
 
-    if (!byName.has(fullName)) {
+    if (!existing) {
       return {
         project_key: p.project_key,
         status: "new",
@@ -109,7 +111,6 @@ app.post("/find-or-create", async (c) => {
       };
     }
 
-    const existing = byName.get(fullName)!;
     const existingPhases = (existing.phases ?? []) as string[];
     const phaseExists = p.phase
       ? existingPhases.some((ep) => String(ep).trim().toLowerCase() === p.phase.trim().toLowerCase())
@@ -118,15 +119,23 @@ app.post("/find-or-create", async (c) => {
     let batchesFound: string[] = [];
     let batchesMissing: string[] = (p.batch_numbers ?? []).map(String);
 
+    // Batches are always children of a phase — if the phase doesn't exist,
+    // the batches can't exist yet either, regardless of name matches.
     const uuid = existing.uuid as string | undefined;
-    if (uuid && batchesMissing.length > 0) {
+    if (uuid && batchesMissing.length > 0 && phaseExists !== false) {
       try {
         const bResp = (await apiGet("/constructibles/batches/", { project: uuid, limit: 500 })) as {
           results?: Record<string, unknown>[];
         };
-        const existingNames = new Set((bResp.results ?? []).map((b) => String(b.name ?? "").trim()));
-        batchesFound = batchesMissing.filter((n) => existingNames.has(n));
-        batchesMissing = batchesMissing.filter((n) => !existingNames.has(n));
+        // Only consider batches that belong to THIS phase
+        const phaseNorm = p.phase.trim().toLowerCase();
+        const phaseBatchNames = new Set(
+          (bResp.results ?? [])
+            .filter((b) => String(b.phase ?? "").trim().toLowerCase() === phaseNorm)
+            .map((b) => String(b.name ?? "").trim())
+        );
+        batchesFound = batchesMissing.filter((n) => phaseBatchNames.has(n));
+        batchesMissing = batchesMissing.filter((n) => !phaseBatchNames.has(n));
       } catch {
         // Batch check failed — treat all as missing (will be created or skipped if they already exist)
       }
@@ -159,14 +168,16 @@ app.post("/create", async (c) => {
   const results = [];
   for (const p of projects) {
     const fullName = buildFullName(p);
-    if (byName.has(fullName)) {
-      results.push({ project_key: p.project_key, status: "already_exists", data: byName.get(fullName) });
+    const lookupName = p.letter ? fullName : p.project_key;
+    const createName = lookupName;
+    if (byName.has(lookupName)) {
+      results.push({ project_key: p.project_key, status: "already_exists", data: byName.get(lookupName) });
       continue;
     }
 
     const projectNumber = [p.superproject, p.letter, p.description].filter(Boolean).join("-");
     const body = {
-      name: fullName,
+      name: createName,
       super_project: p.superproject,
       client_name: p.client_name || clientNameDefault,
       project_number: projectNumber,

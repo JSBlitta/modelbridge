@@ -22,12 +22,6 @@
 
           <label>{{ $t('config.clientName') }}</label>
           <InputText v-model="config.defaults.client_name" style="width:100%;" />
-
-          <label>{{ $t('config.batchNamePattern') }}</label>
-          <div>
-            <InputText v-model="config.defaults.batch_name_pattern" style="width:100%;" />
-            <small>Example: {{ patternExample }}</small>
-          </div>
         </div>
       </template>
     </Card>
@@ -107,11 +101,6 @@ const synonymRows = computed(() => {
     field,
     synonyms_str: Array.isArray(syns) ? syns.join(', ') : syns,
   }))
-})
-
-const patternExample = computed(() => {
-  const pat = config.value?.defaults?.batch_name_pattern || '{number}{suffix}-{phase}'
-  return pat.replace('{number}', '101').replace('{suffix}', 'E').replace('{phase}', 'vbw')
 })
 
 onMounted(async () => {

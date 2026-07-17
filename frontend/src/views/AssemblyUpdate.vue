@@ -104,12 +104,11 @@ import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 const { t } = useI18n()
 import { api } from '../api.js'
+import { useProduuzitProjects } from '../composables/useProduuzitProjects.js'
 
-// Module-level cache — survives component unmount/remount during navigation
-let _projectsCache = null
 let _dbBatchesCache = null
 
-const projects = ref([])
+const { projects, loading: projectsLoading, error: projectsError, fetchProjects } = useProduuzitProjects()
 const batches = ref([])
 const selectedProject = ref(null)
 const selectedBatch = ref(null)
@@ -128,21 +127,6 @@ const isDefinitive = computed(() => {
 
 const changedRows = computed(() => assemblies.value.filter(a => changedUuids.value.has(a.uuid)))
 
-async function loadProjects() {
-  if (_projectsCache) {
-    projects.value = _projectsCache
-    return
-  }
-  try {
-    const res = await api.get('/api/projects?limit=100')
-    _projectsCache = res.data.results || []
-    projects.value = _projectsCache
-    if (!projects.value.length) console.warn('[api-coupler] /api/projects/ returned 0 results:', res.data)
-  } catch (e) {
-    console.error('[api-coupler] Failed to load projects:', e?.response?.data || e?.message)
-  }
-}
-
 async function loadDbBatches() {
   if (_dbBatchesCache) {
     dbBatches.value = _dbBatchesCache
@@ -158,14 +142,10 @@ async function loadDbBatches() {
 }
 
 onMounted(() => {
-  loadProjects()
   loadDbBatches()
 })
 
-async function refreshProjects() {
-  _projectsCache = null
-  await loadProjects()
-}
+function refreshProjects() { fetchProjects(true) }
 
 async function loadBatches() {
   selectedBatch.value = null

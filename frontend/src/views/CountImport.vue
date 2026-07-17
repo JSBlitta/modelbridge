@@ -120,12 +120,13 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 const { t } = useI18n()
 import { api } from '../api.js'
+import { useProduuzitProjects } from '../composables/useProduuzitProjects.js'
 
-const projects = ref([])
+const { projects, loading: projectsLoading, error: projectsError } = useProduuzitProjects()
 const selectedProject = ref(null)
 const batches = ref([])
 const selectedBatch = ref(null)
@@ -145,11 +146,6 @@ const filteredDesigns = computed(() => {
   return designs.value
     .filter(d => !existing.has(d.uuid))
     .filter(d => !q || d.name.toLowerCase().includes(q))
-})
-
-onMounted(async () => {
-  const r = await api.get('/api/projects?limit=100')
-  projects.value = r.data.results || []
 })
 
 async function onProjectChange() {

@@ -5,3 +5,5 @@ dist/
 logs/
 frontend-dist/
 /old**/
+scratch
+*.png

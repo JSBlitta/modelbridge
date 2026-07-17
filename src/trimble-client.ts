@@ -43,6 +43,12 @@ export function stopOAuthServer(): void {
   }
 }
 
+export function markOAuthCompleted(error?: string | null): void {
+  oauthState.completed = true;
+  oauthState.error = error ?? null;
+  oauthState.completedAt = new Date().toISOString();
+}
+
 export async function startOAuthServer(): Promise<number> {
   stopOAuthServer();
   oauthState.completed = false;
@@ -119,7 +125,21 @@ export function getRegionEndpoints() {
 }
 
 export function isAuthenticated(): boolean {
-  return Boolean(accessToken);
+  return Boolean(accessToken || refreshTokenVal);
+}
+
+export function getRefreshToken(): string | null {
+  return refreshTokenVal;
+}
+
+/** Restore a saved refresh token without overwriting one that is already in memory. */
+export function restoreRefreshToken(token: string): void {
+  if (!refreshTokenVal) refreshTokenVal = token.trim() || null;
+}
+
+export function clearTokens(): void {
+  accessToken = null;
+  refreshTokenVal = null;
 }
 
 export function setManualToken(token: string, refresh?: string | null): void {
