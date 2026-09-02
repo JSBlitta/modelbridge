@@ -33,6 +33,7 @@ export function loadConfig(): AppConfig {
     },
     synonyms: {
       stdlib: ["stdlib", "standard_library", "std_lib", "stdlibs"],
+      count: ["count", "aantal", "quantity", "qty", "productie_aantal"],
       ...(parsed?.synonyms ?? {}),
     },
     description_to_suffix: parsed?.description_to_suffix ?? {},

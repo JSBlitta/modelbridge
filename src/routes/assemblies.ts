@@ -3,7 +3,7 @@ import { apiGet, apiPost, apiPatch, fetchAllPages } from "../produuzit-client.js
 import { parseAssemblyCsv } from "../csv-parser.js";
 import { getConfig } from "../config.js";
 import * as db from "../db.js";
-import { findSource, targetsOf } from "../lib/mapping.js";
+import { findSource, targetsOf, parseCount, generateOrderIds, orderPrefix } from "../lib/mapping.js";
 import type { ColumnMapping } from "../lib/mapping.js";
 
 const app = new Hono();
@@ -47,7 +47,7 @@ function mapRow(
     for (const target of targetsOf(targetVal)) {
       if (target.startsWith("client_meta.")) {
         clientMeta[target.slice("client_meta.".length)] = val;
-      } else if (target && target !== "design_name" && target !== "batch_number" && target !== "uuid") {
+      } else if (target && target !== "design_name" && target !== "batch_number" && target !== "uuid" && target !== "count") {
         if (target === "client_meta" && typeof val === "string") {
           try { mapped[target] = JSON.parse(val); } catch { mapped[target] = val; }
         } else {
@@ -159,6 +159,7 @@ app.post("/preview-import", async (c) => {
   const designNameCol = findSource(body.column_mapping, "design_name");
   const batchNumberCol = findSource(body.column_mapping, "batch_number");
   const orderIdCol = findSource(body.column_mapping, "client_order_id");
+  const countCol = findSource(body.column_mapping, "count");
   const uuidCol = findSource(body.column_mapping, "uuid");
 
   // ── UUID mode: update existing assemblies directly by UUID ──
@@ -293,6 +294,27 @@ app.post("/preview-import", async (c) => {
       if (designName && !designUuid) unresolvedDesigns.add(designName);
 
       const orderId = orderIdCol ? (cleanValue(row[orderIdCol]) as string | null) : null;
+      const count = countCol ? parseCount(cleanValue(row[countCol])) : 1;
+
+      // Count mode: one row means "produce N total assemblies for this design"
+      if (count > 1 && !orderId) {
+        const existingForDesign = designUuid ? existingAssemblies.filter((a) => a.design === designUuid) : [];
+        const toCreate = Math.max(0, count - existingForDesign.length);
+        rowPreviews.push({
+          design_name: designName,
+          design_uuid: designUuid,
+          client_order_id: null,
+          count_requested: count,
+          count_existing: existingForDesign.length,
+          count_to_create: toCreate,
+          status: toCreate > 0 ? "new" : "identical",
+          changed_fields: [],
+          proposed: mapped,
+          existing: null,
+        });
+        continue;
+      }
+
       const key = assemblyKey(designUuid, orderId);
       const ex = designUuid ? existingByKey.get(key) ?? null : null;
       let status: "new" | "changed" | "identical" = "new";
@@ -311,6 +333,8 @@ app.post("/preview-import", async (c) => {
         design_name: designName,
         design_uuid: designUuid,
         client_order_id: orderId,
+        count_requested: count,
+        count_to_create: status === "new" ? count : 0,
         status,
         changed_fields: changed,
         proposed: mapped,
@@ -327,8 +351,8 @@ app.post("/preview-import", async (c) => {
       blocked: dbState === "definitive",
       rows: rowPreviews,
       summary: {
-        total: rowPreviews.length,
-        new: rowPreviews.filter((r) => r.status === "new").length,
+        total: rowPreviews.reduce((a, r) => a + (r.count_to_create || 1), 0),
+        new: rowPreviews.filter((r) => r.status === "new").reduce((a, r) => a + (r.count_to_create || 1), 0),
         changed: rowPreviews.filter((r) => r.status === "changed").length,
         identical: rowPreviews.filter((r) => r.status === "identical").length,
       },
@@ -359,6 +383,7 @@ app.post("/import", async (c) => {
   const designNameCol = findSource(body.column_mapping, "design_name");
   const batchNumberCol = findSource(body.column_mapping, "batch_number");
   const orderIdCol = findSource(body.column_mapping, "client_order_id");
+  const countCol = findSource(body.column_mapping, "count");
   const uuidCol = findSource(body.column_mapping, "uuid");
 
   // ── UUID mode: bulk-PATCH all assemblies in a single request ──
@@ -467,6 +492,28 @@ app.post("/import", async (c) => {
       mapped.project = body.project_uuid;
       if (orderId) mapped.client_order_id = orderId;
 
+      const count = countCol ? parseCount(cleanValue(row[countCol])) : 1;
+
+      // Count mode: produce N total assemblies for this design (no explicit order ID)
+      if (count > 1 && !orderId) {
+        const existingForDesign = existingAssemblies.filter((a) => a.design === designUuid);
+        const toCreate = Math.max(0, count - existingForDesign.length);
+        const prefix = orderPrefix(designName || "");
+        const newIds = generateOrderIds(prefix, existingForDesign.length + 1, toCreate);
+        for (const newId of newIds) {
+          try {
+            await apiPost("/constructibles/assemblies/", { ...mapped, client_order_id: newId });
+            results.push({ design_name: designName, client_order_id: newId, batch: batchName, status: "created" });
+          } catch (e) {
+            results.push({ design_name: designName, client_order_id: newId, batch: batchName, status: "error", reason: String(e) });
+          }
+        }
+        if (toCreate === 0) {
+          results.push({ design_name: designName, batch: batchName, status: "skipped", reason: `Already at count ${count}` });
+        }
+        continue;
+      }
+
       const key = assemblyKey(designUuid, orderId);
       const ex = existingByKey.get(key);
       if (ex) {
@@ -550,14 +597,6 @@ interface CountItem {
   scheduled_prod_date?: string;
   priority?: number;
   client_meta?: Record<string, unknown>;
-}
-
-function generateOrderIds(prefix: string, start: number, count: number): string[] {
-  const ids: string[] = [];
-  for (let i = 0; i < count; i++) {
-    ids.push(`${prefix}-${String(start + i).padStart(3, "0")}`);
-  }
-  return ids;
 }
 
 // Preview: shows existing count, how many will be created, and the order IDs that will be used

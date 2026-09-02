@@ -81,6 +81,7 @@ const targetOptions = computed(() => {
     { name: 'client_order_id', label: t('columnMapper.clientOrderId') },
     { name: 'scheduled_prod_date', label: t('columnMapper.scheduledProdDate') },
     { name: 'priority', label: t('columnMapper.priority') },
+    { name: 'count', label: t('columnMapper.count') },
     { name: 'uuid', label: t('columnMapper.assemblyUuid') },
     { name: 'superproject', label: 'Superproject' },
     { name: 'phase', label: 'Phase' },

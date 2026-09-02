@@ -21,6 +21,12 @@ synonyms:
   - order_id
   - ordernummer
   - klantreferentie
+  count:
+  - count
+  - aantal
+  - quantity
+  - qty
+  - productie_aantal
   design:
   - design
   - element

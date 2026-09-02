@@ -19,8 +19,9 @@ import {
 } from "../trimble-client.js";
 import { apiGet, apiPatch, apiPost, fetchAllPages } from "../produuzit-client.js";
 import * as db from "../db.js";
-import { findSource, targetsOf } from "../lib/mapping.js";
+import { findSource, targetsOf, parseCount, generateOrderIds, orderPrefix } from "../lib/mapping.js";
 import type { ColumnMapping } from "../lib/mapping.js";
+import { logger } from "../logger.js";
 
 const app = new Hono();
 
@@ -375,6 +376,7 @@ app.post("/preview-import", async (c) => {
   const designProp = resolveProp(body.column_mapping, "design_name");
   const batchProp = resolveProp(body.column_mapping, "batch_number");
   const orderProp = resolveProp(body.column_mapping, "client_order_id");
+  const countProp = resolveProp(body.column_mapping, "count");
 
   let entities = body.entities;
   if (body.unique_only) {
@@ -387,7 +389,7 @@ app.post("/preview-import", async (c) => {
     });
   }
 
-  console.log(`[trimble preview] project=${body.project_uuid}, entities=${entities.length}, designs=${designsMap.size}`);
+  logger.debug(`[trimble preview] project=${body.project_uuid}, entities=${entities.length}, designs=${designsMap.size}`);
 
   // Fetch ALL assemblies once for the project — avoid N per-batch calls
   const allAssemblies = (await fetchAllPages("/constructibles/assemblies/", { project: body.project_uuid, limit: 1000 })) as Record<string, unknown>[];
@@ -457,7 +459,28 @@ app.post("/preview-import", async (c) => {
             if (dn && !designUuid) unresolvedDesigns.add(dn);
 
             const orderId = orderProp ? extractProp(entity, orderProp) || null : null;
+      const count = countProp ? parseCount(extractProp(entity, countProp)) : 1;
       const mapped = mapIfcRow(entity, body.column_mapping);
+
+      // Count mode: one entity means "produce N total assemblies for this design"
+      if (dbState !== "definitive" && count > 1 && !orderId) {
+        const existingForDesign = designUuid ? existingAsm.filter((a) => a.design === designUuid) : [];
+        const toCreate = Math.max(0, count - existingForDesign.length);
+        rowPreviews.push({
+          design_name: dn,
+          design_uuid: designUuid,
+          client_order_id: null,
+          count_requested: count,
+          count_existing: existingForDesign.length,
+          count_to_create: toCreate,
+          status: dbState === "definitive" ? "blocked" : toCreate > 0 ? "new" : "identical",
+          changed_fields: [],
+          proposed: mapped,
+          existing: null,
+        });
+        continue;
+      }
+
       const key = trimbleAssemblyKey(designUuid, orderId);
       const ex = designUuid ? existingByKey.get(key) ?? null : null;
       let status: "new" | "changed" | "identical" | "blocked" = "new";
@@ -474,17 +497,17 @@ app.post("/preview-import", async (c) => {
         status = changed.length ? "changed" : "identical";
       }
 
-      rowPreviews.push({ design_name: dn, design_uuid: designUuid, client_order_id: orderId, status, changed_fields: changed, proposed: mapped, existing: ex });
+      rowPreviews.push({ design_name: dn, design_uuid: designUuid, client_order_id: orderId, count_requested: count, count_to_create: status === "new" ? count : 0, status, changed_fields: changed, proposed: mapped, existing: ex });
     }
 
     const summary = {
-      total: rowPreviews.length,
-      new: rowPreviews.filter((r) => r.status === "new").length,
+      total: rowPreviews.reduce((a, r) => a + (r.count_to_create || 1), 0),
+      new: rowPreviews.filter((r) => r.status === "new").reduce((a, r) => a + (r.count_to_create || 1), 0),
       changed: rowPreviews.filter((r) => r.status === "changed").length,
       identical: rowPreviews.filter((r) => r.status === "identical").length,
       blocked: rowPreviews.filter((r) => r.status === "blocked").length,
     };
-    console.log(`[trimble preview] batch ${bi}/${byBatch.size} "${batchName}": ${summary.new}↑ ${summary.changed}~ ${summary.identical}= ${summary.blocked}✗`);
+    logger.debug(`[trimble preview] batch ${bi}/${byBatch.size} "${batchName}": ${summary.new}↑ ${summary.changed}~ ${summary.identical}= ${summary.blocked}✗`);
 
     batchPreviews.push({ batch_uuid: batchUuid, batch_name: batchName, local_state: dbState, blocked: dbState === "definitive", rows: rowPreviews, summary });
   }
@@ -517,6 +540,7 @@ app.post("/import", async (c) => {
   const designProp = resolveProp(body.column_mapping, "design_name");
   const batchProp = resolveProp(body.column_mapping, "batch_number");
   const orderProp = resolveProp(body.column_mapping, "client_order_id");
+  const countProp = resolveProp(body.column_mapping, "count");
 
   let entities = body.entities;
   if (body.unique_only) {
@@ -598,11 +622,32 @@ app.post("/import", async (c) => {
             }
 
       const orderId = orderProp ? extractProp(entity, orderProp) || null : null;
+      const count = countProp ? parseCount(extractProp(entity, countProp)) : 1;
       const mapped = mapIfcRow(entity, body.column_mapping);
       mapped.design = designUuid;
       mapped.batch = batchUuid;
       mapped.project = body.project_uuid;
       if (orderId) mapped.client_order_id = orderId;
+
+      // Count mode: produce N total assemblies for this design (no explicit order ID)
+      if (count > 1 && !orderId) {
+        const existingForDesign = (existingResp.results ?? []).filter((a) => a.design === designUuid);
+        const toCreate = Math.max(0, count - existingForDesign.length);
+        const prefix = orderPrefix(dn || "");
+        const newIds = generateOrderIds(prefix, existingForDesign.length + 1, toCreate);
+        for (const newId of newIds) {
+          try {
+            await apiPost("/constructibles/assemblies/", { ...mapped, client_order_id: newId });
+            results.push({ design_name: dn, client_order_id: newId, batch: batchName, status: "created" });
+          } catch (e) {
+            results.push({ design_name: dn, client_order_id: newId, batch: batchName, status: "error", reason: String(e) });
+          }
+        }
+        if (toCreate === 0) {
+          results.push({ design_name: dn, batch: batchName, status: "skipped", reason: `Already at count ${count}` });
+        }
+        continue;
+      }
 
       const key = trimbleAssemblyKey(designUuid, orderId);
       const ex = existingByKey.get(key);
@@ -708,7 +753,7 @@ function mapIfcRow(entity: Record<string, unknown>, columnMapping: ColumnMapping
     for (const target of targetsOf(targetVal)) {
       if (target.startsWith("client_meta.")) {
         clientMeta[target.slice("client_meta.".length)] = val;
-      } else if (target && target !== "design_name" && target !== "batch_number") {
+      } else if (target && target !== "design_name" && target !== "batch_number" && target !== "count") {
         mapped[target] = val;
       }
     }

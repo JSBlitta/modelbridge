@@ -226,6 +226,15 @@
                       :value="statusLabel(data.status)" />
                   </template>
                 </Column>
+                <Column :header="$t('unified.countLabel')" style="width:150px;">
+                  <template #body="{ data }">
+                    <span v-if="data.count_requested > 1">
+                      {{ $t('unified.countRequested', { count: data.count_requested }) }}
+                      <span v-if="data.count_to_create" class="text-new"> ({{ data.count_to_create }} {{ $t('unified.toCreate') }})</span>
+                    </span>
+                    <span v-else style="color:#9ca3af;">—</span>
+                  </template>
+                </Column>
                 <Column field="changed_fields" :header="$t('unified.changedFields')">
                   <template #body="{ data }">
                     <span v-if="data.changed_fields?.length">{{ data.changed_fields.join(', ') }}</span>
