@@ -68,16 +68,39 @@ async function loadBatches(projectUuid: string): Promise<Record<string, unknown>
   return (await fetchAllPages("/constructibles/batches/", { project: projectUuid })) as Record<string, unknown>[];
 }
 
+// Resolve design name → uuid, creating the design in Produuzit when missing
+async function resolveDesignUuid(
+  designsMap: Map<string, string>,
+  projectUuid: string,
+  designName: string,
+  createdDesigns: Map<string, string>,
+): Promise<string | null> {
+  const existing = designsMap.get(designName) ?? createdDesigns.get(designName);
+  if (existing) return existing;
+  try {
+    const created = (await apiPost("/constructibles/assembly_designs/", { name: designName, project: projectUuid })) as Record<string, unknown>;
+    const uuid = created.uuid as string;
+    if (uuid) {
+      createdDesigns.set(designName, uuid);
+      return uuid;
+    }
+  } catch (e) {
+    // Fall through to null — caller reports the design as unresolved
+  }
+  return null;
+}
+
 function assemblyKey(designUuid: string | null | undefined, clientOrderId: string | null | undefined): string {
   return `${designUuid ?? ""}|${clientOrderId ?? ""}`;
 }
 
-function matchBatchByNumber(batches: Record<string, unknown>[], batchNumber: string): Record<string, unknown> | null {
-  const num = parseInt(String(batchNumber).trim(), 10);
-  if (isNaN(num)) return null;
+function matchBatchByNumber(batches: Record<string, unknown>[], batchRaw: string): Record<string, unknown> | null {
+  // Strict exact match: entity value must fully match a batch name.
+  const raw = String(batchRaw ?? "").trim().toLowerCase();
+  if (!raw) return null;
   for (const b of batches) {
-    const name = (b.name as string) ?? "";
-    if (new RegExp(`^${num}[^0-9]`).test(name) || name === String(num)) return b;
+    const name = String(b.name ?? "").trim().toLowerCase();
+    if (name === raw) return b;
   }
   return null;
 }
@@ -229,6 +252,7 @@ app.post("/preview-import", async (c) => {
   const byBatch = new Map<string, Record<string, string>[]>();
   const unresolvedBatches = new Set<string>();
   const unresolvedDesigns = new Set<string>();
+  const createdDesigns = new Map<string, string>();
 
   for (const row of body.rows) {
     const batchNum = batchNumberCol ? (row[batchNumberCol] ?? "") : "";
@@ -242,9 +266,7 @@ app.post("/preview-import", async (c) => {
   const batchPreviews = [];
   const allWarnings: string[] = [];
 
-  if (!orderIdCol) {
-    allWarnings.push("No client_order_id column mapped. Cannot distinguish multiple assemblies of the same design. Each design will appear once per batch.");
-  }
+  const noOrderIdWarning = !orderIdCol;
 
   for (const [batchUuid, rows] of byBatch) {
     const batchInfo = batches.find((b) => b.uuid === batchUuid) ?? {};
@@ -263,7 +285,7 @@ app.post("/preview-import", async (c) => {
       allWarnings.push(...warnings);
 
       const designName = designNameCol ? (cleanValue(row[designNameCol]) as string | null) : null;
-      const designUuid = designName ? designsMap.get(designName) ?? null : null;
+      const designUuid = designName ? await resolveDesignUuid(designsMap, body.project_uuid, designName, createdDesigns) : null;
       if (designName && !designUuid) unresolvedDesigns.add(designName);
 
       const orderId = orderIdCol ? (cleanValue(row[orderIdCol]) as string | null) : null;
@@ -313,6 +335,7 @@ app.post("/preview-import", async (c) => {
     batch_previews: batchPreviews,
     unresolved_batches: [...unresolvedBatches].sort(),
     unresolved_designs: [...unresolvedDesigns].sort(),
+    no_client_order_id: noOrderIdWarning,
     warnings: [...new Set(allWarnings)],
   });
 });
@@ -402,6 +425,7 @@ app.post("/import", async (c) => {
   }
 
   const results: Record<string, unknown>[] = [];
+  const createdDesigns = new Map<string, string>();
 
   for (const [batchUuid, rows] of byBatch) {
     const dbState = dbBatches.get(batchUuid)?.state ?? "provisional";
@@ -426,7 +450,7 @@ app.post("/import", async (c) => {
     for (const row of rows) {
       const { mapped } = mapRow(row, body.column_mapping);
       const designName = designNameCol ? (cleanValue(row[designNameCol]) as string | null) : null;
-      const designUuid = designName ? designsMap.get(designName) ?? null : null;
+      const designUuid = designName ? await resolveDesignUuid(designsMap, body.project_uuid, designName, createdDesigns) : null;
 
       if (!designUuid) {
         results.push({ design_name: designName, batch: batchName, status: "error", reason: `Design '${designName}' not found in project` });

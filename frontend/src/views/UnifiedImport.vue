@@ -102,6 +102,9 @@
     <Card v-if="project" class="mb-card">
       <template #title>{{ $t('unified.assemblySection') }}</template>
       <template #content>
+        <Message severity="info" :closable="false" size="small" style="margin-bottom:0.75rem;">
+          {{ $t('unified.csvInstructions') }}
+        </Message>
         <div style="margin-bottom:0.75rem;">
           <label style="display:block;font-size:0.8rem;font-weight:600;color:#6b7280;margin-bottom:0.25rem;">{{ $t('unified.assemblyCsv') }}</label>
           <FileUpload mode="basic" accept=".csv" :auto="false" :choose-label="$t('unified.selectCsv')" @select="onAsmFileSelect" />
@@ -189,6 +192,9 @@
               <span v-if="totalBlocked" class="chip-blocked">{{ $t('compactFlow.blockedChip', { count: totalBlocked }) }}</span>
             </div>
 
+            <Message v-if="previewData.no_client_order_id" severity="warn" :closable="false" size="small">
+              {{ $t('unified.noClientOrderId') }}
+            </Message>
             <Message v-if="previewData.warnings?.length" severity="warn" :closable="false" size="small">
               {{ previewData.warnings.join(' \u00b7 ') }}
             </Message>
