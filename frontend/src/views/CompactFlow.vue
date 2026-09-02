@@ -147,18 +147,19 @@ const initialMapping = computed(() => {
 })
 
 const mappingWarnings = computed(() => {
-  const targets = Object.values(columnMapping.value)
+  const targets = Object.values(columnMapping.value).flatMap(v => Array.isArray(v) ? v : [v])
   const w = []
   if (!targets.includes('design_name')) w.push(t('compactFlow.noDesignName'))
   if (!targets.includes('batch_number')) w.push(t('compactFlow.noBatchNumber'))
   return w
 })
 
-const hasRequiredMapping = computed(() =>
-  parseResult.value && selectedProject.value &&
-  Object.values(columnMapping.value).includes('design_name') &&
-  Object.values(columnMapping.value).includes('batch_number')
-)
+const hasRequiredMapping = computed(() => {
+  const targets = Object.values(columnMapping.value).flatMap(v => Array.isArray(v) ? v : [v])
+  return parseResult.value && selectedProject.value &&
+    targets.includes('design_name') &&
+    targets.includes('batch_number')
+})
 
 const totalNew = computed(() => previewData.value?.batch_previews.reduce((a, b) => a + b.summary.new, 0) ?? 0)
 const totalChanged = computed(() => previewData.value?.batch_previews.reduce((a, b) => a + b.summary.changed, 0) ?? 0)

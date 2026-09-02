@@ -524,9 +524,11 @@ export default {
     clientMeta_verdieping: 'client_meta: verdieping',
     clientMeta_levering: 'client_meta: levering_montage',
     clientMeta_uid: 'client_meta: uid_element',
-    newMetaKey: '+ New client_meta key\u2026',
+    newMetaKey: '+ New client_meta key…',
     keyName: 'key name',
-    specialChars: '\u26a0 special chars',
+    specialChars: '⚠ special chars',
+    addDuplicate: 'Duplicate',
+    duplicateHint: 'Duplicate this property to map it to another Produuzit field',
   },
   confirmationTable: {
     status: 'Status',

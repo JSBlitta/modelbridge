@@ -3,6 +3,8 @@ import { apiGet, apiPost, apiPatch, fetchAllPages } from "../produuzit-client.js
 import { parseAssemblyCsv } from "../csv-parser.js";
 import { getConfig } from "../config.js";
 import * as db from "../db.js";
+import { findSource, targetsOf } from "../lib/mapping.js";
+import type { ColumnMapping } from "../lib/mapping.js";
 
 const app = new Hono();
 
@@ -28,13 +30,13 @@ function cleanValue(val: unknown): unknown {
 
 function mapRow(
   row: Record<string, string>,
-  columnMapping: Record<string, string>,
+  columnMapping: ColumnMapping,
 ): { mapped: Record<string, unknown>; warnings: string[] } {
   const mapped: Record<string, unknown> = {};
   const clientMeta: Record<string, unknown> = {};
   const warnings: string[] = [];
 
-  for (const [csvCol, target] of Object.entries(columnMapping)) {
+  for (const [csvCol, targetVal] of Object.entries(columnMapping)) {
     const rawVal = row[csvCol];
     const val = cleanValue(rawVal);
 
@@ -42,13 +44,15 @@ function mapRow(
       warnings.push(`Column '${csvCol}' contains special characters that will be escaped.`);
     }
 
-    if (target.startsWith("client_meta.")) {
-      clientMeta[target.slice("client_meta.".length)] = val;
-    } else if (target && target !== "design_name" && target !== "batch_number" && target !== "uuid") {
-      if (target === "client_meta" && typeof val === "string") {
-        try { mapped[target] = JSON.parse(val); } catch { mapped[target] = val; }
-      } else {
-        mapped[target] = val;
+    for (const target of targetsOf(targetVal)) {
+      if (target.startsWith("client_meta.")) {
+        clientMeta[target.slice("client_meta.".length)] = val;
+      } else if (target && target !== "design_name" && target !== "batch_number" && target !== "uuid") {
+        if (target === "client_meta" && typeof val === "string") {
+          try { mapped[target] = JSON.parse(val); } catch { mapped[target] = val; }
+        } else {
+          mapped[target] = val;
+        }
       }
     }
   }
@@ -144,7 +148,7 @@ app.get("/context", async (c) => {
 app.post("/preview-import", async (c) => {
   const body = await c.req.json<{
     project_uuid: string;
-    column_mapping: Record<string, string>;
+    column_mapping: ColumnMapping;
     rows: Record<string, string>[];
   }>();
 
@@ -152,15 +156,15 @@ app.post("/preview-import", async (c) => {
   const batches = await loadBatches(body.project_uuid);
   const dbBatches = new Map(db.getBatches(body.project_uuid).map((b) => [b.uuid, b]));
 
-  const designNameCol = Object.entries(body.column_mapping).find(([, t]) => t === "design_name")?.[0];
-  const batchNumberCol = Object.entries(body.column_mapping).find(([, t]) => t === "batch_number")?.[0];
-  const orderIdCol = Object.entries(body.column_mapping).find(([, t]) => t === "client_order_id")?.[0];
-  const uuidCol = Object.entries(body.column_mapping).find(([, t]) => t === "uuid")?.[0];
+  const designNameCol = findSource(body.column_mapping, "design_name");
+  const batchNumberCol = findSource(body.column_mapping, "batch_number");
+  const orderIdCol = findSource(body.column_mapping, "client_order_id");
+  const uuidCol = findSource(body.column_mapping, "uuid");
 
   // ── UUID mode: update existing assemblies directly by UUID ──
   if (uuidCol) {
-    const superprojectCol = Object.entries(body.column_mapping).find(([, t]) => t === "superproject")?.[0];
-    const projectCol = Object.entries(body.column_mapping).find(([, t]) => t === "project")?.[0];
+    const superprojectCol = findSource(body.column_mapping, "superproject");
+    const projectCol = findSource(body.column_mapping, "project");
 
     // Fetch project info for validation
     let projectInfo: Record<string, unknown> = {};
@@ -344,7 +348,7 @@ app.post("/preview-import", async (c) => {
 app.post("/import", async (c) => {
   const body = await c.req.json<{
     project_uuid: string;
-    column_mapping: Record<string, string>;
+    column_mapping: ColumnMapping;
     rows: Record<string, string>[];
   }>();
 
@@ -352,10 +356,10 @@ app.post("/import", async (c) => {
   const batches = await loadBatches(body.project_uuid);
   const dbBatches = new Map(db.getBatches(body.project_uuid).map((b) => [b.uuid, b]));
 
-  const designNameCol = Object.entries(body.column_mapping).find(([, t]) => t === "design_name")?.[0];
-  const batchNumberCol = Object.entries(body.column_mapping).find(([, t]) => t === "batch_number")?.[0];
-  const orderIdCol = Object.entries(body.column_mapping).find(([, t]) => t === "client_order_id")?.[0];
-  const uuidCol = Object.entries(body.column_mapping).find(([, t]) => t === "uuid")?.[0];
+  const designNameCol = findSource(body.column_mapping, "design_name");
+  const batchNumberCol = findSource(body.column_mapping, "batch_number");
+  const orderIdCol = findSource(body.column_mapping, "client_order_id");
+  const uuidCol = findSource(body.column_mapping, "uuid");
 
   // ── UUID mode: bulk-PATCH all assemblies in a single request ──
   if (uuidCol) {

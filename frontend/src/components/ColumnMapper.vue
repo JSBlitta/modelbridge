@@ -7,6 +7,7 @@
           <th>{{ $t('columnMapper.mapsTo') }}</th>
           <th>{{ $t('columnMapper.preview') }}</th>
           <th>{{ $t('columnMapper.warning') }}</th>
+          <th style="width:3rem;"></th>
         </tr>
       </thead>
       <tbody>
@@ -26,10 +27,26 @@
               <InputText v-model="newMetaKeys[col]" :placeholder="$t('columnMapper.keyName')" style="width:120px;font-size:0.8rem;" @input="emitMapping" />
               <small>→ client_meta.<em>{{ newMetaKeys[col] || '...' }}</em></small>
             </div>
+            <!-- Duplicate mappings: same source column to additional Produuzit targets -->
+            <div v-for="dup in dupsOf(col)" :key="dup.id" class="dup-row">
+              <Select
+                v-model="dup.target"
+                :options="targetOptions"
+                option-label="label"
+                option-value="name"
+                :placeholder="$t('columnMapper.ignore')"
+                class="field-select"
+                @change="emitMapping"
+              />
+              <Button icon="pi pi-times" text size="small" severity="danger" @click="removeDuplicate(dup.id)" />
+            </div>
           </td>
           <td class="preview-val">{{ previewValue(col) }}</td>
           <td>
             <span v-if="hasWarning(col)" class="warn-icon" title="Value contains special characters">{{ $t('columnMapper.specialChars') }}</span>
+          </td>
+          <td>
+            <Button icon="pi pi-copy" text size="small" v-tooltip.top="$t('columnMapper.duplicateHint')" @click="addDuplicate(col)" />
           </td>
         </tr>
       </tbody>
@@ -52,6 +69,8 @@ const emit = defineEmits(['mapping-updated'])
 
 const mapping = ref({})
 const newMetaKeys = ref({})
+const dups = ref([])  // [{ id, col, target, metaKey }]
+let _dupSeq = 0
 
 // Fixed target options
 const targetOptions = computed(() => {
@@ -76,8 +95,11 @@ const targetOptions = computed(() => {
   ]
   // Add any auto-mapped targets not in the standard list
   for (const target of Object.values(props.autoMapping)) {
-    if (target && !standard.some(o => o.name === target)) {
-      standard.push({ name: target, label: target })
+    const ts = Array.isArray(target) ? target : [target]
+    for (const tgt of ts) {
+      if (tgt && !standard.some(o => o.name === tgt)) {
+        standard.push({ name: tgt, label: tgt })
+      }
     }
   }
   return standard
@@ -98,9 +120,22 @@ function hasWarning(col) {
   return false
 }
 
+function dupsOf(col) {
+  return dups.value.filter(d => d.col === col)
+}
+
+function addDuplicate(col) {
+  dups.value = [...dups.value, { id: ++_dupSeq, col, target: '', metaKey: '' }]
+}
+
+function removeDuplicate(id) {
+  dups.value = dups.value.filter(d => d.id !== id)
+  emitMapping()
+}
+
 watch(() => props.autoMapping, (am) => {
   for (const [col, target] of Object.entries(am)) {
-    if (!mapping.value[col]) mapping.value[col] = target
+    if (!mapping.value[col]) mapping.value[col] = Array.isArray(target) ? target[0] : target
   }
   emitMapping()
 }, { immediate: true })
@@ -115,13 +150,13 @@ watch(() => props.detectedColumns, (cols) => {
 function emitMapping() {
   const result = {}
   for (const [col, target] of Object.entries(mapping.value)) {
-    if (!target) continue
-    if (target === '__new_meta__') {
-      const key = (newMetaKeys.value[col] || '').trim()
-      if (key) result[col] = `client_meta.${key}`
-    } else {
-      result[col] = target
-    }
+    const primary = target === '__new_meta__'
+      ? (newMetaKeys.value[col]?.trim() ? `client_meta.${newMetaKeys.value[col].trim()}` : '')
+      : target
+    const dupTargets = dupsOf(col).map(d => d.target).filter(Boolean)
+    const allTargets = [primary, ...dupTargets].filter(Boolean)
+    if (!allTargets.length) continue
+    result[col] = allTargets.length === 1 ? allTargets[0] : allTargets
   }
   emit('mapping-updated', result)
 }
@@ -135,7 +170,7 @@ function emitMapping() {
 .map-table tr.row-warn { background: #fffbeb; }
 .csv-col { font-family: monospace; font-size: 0.82rem; background: #e2e8f0; padding: 0.2rem 0.5rem; border-radius: 4px; white-space: nowrap; }
 .field-select { min-width: 210px; }
+.dup-row { display: flex; align-items: center; gap: 0.3rem; margin-top: 0.35rem; }
 .preview-val { color: #6b7280; font-size: 0.8rem; font-family: monospace; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .warn-icon { color: #b45309; font-size: 0.8rem; white-space: nowrap; }
 </style>
-

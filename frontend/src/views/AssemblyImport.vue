@@ -187,14 +187,14 @@ const initialMapping = computed(() => {
 
 const mappingWarnings = computed(() => {
   const warns = []
-  const targets = Object.values(columnMapping.value)
+  const targets = Object.values(columnMapping.value).flatMap(v => Array.isArray(v) ? v : [v])
   if (!targets.includes('design_name')) warns.push('No column mapped to Design Name — cannot resolve assemblies.')
   if (!targets.includes('batch_number')) warns.push('No column mapped to Batch Number — all rows will be unassigned.')
   return warns
 })
 
 const hasRequiredMapping = computed(() => {
-  const targets = Object.values(columnMapping.value)
+  const targets = Object.values(columnMapping.value).flatMap(v => Array.isArray(v) ? v : [v])
   return targets.includes('design_name') && targets.includes('batch_number')
 })
 

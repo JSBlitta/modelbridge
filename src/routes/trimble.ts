@@ -19,6 +19,8 @@ import {
 } from "../trimble-client.js";
 import { apiGet, apiPatch, apiPost, fetchAllPages } from "../produuzit-client.js";
 import * as db from "../db.js";
+import { findSource, targetsOf } from "../lib/mapping.js";
+import type { ColumnMapping } from "../lib/mapping.js";
 
 const app = new Hono();
 
@@ -290,7 +292,7 @@ app.post("/models/:modelId/entities", async (c) => {
     unique_only?: boolean;
     unique_key_prop?: string;
     include_assemblies?: boolean;
-    column_mapping?: Record<string, string>;
+    column_mapping?: ColumnMapping;
   }>();
 
   if (!body.versionId) return c.json({ error: "Missing versionId" }, 400);
@@ -358,7 +360,7 @@ app.post("/models/:modelId/entities", async (c) => {
 app.post("/preview-import", async (c) => {
   const body = await c.req.json<{
     project_uuid: string;
-    column_mapping: Record<string, string>;
+    column_mapping: ColumnMapping;
     entities: Record<string, unknown>[];
     unique_only?: boolean;
   }>();
@@ -500,7 +502,7 @@ app.post("/preview-import", async (c) => {
 app.post("/import", async (c) => {
   const body = await c.req.json<{
     project_uuid: string;
-    column_mapping: Record<string, string>;
+    column_mapping: ColumnMapping;
     entities: Record<string, unknown>[];
     unique_only?: boolean;
   }>();
@@ -693,23 +695,22 @@ function extractProp(entity: Record<string, unknown>, propPath: string): string 
   return val != null ? String(val) : "";
 }
 
-function resolveProp(columnMapping: Record<string, string>, target: string): string {
-  for (const [ifcProp, prodTarget] of Object.entries(columnMapping)) {
-    if (prodTarget === target) return ifcProp;
-  }
-  return "";
+function resolveProp(columnMapping: ColumnMapping, target: string): string {
+  return findSource(columnMapping, target);
 }
 
-function mapIfcRow(entity: Record<string, unknown>, columnMapping: Record<string, string>): Record<string, unknown> {
+function mapIfcRow(entity: Record<string, unknown>, columnMapping: ColumnMapping): Record<string, unknown> {
   const mapped: Record<string, unknown> = {};
   const clientMeta: Record<string, unknown> = {};
-  for (const [ifcPath, target] of Object.entries(columnMapping)) {
+  for (const [ifcPath, targetVal] of Object.entries(columnMapping)) {
     const rawVal = extractProp(entity, ifcPath);
     const val = cleanValue(rawVal);
-    if (target.startsWith("client_meta.")) {
-      clientMeta[target.slice("client_meta.".length)] = val;
-    } else if (target && target !== "design_name" && target !== "batch_number") {
-      mapped[target] = val;
+    for (const target of targetsOf(targetVal)) {
+      if (target.startsWith("client_meta.")) {
+        clientMeta[target.slice("client_meta.".length)] = val;
+      } else if (target && target !== "design_name" && target !== "batch_number") {
+        mapped[target] = val;
+      }
     }
   }
   if (Object.keys(clientMeta).length) mapped.client_meta = clientMeta;

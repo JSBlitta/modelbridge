@@ -357,16 +357,17 @@ const initialIfcMapping = computed(() => {
 })
 
 const mappingWarnings = computed(() => {
-  const targets = Object.values(columnMapping.value)
+  const targets = Object.values(columnMapping.value).flatMap(v => Array.isArray(v) ? v : [v])
   const w = []
   if (!targets.includes('design_name')) w.push(t('trimble.noDesignName'))
   if (!targets.includes('batch_number')) w.push(t('trimble.noBatchNumber'))
   return w
 })
 
-const hasRequiredMapping = computed(() =>
-  Object.values(columnMapping.value).includes('design_name') &&
-  Object.values(columnMapping.value).includes('batch_number'))
+const hasRequiredMapping = computed(() => {
+  const targets = Object.values(columnMapping.value).flatMap(v => Array.isArray(v) ? v : [v])
+  return targets.includes('design_name') && targets.includes('batch_number')
+})
 
 const dedupLabel = computed(() => {
   if (uniqueKeyProp.value) return uniqueKeyProp.value.split('.').pop()
@@ -768,6 +769,7 @@ async function doImport() {
 function resolveProp(columnMappingObj, target) {
   for (const [ifcProp, prodTarget] of Object.entries(columnMappingObj)) {
     if (prodTarget === target) return ifcProp
+    if (Array.isArray(prodTarget) && prodTarget.includes(target)) return ifcProp
   }
   return ''
 }

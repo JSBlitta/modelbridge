@@ -345,18 +345,19 @@ const initialMapping = computed(() => {
 })
 
 const mappingWarnings = computed(() => {
-  const targets = Object.values(columnMapping.value)
+  const targets = Object.values(columnMapping.value).flatMap(v => Array.isArray(v) ? v : [v])
   const w = []
   if (!targets.includes('design_name')) w.push(t('unified.noDesignName'))
   if (!targets.includes('batch_number')) w.push(t('unified.noBatchNumber'))
   return w
 })
 
-const hasRequiredMapping = computed(() =>
-  parseResult.value && project.value &&
-  Object.values(columnMapping.value).includes('design_name') &&
-  Object.values(columnMapping.value).includes('batch_number')
-)
+const hasRequiredMapping = computed(() => {
+  const targets = Object.values(columnMapping.value).flatMap(v => Array.isArray(v) ? v : [v])
+  return parseResult.value && project.value &&
+    targets.includes('design_name') &&
+    targets.includes('batch_number')
+})
 
 const isUuidMode = computed(() => previewData.value?.uuid_mode)
 const previewRows = computed(() => {
