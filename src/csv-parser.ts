@@ -1,5 +1,19 @@
 const PROJECT_PATTERN = /^(\d+)-([A-Za-z])(?:-(.+))?$/;
 
+// Detect comma vs semicolon delimiter from the header line (outside quotes)
+function detectDelimiter(headerLine: string): "," | ";" {
+  let commas = 0;
+  let semis = 0;
+  let inQuotes = false;
+  for (let i = 0; i < headerLine.length; i++) {
+    const ch = headerLine[i];
+    if (ch === '"') inQuotes = !inQuotes;
+    else if (!inQuotes && ch === ",") commas++;
+    else if (!inQuotes && ch === ";") semis++;
+  }
+  return semis > commas ? ";" : ",";
+}
+
 function detectColumns(
   headers: string[],
   synonyms: Record<string, string[]>,
@@ -32,8 +46,9 @@ export function parseProjectCsv(
   const lines = text.split(/\r?\n/);
   if (lines.length < 2) return { detected_columns: { headers: [], mapped: {} }, project_groups: [], phase_suggestions: [], raw_preview: [] };
 
-  const headers = lines[0].split(",").map((h) => h.trim().replace(/^"|"$/g, ""));
-  const rows = parseRows(lines, headers);
+  const delim = detectDelimiter(lines[0]);
+  const headers = lines[0].split(delim).map((h) => h.trim().replace(/^"|"$/g, ""));
+  const rows = parseRows(lines, headers, delim);
   const colMap = detectColumns(headers, synonyms);
 
   const rawPreview = rows.slice(0, 5);
@@ -142,8 +157,9 @@ export function parseAssemblyCsv(
   const lines = text.split(/\r?\n/);
   if (lines.length < 2) return { headers: [], col_map: {}, meta_suggestions: {}, unmapped_columns: [], rows: [], preview: [] };
 
-  const headers = lines[0].split(",").map((h) => h.trim().replace(/^"|"$/g, ""));
-  const rows = parseRows(lines, headers);
+  const delim = detectDelimiter(lines[0]);
+  const headers = lines[0].split(delim).map((h) => h.trim().replace(/^"|"$/g, ""));
+  const rows = parseRows(lines, headers, delim);
   const colMap = detectColumns(headers, synonyms);
 
   const metaSuggestions: Record<string, string> = {};
@@ -173,12 +189,12 @@ export function parseAssemblyCsv(
   };
 }
 
-function parseRows(lines: string[], headers: string[]): Record<string, string>[] {
+function parseRows(lines: string[], headers: string[], delim: "," | ";"): Record<string, string>[] {
   const rows: Record<string, string>[] = [];
   for (let i = 1; i < lines.length; i++) {
     const line = lines[i].trim();
     if (!line) continue;
-    const values = splitCsvLine(line);
+    const values = splitCsvLine(line, delim);
     const row: Record<string, string> = {};
     for (let j = 0; j < headers.length; j++) {
       row[headers[j]] = values[j] ?? "";
@@ -188,7 +204,7 @@ function parseRows(lines: string[], headers: string[]): Record<string, string>[]
   return rows;
 }
 
-function splitCsvLine(line: string): string[] {
+function splitCsvLine(line: string, delim: "," | ";"): string[] {
   const result: string[] = [];
   let current = "";
   let inQuotes = false;
@@ -197,7 +213,7 @@ function splitCsvLine(line: string): string[] {
     if (ch === '"') {
       if (inQuotes && line[i + 1] === '"') { current += '"'; i++; }
       else inQuotes = !inQuotes;
-    } else if (ch === "," && !inQuotes) {
+    } else if (ch === delim && !inQuotes) {
       result.push(current.trim());
       current = "";
     } else {
