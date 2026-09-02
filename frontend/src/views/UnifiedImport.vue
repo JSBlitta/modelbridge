@@ -16,7 +16,9 @@
 
         <Divider align="center"><span style="color:#9ca3af;font-size:0.8rem;">{{ $t('unified.orCreateFromCsv') }}</span></Divider>
 
-        <FileUpload mode="basic" accept=".csv" :auto="false" :choose-label="$t('unified.uploadSuperproject')" @select="onSuperCsvSelect" />
+        <Button :label="$t('unified.uploadSuperproject')" icon="pi pi-upload" severity="secondary" size="small"
+          @click="triggerSuperCsv" />
+        <input ref="superFileInput" type="file" accept=".csv" style="display:none" @change="onSuperCsvInput" />
         <span v-if="superParseError" style="color:#dc2626;font-size:0.85rem;display:block;margin-top:0.4rem;">{{ superParseError }}</span>
         <span v-if="superNoProjects" style="color:#b45309;font-size:0.85rem;display:block;margin-top:0.4rem;">
           {{ $t('unified.noProjectColumn') }}
@@ -207,10 +209,30 @@
 
             <div v-for="bp in previewData.batch_previews" :key="bp.batch_uuid" class="batch-preview-row">
               <Tag :severity="bp.blocked?'danger':'secondary'" :value="bp.batch_name" />
-              <span style="color:#15803d;">{{ bp.summary.new }}\u2191</span>
-              <span style="color:#b45309;">{{ bp.summary.changed }}~</span>
-              <span class="text-identical">{{ bp.summary.identical }}=</span>
+              <span style="color:#15803d;">{{ $t('unified.batchNewChip', { count: bp.summary.new }) }}</span>
+              <span style="color:#b45309;">{{ $t('unified.batchChangedChip', { count: bp.summary.changed }) }}</span>
+              <span class="text-identical">{{ $t('unified.batchIdenticalChip', { count: bp.summary.identical }) }}</span>
               <Tag v-if="bp.blocked" severity="danger" :value="$t('compactFlow.definitiveBlocked')" />
+            </div>
+
+            <div style="max-height:320px;overflow-y:auto;border:1px solid #e5e7eb;border-radius:6px;margin-top:0.75rem;">
+              <DataTable :value="previewRows" size="small" striped-rows>
+                <Column field="design_name" :header="$t('unified.design')" />
+                <Column field="client_order_id" :header="$t('unified.orderPrefix')" />
+                <Column field="batch_name" :header="$t('unified.batch')" />
+                <Column :header="$t('unified.status')" style="width:110px;">
+                  <template #body="{ data }">
+                    <Tag :severity="data.status==='new'?'success':data.status==='changed'?'warn':data.status==='identical'?'secondary':'danger'"
+                      :value="statusLabel(data.status)" />
+                  </template>
+                </Column>
+                <Column field="changed_fields" :header="$t('unified.changedFields')">
+                  <template #body="{ data }">
+                    <span v-if="data.changed_fields?.length">{{ data.changed_fields.join(', ') }}</span>
+                    <span v-else style="color:#9ca3af;">—</span>
+                  </template>
+                </Column>
+              </DataTable>
             </div>
           </template>
 
@@ -336,6 +358,15 @@ const hasRequiredMapping = computed(() =>
 )
 
 const isUuidMode = computed(() => previewData.value?.uuid_mode)
+const previewRows = computed(() => {
+  const rows = []
+  for (const bp of previewData.value?.batch_previews || []) {
+    for (const r of bp.rows || []) {
+      rows.push({ ...r, batch_name: bp.batch_name })
+    }
+  }
+  return rows
+})
 const totalNew = computed(() => previewData.value?.batch_previews?.reduce((a, b) => a + b.summary.new, 0) ?? 0)
 const totalChanged = computed(() => isUuidMode.value
   ? (previewData.value?.row_previews?.filter(r => r.status === 'changed').length ?? 0)
@@ -364,6 +395,20 @@ async function onSuperCsvSelect(e) {
   superParseError.value = ''
   superNoProjects.value = false
   const file = e.files?.[0]; if (!file) return
+  await parseSuperCsvFile(file)
+}
+
+const superFileInput = ref(null)
+function triggerSuperCsv() { superFileInput.value?.click() }
+function onSuperCsvInput(e) {
+  const file = e.target.files?.[0]
+  if (file) onSuperCsvSelect({ files: [file] })
+  e.target.value = ''
+}
+
+async function parseSuperCsvFile(file) {
+  superParseError.value = ''
+  superNoProjects.value = false
   const form = new FormData(); form.append('file', file)
   try {
     const res = await api.post('/api/csv/parse', form)
@@ -450,6 +495,13 @@ async function onAsmFileSelect(e) {
 }
 
 function onMappingUpdated(m) { columnMapping.value = m; previewData.value = null }
+
+function statusLabel(status) {
+  if (status === 'new') return t('unified.statusNew')
+  if (status === 'changed') return t('unified.statusChanged')
+  if (status === 'identical') return t('unified.statusIdentical')
+  return status
+}
 
 async function doPreview() {
   previewing.value = true; previewData.value = null
