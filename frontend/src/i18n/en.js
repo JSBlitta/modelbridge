@@ -419,6 +419,12 @@ export default {
     filterColumns: 'Filter columns...',
     importErrorsDetail: '{count} error(s) during import — see details below.',
     importSuccessDetail: '{created} created, {updated} updated.',
+    statusLabel: 'Status',
+    statusNew: 'new',
+    statusChanged: 'changed',
+    statusIdentical: 'identical',
+    statusBlocked: 'blocked',
+    changes: 'Changes',
   },
   unified: {
     title: 'Import',

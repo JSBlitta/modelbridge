@@ -419,6 +419,12 @@ export default {
     filterColumns: 'Filter kolommen...',
     importErrorsDetail: '{count} fout(en) tijdens importeren — zie details hieronder.',
     importSuccessDetail: '{created} aangemaakt, {updated} bijgewerkt.',
+    statusLabel: 'Status',
+    statusNew: 'nieuw',
+    statusChanged: 'gewijzigd',
+    statusIdentical: 'identiek',
+    statusBlocked: 'geblokkeerd',
+    changes: 'Wijzigingen',
   },
   unified: {
     title: 'Importeren',

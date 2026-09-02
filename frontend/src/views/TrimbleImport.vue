@@ -223,6 +223,25 @@
             <span class="chip-identical" style="color:#9ca3af">{{ $t('trimble.identicalChip', { count: bp.summary.identical }) }}</span>
             <Tag v-if="bp.blocked" severity="danger" :value="$t('trimble.blockedChip')" />
           </div>
+          <div style="max-height:320px;overflow-y:auto;border:1px solid #e5e7eb;border-radius:6px;margin-top:0.75rem;">
+            <DataTable :value="previewRows" size="small" striped-rows>
+              <Column field="design_name" :header="$t('trimble.design')" />
+              <Column field="client_order_id" :header="$t('trimble.orderId')" />
+              <Column field="batch_name" :header="$t('trimble.batch')" />
+              <Column :header="$t('trimble.statusLabel')" style="width:110px;">
+                <template #body="{ data }">
+                  <Tag :severity="data.status==='new'?'success':data.status==='changed'?'warn':data.status==='identical'?'secondary':'danger'"
+                    :value="statusLabel(data.status)" />
+                </template>
+              </Column>
+              <Column :header="$t('trimble.changes')">
+                <template #body="{ data }">
+                  <span v-if="data.changed_fields?.length">{{ formatChanges(data) }}</span>
+                  <span v-else style="color:#9ca3af;">—</span>
+                </template>
+              </Column>
+            </DataTable>
+          </div>
           <Message v-if="!canExecute" severity="secondary" :closable="false" size="small" style="margin-top:0.5rem;">
             {{ $t('trimble.nothingToPushDetail') }}
           </Message>
@@ -441,6 +460,34 @@ function toggleBatch(batchKey) {
 const canExecute = computed(() =>
   previewData.value?.batch_previews?.some(bp => !bp.blocked && (bp.summary.new > 0 || bp.summary.changed > 0))
 )
+
+const previewRows = computed(() => {
+  const rows = []
+  for (const bp of previewData.value?.batch_previews || []) {
+    for (const r of bp.rows || []) {
+      rows.push({ ...r, batch_name: bp.batch_name })
+    }
+  }
+  return rows
+})
+
+function statusLabel(status) {
+  if (status === 'new') return t('trimble.statusNew')
+  if (status === 'changed') return t('trimble.statusChanged')
+  if (status === 'identical') return t('trimble.statusIdentical')
+  if (status === 'blocked') return t('trimble.statusBlocked')
+  return status
+}
+
+function formatChanges(row) {
+  const fields = row.changed_fields || []
+  return fields.map(f => {
+    const oldVal = row.existing?.[f]
+    const newVal = row.proposed?.[f]
+    const fmt = v => v === undefined || v === null ? '—' : typeof v === 'object' ? JSON.stringify(v) : String(v)
+    return `${f}: ${fmt(oldVal)} → ${fmt(newVal)}`
+  }).join(' | ')
+}
 
 
 const totalSelectedProps = computed(() => allSelectedProps.value.length)
