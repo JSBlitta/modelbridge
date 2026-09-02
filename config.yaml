@@ -13,8 +13,6 @@ synonyms:
   - levering-productie
   - levering_productie
   - productie
-  - levering-bestelling
-  - levering_bestelling
   client_order_id:
   - client_order_id
   - montagenummer
@@ -39,9 +37,12 @@ synonyms:
   - phase
   - fase
   - ohw_verdieping
+  - levering-bestelling
+  - levering_bestelling
   priority:
   - priority
   - prioriteit
+  - prio
   uuid:
   - uuid
   - assembly_uuid

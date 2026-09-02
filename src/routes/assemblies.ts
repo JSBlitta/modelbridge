@@ -3,8 +3,9 @@ import { apiGet, apiPost, apiPatch, fetchAllPages } from "../produuzit-client.js
 import { parseAssemblyCsv } from "../csv-parser.js";
 import { getConfig } from "../config.js";
 import * as db from "../db.js";
-import { findSource, targetsOf, parseCount, generateOrderIds, orderPrefix } from "../lib/mapping.js";
+import { findSource, targetsOf, parseCount, generateOrderIds } from "../lib/mapping.js";
 import type { ColumnMapping } from "../lib/mapping.js";
+import { upsertProductionCounts } from "../lib/production-counts.js";
 
 const app = new Hono();
 
@@ -92,10 +93,6 @@ async function resolveDesignUuid(
     // Fall through to null — caller reports the design as unresolved
   }
   return null;
-}
-
-function assemblyKey(designUuid: string | null | undefined, clientOrderId: string | null | undefined): string {
-  return `${designUuid ?? ""}|${clientOrderId ?? ""}`;
 }
 
 function matchBatchByNumber(batches: Record<string, unknown>[], batchRaw: string): Record<string, unknown> | null {
@@ -252,12 +249,14 @@ app.post("/preview-import", async (c) => {
     });
   }
 
-  // ── Standard mode: resolve designs, group by batch ──
+  // ── Standard mode: resolve designs, aggregate production counts by batch ──
 
   const byBatch = new Map<string, Record<string, string>[]>();
   const unresolvedBatches = new Set<string>();
   const unresolvedDesigns = new Set<string>();
   const createdDesigns = new Map<string, string>();
+  const batchById = new Map<string, Record<string, unknown>>();
+  for (const b of batches) batchById.set(b.uuid as string, b);
 
   for (const row of body.rows) {
     const batchNum = batchNumberCol ? (row[batchNumberCol] ?? "") : "";
@@ -269,80 +268,36 @@ app.post("/preview-import", async (c) => {
   }
 
   const batchPreviews = [];
-  const allWarnings: string[] = [];
-
-  const noOrderIdWarning = !orderIdCol;
 
   for (const [batchUuid, rows] of byBatch) {
-    const batchInfo = batches.find((b) => b.uuid === batchUuid) ?? {};
+    const batchInfo = batchById.get(batchUuid) ?? {};
     const dbState = dbBatches.get(batchUuid)?.state ?? "provisional";
+    const batchPhase = String(batchInfo.phase ?? "").trim();
 
-    const existingAssemblies = await fetchAssembliesByBatch(batchUuid);
-    const existingByKey = new Map<string, Record<string, unknown>>();
-    for (const a of existingAssemblies) {
-      const key = assemblyKey(a.design as string, a.client_order_id as string | undefined);
-      existingByKey.set(key, a);
-    }
-
-    const rowPreviews = [];
+    const countMap = new Map<string, { design: string; design_name: string; phase: string; count: number }>();
     for (const row of rows) {
-      const { mapped, warnings } = mapRow(row, body.column_mapping);
-      allWarnings.push(...warnings);
-
       const designName = designNameCol ? (cleanValue(row[designNameCol]) as string | null) : null;
       const designUuid = designName ? await resolveDesignUuid(designsMap, body.project_uuid, designName, createdDesigns) : null;
-      if (designName && !designUuid) unresolvedDesigns.add(designName);
-
-      const orderId = orderIdCol ? (cleanValue(row[orderIdCol]) as string | null) : null;
+      if (designName && !designUuid) { unresolvedDesigns.add(designName); continue; }
+      if (!designUuid) continue;
       const count = countCol ? parseCount(cleanValue(row[countCol])) : 1;
-
-      // Count mode: one row means "produce N total assemblies for this design"
-      if (count > 1 && !orderId) {
-        const existingForDesign = designUuid ? existingAssemblies.filter((a) => a.design === designUuid) : [];
-        const toCreate = Math.max(0, count - existingForDesign.length);
-        rowPreviews.push({
-          design_name: designName,
-          design_uuid: designUuid,
-          client_order_id: null,
-          count_requested: count,
-          count_existing: existingForDesign.length,
-          count_to_create: toCreate,
-          status: toCreate > 0 ? "new" : "identical",
-          changed_fields: [],
-          proposed: mapped,
-          existing: null,
-        });
-        continue;
-      }
-
-      const key = assemblyKey(designUuid, orderId);
-      const ex = designUuid ? existingByKey.get(key) ?? null : null;
-      let status: "new" | "changed" | "identical" = "new";
-      const changed: string[] = [];
-
-      if (ex) {
-        for (const field of ["scheduled_prod_date", "priority", "client_meta"]) {
-          if (field in mapped && JSON.stringify(mapped[field]) !== JSON.stringify(ex[field])) {
-            changed.push(field);
-          }
-        }
-        status = changed.length ? "changed" : "identical";
-      }
-
-      rowPreviews.push({
-        design_name: designName,
-        design_uuid: designUuid,
-        client_order_id: orderId,
-        count_requested: count,
-        count_to_create: status === "new" ? count : 0,
-        status,
-        changed_fields: changed,
-        proposed: mapped,
-        existing: ex
-          ? { uuid: ex.uuid, design: ex.design, client_order_id: ex.client_order_id, scheduled_prod_date: ex.scheduled_prod_date, priority: ex.priority, client_meta: ex.client_meta }
-          : null,
-      });
+      const key = `${batchPhase}|${designUuid}`;
+      const entry = countMap.get(key);
+      if (entry) entry.count += count;
+      else countMap.set(key, { design: designUuid, design_name: designName || designUuid, phase: batchPhase, count });
     }
+
+    const rowPreviews = [...countMap.values()].map((e) => ({
+      design_name: e.design_name,
+      design_uuid: e.design,
+      phase: e.phase,
+      count_requested: e.count,
+      count_to_create: dbState === "definitive" ? 0 : e.count,
+      status: dbState === "definitive" ? "blocked" : "new",
+      changed_fields: [],
+      proposed: null,
+      existing: null,
+    }));
 
     batchPreviews.push({
       batch_uuid: batchUuid,
@@ -351,10 +306,10 @@ app.post("/preview-import", async (c) => {
       blocked: dbState === "definitive",
       rows: rowPreviews,
       summary: {
-        total: rowPreviews.reduce((a, r) => a + (r.count_to_create || 1), 0),
-        new: rowPreviews.filter((r) => r.status === "new").reduce((a, r) => a + (r.count_to_create || 1), 0),
-        changed: rowPreviews.filter((r) => r.status === "changed").length,
-        identical: rowPreviews.filter((r) => r.status === "identical").length,
+        total: rowPreviews.reduce((a, r) => a + (r.count_to_create || 0), 0),
+        new: rowPreviews.filter((r) => r.status === "new").reduce((a, r) => a + (r.count_to_create || 0), 0),
+        changed: 0,
+        identical: 0,
       },
     });
   }
@@ -363,8 +318,8 @@ app.post("/preview-import", async (c) => {
     batch_previews: batchPreviews,
     unresolved_batches: [...unresolvedBatches].sort(),
     unresolved_designs: [...unresolvedDesigns].sort(),
-    no_client_order_id: noOrderIdWarning,
-    warnings: [...new Set(allWarnings)],
+    no_client_order_id: !orderIdCol,
+    warnings: [],
   });
 });
 
@@ -455,10 +410,17 @@ app.post("/import", async (c) => {
 
   const results: Record<string, unknown>[] = [];
   const createdDesigns = new Map<string, string>();
+  const batchById = new Map<string, Record<string, unknown>>();
+  for (const b of batches) batchById.set(b.uuid as string, b);
+
+  // Aggregate production counts per (batch, phase, design)
+  const countMap = new Map<string, { batch: string; phase: string; design: string; design_name: string; count: number }>();
 
   for (const [batchUuid, rows] of byBatch) {
     const dbState = dbBatches.get(batchUuid)?.state ?? "provisional";
-    const batchName = (batches.find((b) => b.uuid === batchUuid) as Record<string, unknown>)?.name ?? batchUuid;
+    const batchInfo = batchById.get(batchUuid) ?? {};
+    const batchName = (batchInfo.name as string) ?? batchUuid;
+    const batchPhase = String(batchInfo.phase ?? "").trim();
 
     if (dbState === "definitive") {
       for (const row of rows) {
@@ -468,81 +430,30 @@ app.post("/import", async (c) => {
       continue;
     }
 
-    const existingAssemblies = await fetchAssembliesByBatch(batchUuid);
-    // Key on (design, client_order_id) so each physical element is tracked individually
-    const existingByKey = new Map<string, Record<string, unknown>>();
-    for (const a of existingAssemblies) {
-      const key = assemblyKey(a.design as string, a.client_order_id as string | undefined);
-      existingByKey.set(key, a);
-    }
-
     for (const row of rows) {
-      const { mapped } = mapRow(row, body.column_mapping);
       const designName = designNameCol ? (cleanValue(row[designNameCol]) as string | null) : null;
       const designUuid = designName ? await resolveDesignUuid(designsMap, body.project_uuid, designName, createdDesigns) : null;
-
       if (!designUuid) {
         results.push({ design_name: designName, batch: batchName, status: "error", reason: `Design '${designName}' not found in project` });
         continue;
       }
-
-      const orderId = orderIdCol ? (cleanValue(row[orderIdCol]) as string | null) : null;
-      mapped.design = designUuid;
-      mapped.batch = batchUuid;
-      mapped.project = body.project_uuid;
-      if (orderId) mapped.client_order_id = orderId;
-
       const count = countCol ? parseCount(cleanValue(row[countCol])) : 1;
+      const key = `${batchUuid}|${batchPhase}|${designUuid}`;
+      const entry = countMap.get(key);
+      if (entry) entry.count += count;
+      else countMap.set(key, { batch: batchUuid, phase: batchPhase, design: designUuid, design_name: designName || designUuid, count });
+    }
+  }
 
-      // Count mode: produce N total assemblies for this design (no explicit order ID)
-      if (count > 1 && !orderId) {
-        const existingForDesign = existingAssemblies.filter((a) => a.design === designUuid);
-        const toCreate = Math.max(0, count - existingForDesign.length);
-        const prefix = orderPrefix(designName || "");
-        const newIds = generateOrderIds(prefix, existingForDesign.length + 1, toCreate);
-        for (const newId of newIds) {
-          try {
-            await apiPost("/constructibles/assemblies/", { ...mapped, client_order_id: newId });
-            results.push({ design_name: designName, client_order_id: newId, batch: batchName, status: "created" });
-          } catch (e) {
-            results.push({ design_name: designName, client_order_id: newId, batch: batchName, status: "error", reason: String(e) });
-          }
-        }
-        if (toCreate === 0) {
-          results.push({ design_name: designName, batch: batchName, status: "skipped", reason: `Already at count ${count}` });
-        }
-        continue;
+  if (countMap.size) {
+    try {
+      await upsertProductionCounts(body.project_uuid, [...countMap.values()]);
+      for (const e of countMap.values()) {
+        const bn = (batchById.get(e.batch)?.name as string) ?? e.batch;
+        results.push({ design_name: e.design_name, batch: bn, phase: e.phase, status: "created", count: e.count });
       }
-
-      const key = assemblyKey(designUuid, orderId);
-      const ex = existingByKey.get(key);
-      if (ex) {
-        const changed: string[] = [];
-        for (const field of ["scheduled_prod_date", "priority", "client_meta"]) {
-          if (field in mapped && JSON.stringify(mapped[field]) !== JSON.stringify(ex[field])) {
-            changed.push(field);
-          }
-        }
-        if (!changed.length) {
-          results.push({ design_name: designName, client_order_id: orderId, batch: batchName, status: "skipped", reason: "Identical" });
-          continue;
-        }
-        try {
-          const patchBody: Record<string, unknown> = {};
-          for (const k of changed) if (k in mapped) patchBody[k] = mapped[k];
-          await apiPatch(`/constructibles/assemblies/${ex.uuid}/`, patchBody);
-          results.push({ design_name: designName, client_order_id: orderId, batch: batchName, status: "updated", changed_fields: changed });
-        } catch (e) {
-          results.push({ design_name: designName, client_order_id: orderId, batch: batchName, status: "error", reason: String(e) });
-        }
-      } else {
-        try {
-          await apiPost("/constructibles/assemblies/", mapped);
-          results.push({ design_name: designName, client_order_id: orderId, batch: batchName, status: "created" });
-        } catch (e) {
-          results.push({ design_name: designName, client_order_id: orderId, batch: batchName, status: "error", reason: String(e) });
-        }
-      }
+    } catch (e) {
+      results.push({ status: "error", reason: `Failed to write production counts: ${String(e)}` });
     }
   }
 

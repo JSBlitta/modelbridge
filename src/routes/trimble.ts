@@ -17,10 +17,11 @@ import {
   stopOAuthServer,
   trimbleGet,
 } from "../trimble-client.js";
-import { apiGet, apiPatch, apiPost, fetchAllPages } from "../produuzit-client.js";
+import { fetchAllPages } from "../produuzit-client.js";
 import * as db from "../db.js";
-import { findSource, targetsOf, parseCount, generateOrderIds, orderPrefix } from "../lib/mapping.js";
+import { findSource, parseCount } from "../lib/mapping.js";
 import type { ColumnMapping } from "../lib/mapping.js";
+import { upsertProductionCounts } from "../lib/production-counts.js";
 import { logger } from "../logger.js";
 
 const app = new Hono();
@@ -43,18 +44,6 @@ app.use("/*", async (c, next) => {
   if (saved) restoreRefreshToken(saved);
   await next();
 });
-
-const NA_PATTERN = /^#?n\/?a$/i;
-
-function cleanValue(val: unknown): unknown {
-  if (val == null) return null;
-  if (typeof val === "string") {
-    const v = val.trim();
-    if (NA_PATTERN.test(v) || v === "") return null;
-    return v;
-  }
-  return val;
-}
 
 // --- Auth routes ---
 
@@ -326,19 +315,19 @@ app.post("/models/:modelId/entities", async (c) => {
     return true;
   });
   if (entities.length < filteredBefore) {
-    console.log(`[trimble] filtered out ${filteredBefore - entities.length} spatial/assembly entities (${filteredBefore} → ${entities.length})`);
+    logger.debug(`[trimble] filtered out ${filteredBefore - entities.length} spatial/assembly entities (${filteredBefore} → ${entities.length})`);
   }
 
   if (entities.length > 0) {
-    console.log(`[trimble] entities: ${entities.length} items, psetdefs: ${psetdefsRaw.length}`);
-    console.log("[trimble] first entity (transformed):", JSON.stringify(entities[0], null, 2));
+    logger.debug(`[trimble] entities: ${entities.length} items, psetdefs: ${psetdefsRaw.length}`);
+    logger.debug("[trimble] first entity (transformed):", JSON.stringify(entities[0], null, 2));
     // Log entity type breakdown to help identify spatial/structural elements vs physical elements
     const typeCounts: Record<string, number> = {};
     for (const e of entities) {
       const tp = (e.type as string) || "(no type)";
       typeCounts[tp] = (typeCounts[tp] || 0) + 1;
     }
-    console.log("[trimble] entity types:", JSON.stringify(typeCounts, null, 2));
+    logger.debug("[trimble] entity types:", JSON.stringify(typeCounts, null, 2));
   }
 
   if (body.unique_only) {
@@ -408,7 +397,7 @@ app.post("/preview-import", async (c) => {
       if (!designToBatchUuids.get(dUuid)!.includes(bUuid)) designToBatchUuids.get(dUuid)!.push(bUuid);
     }
   }
-  console.log(`[trimble preview] loaded ${allAssemblies.length} assemblies across ${asmByBatch.size} batches`);
+  logger.debug(`[trimble preview] loaded ${allAssemblies.length} assemblies across ${asmByBatch.size} batches`);
 
   const byBatch = new Map<string, Record<string, unknown>[]>();
   const unresolvedBatches = new Set<string>();
@@ -439,80 +428,54 @@ app.post("/preview-import", async (c) => {
 
   const batchPreviews = [];
   let bi = 0;
+  const batchById = new Map<string, Record<string, unknown>>();
+  for (const b of batches) batchById.set(b.uuid as string, b);
+
   for (const [batchUuid, ents] of byBatch) {
     bi++;
     const dbState = dbBatches.get(batchUuid)?.state ?? "provisional";
-    const batchName = (batches.find((b) => b.uuid === batchUuid) as Record<string, unknown>)?.name ?? batchUuid;
+    const batchInfo = batchById.get(batchUuid) ?? {};
+    const batchName = (batchInfo.name as string) ?? batchUuid;
+    const batchPhase = String(batchInfo.phase ?? "").trim();
 
-    // Use pre-partitioned assemblies — no per-batch API call
-    const existingAsm = asmByBatch.get(batchUuid) ?? [];
-    const existingByKey = new Map<string, Record<string, unknown>>();
-    for (const a of existingAsm) {
-      const key = trimbleAssemblyKey(a.design as string, a.client_order_id as string | undefined);
-      existingByKey.set(key, a);
-    }
-
-    const rowPreviews = [];
+    const countMap = new Map<string, { design: string; design_name: string; phase: string; count: number }>();
     for (const entity of ents) {
       const dn = designProp ? extractProp(entity, designProp) : "";
       const designUuid = fuzzyDesignLookup(designsMap, dn) ?? null;
-            if (dn && !designUuid) unresolvedDesigns.add(dn);
-
-            const orderId = orderProp ? extractProp(entity, orderProp) || null : null;
+      if (dn && !designUuid) { unresolvedDesigns.add(dn); continue; }
+      if (!designUuid) continue;
       const count = countProp ? parseCount(extractProp(entity, countProp)) : 1;
-      const mapped = mapIfcRow(entity, body.column_mapping);
-
-      // Count mode: one entity means "produce N total assemblies for this design"
-      if (dbState !== "definitive" && count > 1 && !orderId) {
-        const existingForDesign = designUuid ? existingAsm.filter((a) => a.design === designUuid) : [];
-        const toCreate = Math.max(0, count - existingForDesign.length);
-        rowPreviews.push({
-          design_name: dn,
-          design_uuid: designUuid,
-          client_order_id: null,
-          count_requested: count,
-          count_existing: existingForDesign.length,
-          count_to_create: toCreate,
-          status: dbState === "definitive" ? "blocked" : toCreate > 0 ? "new" : "identical",
-          changed_fields: [],
-          proposed: mapped,
-          existing: null,
-        });
-        continue;
-      }
-
-      const key = trimbleAssemblyKey(designUuid, orderId);
-      const ex = designUuid ? existingByKey.get(key) ?? null : null;
-      let status: "new" | "changed" | "identical" | "blocked" = "new";
-      const changed: string[] = [];
-
-      if (dbState === "definitive") {
-        status = "blocked";
-      } else if (ex) {
-        for (const field of ["scheduled_prod_date", "priority", "client_meta"]) {
-          if (field in mapped && JSON.stringify(mapped[field]) !== JSON.stringify(ex[field])) {
-            changed.push(field);
-          }
-        }
-        status = changed.length ? "changed" : "identical";
-      }
-
-      rowPreviews.push({ design_name: dn, design_uuid: designUuid, client_order_id: orderId, count_requested: count, count_to_create: status === "new" ? count : 0, status, changed_fields: changed, proposed: mapped, existing: ex });
+      const key = `${batchPhase}|${designUuid}`;
+      const entry = countMap.get(key);
+      if (entry) entry.count += count;
+      else countMap.set(key, { design: designUuid, design_name: dn || designUuid, phase: batchPhase, count });
     }
 
+    const rowPreviews = [...countMap.values()].map((e) => ({
+      design_name: e.design_name,
+      design_uuid: e.design,
+      phase: e.phase,
+      count_requested: e.count,
+      count_to_create: dbState === "definitive" ? 0 : e.count,
+      status: dbState === "definitive" ? "blocked" : "new",
+      changed_fields: [],
+      proposed: null,
+      existing: null,
+    }));
+
     const summary = {
-      total: rowPreviews.reduce((a, r) => a + (r.count_to_create || 1), 0),
-      new: rowPreviews.filter((r) => r.status === "new").reduce((a, r) => a + (r.count_to_create || 1), 0),
-      changed: rowPreviews.filter((r) => r.status === "changed").length,
-      identical: rowPreviews.filter((r) => r.status === "identical").length,
+      total: rowPreviews.reduce((a, r) => a + (r.count_to_create || 0), 0),
+      new: rowPreviews.filter((r) => r.status === "new").reduce((a, r) => a + (r.count_to_create || 0), 0),
+      changed: 0,
+      identical: 0,
       blocked: rowPreviews.filter((r) => r.status === "blocked").length,
     };
-    logger.debug(`[trimble preview] batch ${bi}/${byBatch.size} "${batchName}": ${summary.new}↑ ${summary.changed}~ ${summary.identical}= ${summary.blocked}✗`);
+    logger.debug(`[trimble preview] batch ${bi}/${byBatch.size} "${batchName}": ${summary.new} new, ${summary.blocked} blocked`);
 
     batchPreviews.push({ batch_uuid: batchUuid, batch_name: batchName, local_state: dbState, blocked: dbState === "definitive", rows: rowPreviews, summary });
   }
 
-  console.log(`[trimble preview] DONE — ${byBatch.size} batches checked, ${unresolvedDesigns.size} unmatched designs, ${unresolvedBatches.size} unmatched batches`);
+  logger.debug(`[trimble preview] DONE — ${byBatch.size} batches checked, ${unresolvedDesigns.size} unmatched designs, ${unresolvedBatches.size} unmatched batches`);
 
   return c.json({
     batch_previews: batchPreviews,
@@ -553,6 +516,11 @@ app.post("/import", async (c) => {
     });
   }
 
+  const results: Record<string, unknown>[] = [];
+  const batchById = new Map<string, Record<string, unknown>>();
+  for (const b of batches) batchById.set(b.uuid as string, b);
+  const countMap = new Map<string, { batch: string; phase: string; design: string; design_name: string; count: number }>();
+
   const byBatch = new Map<string, Record<string, unknown>[]>();
 
   if (!batchProp) {
@@ -591,11 +559,11 @@ app.post("/import", async (c) => {
     }
   }
 
-  const results: Record<string, unknown>[] = [];
-
   for (const [batchUuid, ents] of byBatch) {
     const dbState = dbBatches.get(batchUuid)?.state ?? "provisional";
-    const batchName = (batches.find((b) => b.uuid === batchUuid) as Record<string, unknown>)?.name ?? batchUuid;
+    const batchInfo = batchById.get(batchUuid) ?? {};
+    const batchName = (batchInfo.name as string) ?? batchUuid;
+    const batchPhase = String(batchInfo.phase ?? "").trim();
 
     if (dbState === "definitive") {
       for (const e of ents) {
@@ -604,80 +572,30 @@ app.post("/import", async (c) => {
       continue;
     }
 
-    const existingResp = (await apiGet("/constructibles/assemblies/", { batch: batchUuid, limit: 500 })) as {
-      results: Record<string, unknown>[];
-    };
-    const existingByKey = new Map<string, Record<string, unknown>>();
-    for (const a of existingResp.results ?? []) {
-      const key = trimbleAssemblyKey(a.design as string, a.client_order_id as string | undefined);
-      existingByKey.set(key, a);
-    }
-
     for (const entity of ents) {
       const dn = designProp ? extractProp(entity, designProp) : "";
       const designUuid = fuzzyDesignLookup(designsMap, dn);
-            if (!designUuid) {
-              results.push({ design_name: dn, batch: batchName, status: "error", reason: `Design '${dn}' not found` });
-              continue;
-            }
-
-      const orderId = orderProp ? extractProp(entity, orderProp) || null : null;
-      const count = countProp ? parseCount(extractProp(entity, countProp)) : 1;
-      const mapped = mapIfcRow(entity, body.column_mapping);
-      mapped.design = designUuid;
-      mapped.batch = batchUuid;
-      mapped.project = body.project_uuid;
-      if (orderId) mapped.client_order_id = orderId;
-
-      // Count mode: produce N total assemblies for this design (no explicit order ID)
-      if (count > 1 && !orderId) {
-        const existingForDesign = (existingResp.results ?? []).filter((a) => a.design === designUuid);
-        const toCreate = Math.max(0, count - existingForDesign.length);
-        const prefix = orderPrefix(dn || "");
-        const newIds = generateOrderIds(prefix, existingForDesign.length + 1, toCreate);
-        for (const newId of newIds) {
-          try {
-            await apiPost("/constructibles/assemblies/", { ...mapped, client_order_id: newId });
-            results.push({ design_name: dn, client_order_id: newId, batch: batchName, status: "created" });
-          } catch (e) {
-            results.push({ design_name: dn, client_order_id: newId, batch: batchName, status: "error", reason: String(e) });
-          }
-        }
-        if (toCreate === 0) {
-          results.push({ design_name: dn, batch: batchName, status: "skipped", reason: `Already at count ${count}` });
-        }
+      if (!designUuid) {
+        results.push({ design_name: dn, batch: batchName, status: "error", reason: `Design '${dn}' not found` });
         continue;
       }
+      const count = countProp ? parseCount(extractProp(entity, countProp)) : 1;
+      const key = `${batchUuid}|${batchPhase}|${designUuid}`;
+      const entry = countMap.get(key);
+      if (entry) entry.count += count;
+      else countMap.set(key, { batch: batchUuid, phase: batchPhase, design: designUuid, design_name: dn || designUuid, count });
+    }
+  }
 
-      const key = trimbleAssemblyKey(designUuid, orderId);
-      const ex = existingByKey.get(key);
-      if (ex) {
-        const changed: string[] = [];
-        for (const field of ["scheduled_prod_date", "priority", "client_meta"]) {
-          if (field in mapped && JSON.stringify(mapped[field]) !== JSON.stringify(ex[field])) {
-            changed.push(field);
-          }
-        }
-        if (!changed.length) {
-          results.push({ design_name: dn, client_order_id: orderId, batch: batchName, status: "skipped", reason: "Identical" });
-          continue;
-        }
-        try {
-          const patchBody: Record<string, unknown> = {};
-          for (const k of changed) if (k in mapped) patchBody[k] = mapped[k];
-          await apiPatch(`/constructibles/assemblies/${(ex as Record<string, unknown>).uuid}/`, patchBody);
-          results.push({ design_name: dn, client_order_id: orderId, batch: batchName, status: "updated", changed_fields: changed });
-        } catch (e) {
-          results.push({ design_name: dn, client_order_id: orderId, batch: batchName, status: "error", reason: String(e) });
-        }
-      } else {
-        try {
-          await apiPost("/constructibles/assemblies/", mapped);
-          results.push({ design_name: dn, client_order_id: orderId, batch: batchName, status: "created" });
-        } catch (e) {
-          results.push({ design_name: dn, client_order_id: orderId, batch: batchName, status: "error", reason: String(e) });
-        }
+  if (countMap.size) {
+    try {
+      await upsertProductionCounts(body.project_uuid, [...countMap.values()]);
+      for (const e of countMap.values()) {
+        const bn = (batchById.get(e.batch)?.name as string) ?? e.batch;
+        results.push({ design_name: e.design_name, batch: bn, phase: e.phase, design: e.design, status: "created", count: e.count });
       }
+    } catch (e) {
+      results.push({ status: "error", reason: `Failed to write production counts: ${String(e)}` });
     }
   }
 
@@ -692,10 +610,6 @@ app.post("/import", async (c) => {
 });
 
 // --- Helpers ---
-
-function trimbleAssemblyKey(designUuid: string | null | undefined, clientOrderId: string | null | undefined): string {
-  return `${designUuid ?? ""}|${clientOrderId ?? ""}`;
-}
 
 function extractProp(entity: Record<string, unknown>, propPath: string): string {
   if (!propPath) return "";
@@ -742,24 +656,6 @@ function extractProp(entity: Record<string, unknown>, propPath: string): string 
 
 function resolveProp(columnMapping: ColumnMapping, target: string): string {
   return findSource(columnMapping, target);
-}
-
-function mapIfcRow(entity: Record<string, unknown>, columnMapping: ColumnMapping): Record<string, unknown> {
-  const mapped: Record<string, unknown> = {};
-  const clientMeta: Record<string, unknown> = {};
-  for (const [ifcPath, targetVal] of Object.entries(columnMapping)) {
-    const rawVal = extractProp(entity, ifcPath);
-    const val = cleanValue(rawVal);
-    for (const target of targetsOf(targetVal)) {
-      if (target.startsWith("client_meta.")) {
-        clientMeta[target.slice("client_meta.".length)] = val;
-      } else if (target && target !== "design_name" && target !== "batch_number" && target !== "count") {
-        mapped[target] = val;
-      }
-    }
-  }
-  if (Object.keys(clientMeta).length) mapped.client_meta = clientMeta;
-  return mapped;
 }
 
 // Normalize only the 4th character: swap dash/underscore at position 3 (0-indexed).

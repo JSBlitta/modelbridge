@@ -208,6 +208,10 @@ export async function apiPatch(path: string, json?: unknown): Promise<unknown> {
   return request("PATCH", path, { json });
 }
 
+export async function apiPut(path: string, json?: unknown): Promise<unknown> {
+  return request("PUT", path, { json });
+}
+
 export async function apiPostFormData(path: string, formData: FormData): Promise<unknown> {
   return request("POST", path, { formData });
 }
