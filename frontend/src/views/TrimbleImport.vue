@@ -166,13 +166,21 @@
           </div>
         </div>
 
-        <DataTable v-if="previewEntities.length" :value="previewEntities" size="small" striped-rows scrollable scroll-height="400px">
+        <DataTable v-if="previewEntities.length" :value="previewEntities" size="small" striped-rows scrollable scroll-height="400px"
+          removable-sort sort-mode="multiple"
+          :global-filter="entityFilter" :global-filter-fields="displayProps" filter-display="menu" global-filter-match-mode="contains">
+          <template #header>
+            <div style="display:flex;gap:0.5rem;align-items:center;">
+              <InputText v-model="entityFilter" :placeholder="$t('trimble.filterEntities')" size="small" style="width:220px;" />
+              <InputText v-model="propFilter" :placeholder="$t('trimble.filterColumns')" size="small" style="width:180px;" />
+            </div>
+          </template>
           <Column :header="$t('trimble.selectAllEntities')" style="width:3rem;">
             <template #body="{ index }">
               <Checkbox :model-value="selectedEntityIndices.has(index)" :binary="true" @change="toggleEntity(index)" />
             </template>
           </Column>
-          <Column v-for="prop in allSelectedProps.slice(0, 8)" :key="prop" :field="prop" :header="prop.split('.').pop()" style="min-width:120px;">
+          <Column v-for="prop in displayProps" :key="prop" :field="prop" :header="prop.split('.').pop()" style="min-width:120px;" sortable>
             <template #body="{ data }">{{ extractProp(data, prop) }}</template>
           </Column>
         </DataTable>
@@ -367,10 +375,27 @@ const entityBatchGroups = computed(() => {
     if (!groups.has(batch)) groups.set(batch, [])
     groups.get(batch).push(i)
   })
-  return groups
+  // Sort low → high by leading number; no-batch entries last
+  return new Map([...groups.entries()].sort(([a], [b]) => {
+    const na = parseInt(a, 10)
+    const nb = parseInt(b, 10)
+    if (isNaN(na) && isNaN(nb)) return String(a).localeCompare(String(b))
+    if (isNaN(na)) return 1
+    if (isNaN(nb)) return -1
+    return na - nb
+  }))
 })
 
 const selectedCount = computed(() => selectedEntityIndices.value.size)
+
+// Entity table filter/sort state
+const entityFilter = ref('')
+const propFilter = ref('')
+const displayProps = computed(() => {
+  const q = propFilter.value.trim().toLowerCase()
+  const props = q ? allSelectedProps.value.filter(p => p.toLowerCase().includes(q)) : allSelectedProps.value
+  return props.slice(0, 12)
+})
 
 const selectedEntities = computed(() =>
   previewEntities.value.filter((_, i) => selectedEntityIndices.value.has(i))

@@ -748,12 +748,35 @@ async function loadBatches(projectUuid: string): Promise<Record<string, unknown>
   return (await fetchAllPages("/constructibles/batches/", { project: projectUuid })) as Record<string, unknown>[];
 }
 
-function matchBatchByNumber(batches: Record<string, unknown>[], batchNumber: string): Record<string, unknown> | null {
-  const num = parseInt(String(batchNumber).trim(), 10);
-  if (isNaN(num)) return null;
-  for (const b of batches) {
-    const name = (b.name as string) ?? "";
-    if (new RegExp(`^${num}[^0-9]`).test(name) || name === String(num)) return b;
+function matchBatchByNumber(batches: Record<string, unknown>[], batchRaw: string): Record<string, unknown> | null {
+  // Parse entity value: "130-vbw" → number="130", suffix="", phase="vbw"
+  const raw = String(batchRaw ?? "").trim();
+  if (!raw) return null;
+  const m = /^(\d+)([a-zA-Z]*)(?:-(.+))?$/.exec(raw);
+  if (!m) return null;
+  const num = m[1];
+  const suffix = m[2].toLowerCase();
+  const phase = (m[3] ?? "").toLowerCase();
+
+  // Phase match first, then exact number/suffix match
+  const phaseMatches = phase
+    ? batches.filter((b) => {
+        const bm = /^(\d+)([a-zA-Z]*)(?:-(.+))?$/.exec(String(b.name ?? "").trim());
+        return bm && (bm[3] ?? "").toLowerCase() === phase;
+      })
+    : batches;
+
+  for (const b of phaseMatches) {
+    const bm = /^(\d+)([a-zA-Z]*)(?:-(.+))?$/.exec(String(b.name ?? "").trim());
+    if (!bm) continue;
+    const bNum = bm[1];
+    const bSuffix = bm[2].toLowerCase();
+    const bPhase = (bm[3] ?? "").toLowerCase();
+    if (bNum !== num) continue;               // exact number match
+    if (bSuffix !== suffix) continue;         // exact suffix match
+    if (phase && bPhase !== phase) continue;  // phase already filtered above, but double-check
+    if (!phase && bPhase) continue;           // entity without phase can't match batch with phase
+    return b;
   }
   return null;
 }

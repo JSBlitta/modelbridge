@@ -1,9 +1,9 @@
 <template>
   <div>
-    <h2 class="page-title">Assembly Update</h2>
+    <h2 class="page-title">{{ $t('assemblyUpdate.title') }}</h2>
 
     <Message v-if="isDefinitive" severity="warn" style="margin-bottom:1rem;">
-      This batch is marked <strong>definitive</strong> in local DB. Proceed with caution.
+      {{ $t('assemblyUpdate.definitiveWarning') }}
     </Message>
 
     <Card class="mb-card">
@@ -11,26 +11,33 @@
       <template #content>
         <div style="display:flex;gap:1rem;flex-wrap:wrap;align-items:flex-end;">
           <div>
-            <label>Project</label><br/>
+            <label>{{ $t('assemblyUpdate.project') }}</label><br/>
             <div style="display:flex;gap:0.25rem;align-items:center;">
               <Select v-model="selectedProject" :options="projects" option-label="name" option-value="uuid"
-                placeholder="Select project..." style="min-width:250px" @change="loadBatches" />
-              <Button icon="pi pi-refresh" text size="small" @click="refreshProjects" v-tooltip.top="'Refresh projects'" />
+                :placeholder="$t('assemblyUpdate.selectProject')" style="min-width:250px" @change="loadBatches" />
+              <Button icon="pi pi-refresh" text size="small" @click="refreshProjects" v-tooltip.top="$t('assemblyUpdate.refreshProjects')" />
             </div>
           </div>
           <div>
-            <label>Batch</label><br/>
+            <label>{{ $t('assemblyUpdate.batch') }}</label><br/>
             <Select v-model="selectedBatch" :options="batches" option-label="name" option-value="uuid"
-              placeholder="Select batch..." style="min-width:250px" @change="loadAssemblies" />
+              :placeholder="$t('assemblyUpdate.selectBatch')" style="min-width:250px" :disabled="!selectedProject" @change="loadAssemblies" />
           </div>
+          <Message v-if="selectedProject && !batches.length && !loadingBatches" severity="info" :closable="false" size="small">
+            {{ $t('assemblyUpdate.noBatches') }}
+          </Message>
         </div>
       </template>
     </Card>
 
-    <Card v-if="assemblies.length" class="mb-card">
-      <template #title>Assemblies ({{ assemblies.length }})</template>
+    <Card v-if="selectedBatch" class="mb-card">
+      <template #title>{{ $t('assemblyUpdate.assemblies') }} ({{ assemblies.length }})</template>
       <template #content>
+        <Message v-if="!assemblies.length && !loadingAssemblies" severity="info" :closable="false" size="small">
+          {{ $t('assemblyUpdate.noAssemblies') }}
+        </Message>
         <DataTable
+          v-if="assemblies.length"
           :value="assemblies"
           edit-mode="cell"
           @cell-edit-complete="onCellEdit"
@@ -64,7 +71,7 @@
           </Column>
         </DataTable>
         <div style="margin-top:0.75rem;display:flex;gap:0.75rem;">
-          <Button label="Review Changes" icon="pi pi-eye" :disabled="!changedRows.length" @click="showReview = true" />
+          <Button :label="$t('assemblyUpdate.reviewChanges')" icon="pi pi-eye" :disabled="!changedRows.length" @click="showReview = true" />
         </div>
       </template>
     </Card>
@@ -77,13 +84,13 @@
         <Column field="priority" :header="$t('assemblyUpdate.priority')" />
       </DataTable>
       <template #footer>
-        <Button label="Apply Changes" icon="pi pi-check" class="btn-create" @click="applyChanges" :loading="applying" />
-        <Button label="Cancel" severity="secondary" @click="showReview = false" />
+        <Button :label="$t('assemblyUpdate.applyChanges')" icon="pi pi-check" class="btn-create" @click="applyChanges" :loading="applying" />
+        <Button :label="$t('assemblyUpdate.cancel')" severity="secondary" @click="showReview = false" />
       </template>
     </Dialog>
 
     <Card v-if="updateResults.length" class="mb-card">
-      <template #title>Update Results</template>
+      <template #title>{{ $t('assemblyUpdate.updateResults') }}</template>
       <template #content>
         <DataTable :value="updateResults" size="small">
           <Column field="design" :header="$t('assemblyUpdate.design')" />
@@ -118,6 +125,8 @@ const showReview = ref(false)
 const applying = ref(false)
 const updateResults = ref([])
 const dbBatches = ref([])
+const loadingBatches = ref(false)
+const loadingAssemblies = ref(false)
 
 const isDefinitive = computed(() => {
   if (!selectedBatch.value) return false
@@ -153,17 +162,32 @@ async function loadBatches() {
   changedUuids.value = new Set()
   updateResults.value = []
   if (!selectedProject.value) return
-  const res = await api.get(`/api/batches?project_uuid=${selectedProject.value}&limit=200`)
-  batches.value = res.data.results || []
+  loadingBatches.value = true
+  try {
+    const res = await api.get(`/api/batches?project_uuid=${selectedProject.value}&limit=200`)
+    batches.value = res.data.results || []
+  } catch (e) {
+    batches.value = []
+  } finally {
+    loadingBatches.value = false
+  }
 }
 
 async function loadAssemblies() {
   if (!selectedBatch.value) return
-  const res = await api.get(`/api/assemblies/?batch_uuid=${selectedBatch.value}&limit=500`)
-  assemblies.value = (res.data.results || []).map(a => ({
-    ...a,
-    client_meta_str: JSON.stringify(a.client_meta || {}),
-  }))
+  loadingAssemblies.value = true
+  assemblies.value = []
+  try {
+    const res = await api.get(`/api/assemblies/?batch_uuid=${selectedBatch.value}&limit=500`)
+    assemblies.value = (res.data.results || []).map(a => ({
+      ...a,
+      client_meta_str: JSON.stringify(a.client_meta || {}),
+    }))
+  } catch (e) {
+    assemblies.value = []
+  } finally {
+    loadingAssemblies.value = false
+  }
   changedUuids.value = new Set()
   updateResults.value = []
 }

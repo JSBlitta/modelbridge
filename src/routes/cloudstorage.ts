@@ -10,11 +10,13 @@ app.post("/upload", async (c) => {
 
   const batchUuid = formData.get("batch_uuid") as string | null;
   const projectUuid = formData.get("project_uuid") as string | null;
+  const assemblyUuid = formData.get("assembly_uuid") as string | null;
 
   const fd = new FormData();
   fd.append("file", file, file.name);
   if (batchUuid) fd.append("batch", batchUuid);
   if (projectUuid) fd.append("project", projectUuid);
+  if (assemblyUuid) fd.append("assembly", assemblyUuid);
 
   return c.json(await apiPostFormData("/cloudstorage/files/", fd));
 });
