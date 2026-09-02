@@ -416,6 +416,8 @@ export default {
     includeAssemblies: 'Include assemblies',
     filterEntities: 'Filter entities...',
     filterColumns: 'Filter columns...',
+    importErrorsDetail: '{count} error(s) during import — see details below.',
+    importSuccessDetail: '{created} created, {updated} updated.',
   },
   unified: {
     title: 'Import',

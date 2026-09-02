@@ -558,6 +558,9 @@ app.post("/import", async (c) => {
         const uuid = matched.uuid as string;
         if (!byBatch.has(uuid)) byBatch.set(uuid, []);
         byBatch.get(uuid)!.push(entity);
+      } else if (batchRaw) {
+        // Graceful error — record unmatched batch value for notification
+        results.push({ design_name: designProp ? extractProp(entity, designProp) : "", batch: batchRaw, status: "error", reason: `No batch named "${batchRaw}" found in project` });
       }
     }
   }
@@ -749,34 +752,14 @@ async function loadBatches(projectUuid: string): Promise<Record<string, unknown>
 }
 
 function matchBatchByNumber(batches: Record<string, unknown>[], batchRaw: string): Record<string, unknown> | null {
-  // Parse entity value: "130-vbw" → number="130", suffix="", phase="vbw"
-  const raw = String(batchRaw ?? "").trim();
+  // Strict exact match: entity value must fully match a batch name.
+  // "130-vbw" only matches a batch named "130-vbw" (case-insensitive).
+  // No partial, prefix, or phase-less fallback matching.
+  const raw = String(batchRaw ?? "").trim().toLowerCase();
   if (!raw) return null;
-  const m = /^(\d+)([a-zA-Z]*)(?:-(.+))?$/.exec(raw);
-  if (!m) return null;
-  const num = m[1];
-  const suffix = m[2].toLowerCase();
-  const phase = (m[3] ?? "").toLowerCase();
-
-  // Phase match first, then exact number/suffix match
-  const phaseMatches = phase
-    ? batches.filter((b) => {
-        const bm = /^(\d+)([a-zA-Z]*)(?:-(.+))?$/.exec(String(b.name ?? "").trim());
-        return bm && (bm[3] ?? "").toLowerCase() === phase;
-      })
-    : batches;
-
-  for (const b of phaseMatches) {
-    const bm = /^(\d+)([a-zA-Z]*)(?:-(.+))?$/.exec(String(b.name ?? "").trim());
-    if (!bm) continue;
-    const bNum = bm[1];
-    const bSuffix = bm[2].toLowerCase();
-    const bPhase = (bm[3] ?? "").toLowerCase();
-    if (bNum !== num) continue;               // exact number match
-    if (bSuffix !== suffix) continue;         // exact suffix match
-    if (phase && bPhase !== phase) continue;  // phase already filtered above, but double-check
-    if (!phase && bPhase) continue;           // entity without phase can't match batch with phase
-    return b;
+  for (const b of batches) {
+    const name = String(b.name ?? "").trim().toLowerCase();
+    if (name === raw) return b;
   }
   return null;
 }

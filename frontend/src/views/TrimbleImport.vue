@@ -271,6 +271,8 @@ import { useRoute } from 'vue-router'
 const { t } = useI18n()
 const route = useRoute()
 import { api } from '../api.js'
+import { useToast } from 'primevue/usetoast'
+const toast = useToast()
 import ColumnMapper from '../components/ColumnMapper.vue'
 import { useProduuzitProjects } from '../composables/useProduuzitProjects.js'
 
@@ -694,6 +696,15 @@ async function doImport() {
     importResults.value = r.data.results || []
     importSummary.value = r.data.summary || { created: 0, updated: 0, skipped: 0, blocked: 0, error: 0 }
     previewData.value = null
+    const unmatched = importResults.value.filter(x => x.status === 'error' && /No batch named/.test(x.reason || ''))
+    if (importSummary.value.error) {
+      toast.add({ severity: 'error', summary: t('trimble.errors'), detail: t('trimble.importErrorsDetail', { count: importSummary.value.error }), life: 8000 })
+    }
+    if (unmatched.length) {
+      toast.add({ severity: 'warn', summary: t('trimble.batchesNotMatched', { batches: unmatched.map(x => x.batch).join(', ') }), detail: '', life: 8000 })
+    } else if (importSummary.value.created || importSummary.value.updated) {
+      toast.add({ severity: 'success', summary: t('trimble.pushToProduuzitTitle'), detail: t('trimble.importSuccessDetail', { created: importSummary.value.created, updated: importSummary.value.updated }), life: 5000 })
+    }
   } finally { importing.value = false }
 }
 

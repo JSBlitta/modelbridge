@@ -416,6 +416,8 @@ export default {
     includeAssemblies: 'Assemblies opnemen',
     filterEntities: 'Filter entiteiten...',
     filterColumns: 'Filter kolommen...',
+    importErrorsDetail: '{count} fout(en) tijdens importeren — zie details hieronder.',
+    importSuccessDetail: '{created} aangemaakt, {updated} bijgewerkt.',
   },
   unified: {
     title: 'Importeren',
