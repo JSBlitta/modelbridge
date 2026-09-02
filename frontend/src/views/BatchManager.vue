@@ -84,10 +84,11 @@
           </Column>
           <Column :header="$t('batchManager.localState')">
             <template #body="{ data }">
-              <Tag
+              <Tag v-if="data.state"
                 :severity="data.state === 'definitive' ? 'success' : 'warn'"
-                :value="data.state || 'provisional'"
-              />
+                :value="data.state" />
+              <Tag v-else-if="data.from_api" severity="secondary" :value="$t('batchManager.notTracked')" />
+              <Tag v-else severity="warn" value="provisional" />
             </template>
           </Column>
         </DataTable>

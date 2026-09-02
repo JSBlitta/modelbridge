@@ -226,6 +226,7 @@ export default {
     reason: 'Reason',
     inApi: 'In API',
     localOnly: 'Local only',
+    notTracked: 'Not tracked',
     provisional: 'provisional',
     noStdLibs: 'No standard libraries linked to this project.',
     libs: '1 lib | {count} libs',

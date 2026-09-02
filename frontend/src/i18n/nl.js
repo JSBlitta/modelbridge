@@ -226,6 +226,7 @@ export default {
     reason: 'Reden',
     inApi: 'In API',
     localOnly: 'Alleen lokaal',
+    notTracked: 'Niet gevolgd',
     provisional: 'voorlopig',
     noStdLibs: 'Geen standaardbibliotheken gekoppeld aan dit project.',
     libs: '1 bib | {count} bibs',

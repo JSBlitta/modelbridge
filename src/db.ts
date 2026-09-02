@@ -64,11 +64,18 @@ export function upsertBatch(
   projectUuid: string,
   phase: string,
   linkedStdlibs?: string[] | null,
-  state = "provisional",
+  state?: string,
 ): void {
   const now = new Date().toISOString();
   const stdlibJson = linkedStdlibs ? JSON.stringify(linkedStdlibs) : null;
-  db()
+  const d = db();
+  // Preserve the existing state on update unless explicitly overridden.
+  // Without this, every re-import silently reset definitive batches to provisional.
+  const existing = state === undefined
+    ? (d.prepare("SELECT state FROM batches WHERE uuid=?").get(uuid) as { state?: string } | undefined)
+    : undefined;
+  const effectiveState = state ?? existing?.state ?? "provisional";
+  d
     .prepare(
       `INSERT INTO batches (uuid, name, project_uuid, phase, linked_stdlibs, state, created_at, updated_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
@@ -77,7 +84,7 @@ export function upsertBatch(
          phase=excluded.phase, linked_stdlibs=excluded.linked_stdlibs,
          state=excluded.state, updated_at=excluded.updated_at`,
     )
-    .run(uuid, name, projectUuid, phase, stdlibJson, state, now, now);
+    .run(uuid, name, projectUuid, phase, stdlibJson, effectiveState, now, now);
 }
 
 export interface BatchRow {
