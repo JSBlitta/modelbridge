@@ -276,11 +276,12 @@
 import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 const { t } = useI18n()
-import { useToast } from 'primevue/usetoast'
-const toast = useToast()
 import { api } from '../api.js'
 import { useProduuzitProjects } from '../composables/useProduuzitProjects.js'
 import { useProjectChecker } from '../composables/useProjectChecker.js'
+import { useNotifications } from '../composables/useNotifications.js'
+
+const { notify } = useNotifications()
 import PhaseTable from '../components/PhaseTable.vue'
 import ConfirmationTable from '../components/ConfirmationTable.vue'
 import ConfirmedButton from '../components/ConfirmedButton.vue'
@@ -472,8 +473,8 @@ async function addPhasesAndBatches() {
     const created = results.filter(r => r.status === 'created').length
     const existed = results.filter(r => r.status === 'already_exists').length
     const errors = results.filter(r => r.status === 'error').length
-    if (created) toast.add({ severity: 'success', summary: t('unified.created'), detail: t('unified.createdDetail', { created, existed }), life: 5000 })
-    if (errors) toast.add({ severity: 'error', summary: t('unified.error'), detail: t('unified.errorsDetail', { errors }), life: 8000 })
+    if (created) notify({ severity: 'success', summary: t('unified.created'), detail: t('unified.createdDetail', { created, existed }), life: 5000 })
+    if (errors) notify({ severity: 'error', summary: t('unified.error'), detail: t('unified.errorsDetail', { errors }), life: 8000 })
     // Re-check so the UI updates to show phases/batches as existing
     await checkProjects()
   } catch (err) {

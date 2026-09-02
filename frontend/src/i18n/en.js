@@ -4,6 +4,12 @@ export default {
     title: 'Produuzit',
     openPlatform: 'Open Produuzit',
     signOut: 'Sign out',
+    error: 'Error',
+  },
+  notifications: {
+    title: 'Notifications',
+    empty: 'No notifications yet',
+    clearAll: 'Clear all',
   },
   nav: {
     trimble: 'Trimble',
@@ -419,6 +425,9 @@ export default {
     filterColumns: 'Filter columns...',
     importErrorsDetail: '{count} error(s) during import — see details below.',
     importSuccessDetail: '{created} created, {updated} updated.',
+    importResultsTitle: 'Import results',
+    importSuccess: 'Import completed successfully.',
+    importPartialSuccess: 'Import completed with warnings — see details below.',
     statusLabel: 'Status',
     statusNew: 'new',
     statusChanged: 'changed',

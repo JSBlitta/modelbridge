@@ -261,23 +261,32 @@
         <div v-else class="mb-sm" style="margin-bottom:0.75rem">
           <Button :label="$t('trimble.pushToProduuzit')" icon="pi pi-cloud-upload" severity="warning" @click="doImport" :loading="importing" />
         </div>
+      </template>
+    </Card>
 
-        <div v-if="importResults.length" class="mt-sm" style="margin-top:1rem">
-          <div class="summary-chips">
-            <span class="chip-new">{{ importSummary.created }} {{ $t('trimble.created') }}</span>
-            <span class="chip-changed">{{ importSummary.updated }} {{ $t('trimble.updated') }}</span>
-            <span class="chip-identical">{{ importSummary.skipped }} {{ $t('trimble.skipped') }}</span>
-            <span v-if="importSummary.blocked" class="chip-blocked">{{ importSummary.blocked }} {{ $t('trimble.blocked') }}</span>
-            <span v-if="importSummary.error" class="chip-blocked">{{ importSummary.error }} {{ $t('trimble.errors') }}</span>
-          </div>
-          <DataTable v-if="importResults.some(r => r.status === 'error' || r.status === 'blocked')"
-            :value="importResults.filter(r => r.status === 'error' || r.status === 'blocked')" size="small" style="margin-top:0.5rem;">
-            <Column field="design_name" :header="$t('trimble.design')" />
-            <Column field="client_order_id" :header="$t('trimble.orderId')" />
-            <Column field="batch" :header="$t('trimble.batch')" />
-            <Column field="reason" :header="$t('trimble.reason')" />
-          </DataTable>
+    <Card v-if="importResults.length" class="mb-card">
+      <template #title>{{ $t('trimble.importResultsTitle') }}</template>
+      <template #content>
+        <Message v-if="importSummary.error === 0 && importSummary.blocked === 0" severity="success" :closable="false" style="margin-bottom:0.75rem;">
+          <strong>{{ $t('trimble.importSuccess') }}</strong>
+        </Message>
+        <Message v-else severity="warn" :closable="false" style="margin-bottom:0.75rem;">
+          {{ $t('trimble.importPartialSuccess') }}
+        </Message>
+        <div class="summary-chips" style="margin-bottom:0.75rem;">
+          <span class="chip-new">{{ importSummary.created }} {{ $t('trimble.created') }}</span>
+          <span class="chip-changed">{{ importSummary.updated }} {{ $t('trimble.updated') }}</span>
+          <span class="chip-identical">{{ importSummary.skipped }} {{ $t('trimble.skipped') }}</span>
+          <span v-if="importSummary.blocked" class="chip-blocked">{{ importSummary.blocked }} {{ $t('trimble.blocked') }}</span>
+          <span v-if="importSummary.error" class="chip-blocked">{{ importSummary.error }} {{ $t('trimble.errors') }}</span>
         </div>
+        <DataTable v-if="importResults.some(r => r.status === 'error' || r.status === 'blocked')"
+          :value="importResults.filter(r => r.status === 'error' || r.status === 'blocked')" size="small" style="margin-top:0.5rem;">
+          <Column field="design_name" :header="$t('trimble.design')" />
+          <Column field="client_order_id" :header="$t('trimble.orderId')" />
+          <Column field="batch" :header="$t('trimble.batch')" />
+          <Column field="reason" :header="$t('trimble.reason')" />
+        </DataTable>
       </template>
     </Card>
   </div>
@@ -290,10 +299,11 @@ import { useRoute } from 'vue-router'
 const { t } = useI18n()
 const route = useRoute()
 import { api } from '../api.js'
-import { useToast } from 'primevue/usetoast'
-const toast = useToast()
 import ColumnMapper from '../components/ColumnMapper.vue'
 import { useProduuzitProjects } from '../composables/useProduuzitProjects.js'
+import { useNotifications } from '../composables/useNotifications.js'
+
+const { notify } = useNotifications()
 
 const authStatus = ref(false)
 const loadingStatus = ref(false)
@@ -745,12 +755,12 @@ async function doImport() {
     previewData.value = null
     const unmatched = importResults.value.filter(x => x.status === 'error' && /No batch named/.test(x.reason || ''))
     if (importSummary.value.error) {
-      toast.add({ severity: 'error', summary: t('trimble.errors'), detail: t('trimble.importErrorsDetail', { count: importSummary.value.error }), life: 8000 })
+      notify({ severity: 'error', summary: t('trimble.errors'), detail: t('trimble.importErrorsDetail', { count: importSummary.value.error }), life: 8000 })
     }
     if (unmatched.length) {
-      toast.add({ severity: 'warn', summary: t('trimble.batchesNotMatched', { batches: unmatched.map(x => x.batch).join(', ') }), detail: '', life: 8000 })
+      notify({ severity: 'warn', summary: t('trimble.batchesNotMatched', { batches: unmatched.map(x => x.batch).join(', ') }), detail: '', life: 8000 })
     } else if (importSummary.value.created || importSummary.value.updated) {
-      toast.add({ severity: 'success', summary: t('trimble.pushToProduuzitTitle'), detail: t('trimble.importSuccessDetail', { created: importSummary.value.created, updated: importSummary.value.updated }), life: 5000 })
+      notify({ severity: 'success', summary: t('trimble.pushToProduuzitTitle'), detail: t('trimble.importSuccessDetail', { created: importSummary.value.created, updated: importSummary.value.updated }), life: 5000 })
     }
   } finally { importing.value = false }
 }

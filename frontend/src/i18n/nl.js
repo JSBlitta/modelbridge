@@ -4,6 +4,12 @@ export default {
     title: 'Produuzit',
     openPlatform: 'Open Produuzit',
     signOut: 'Uitloggen',
+    error: 'Fout',
+  },
+  notifications: {
+    title: 'Meldingen',
+    empty: 'Nog geen meldingen',
+    clearAll: 'Alles wissen',
   },
   nav: {
     trimble: 'Trimble',
@@ -419,6 +425,9 @@ export default {
     filterColumns: 'Filter kolommen...',
     importErrorsDetail: '{count} fout(en) tijdens importeren — zie details hieronder.',
     importSuccessDetail: '{created} aangemaakt, {updated} bijgewerkt.',
+    importResultsTitle: 'Importresultaten',
+    importSuccess: 'Import succesvol afgerond.',
+    importPartialSuccess: 'Import afgerond met waarschuwingen — zie details hieronder.',
     statusLabel: 'Status',
     statusNew: 'nieuw',
     statusChanged: 'gewijzigd',
