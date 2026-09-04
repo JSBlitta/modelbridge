@@ -98,7 +98,6 @@ async function ensureAccessToken(): Promise<string> {
   return accessToken as string;
 }
 
-const MAX_PAGES = 60; // same limit as the original Power Automate "Do until"
 const MAX_RETRIES_429 = 3;
 
 async function getUrl(url: string): Promise<Response> {
@@ -121,10 +120,14 @@ function isNextUrl(next: unknown): string | null {
 // Handles paginated bodies ({ results, next }), plain arrays and single objects.
 export async function fetchAllReporting(path: string): Promise<unknown[]> {
   const items: unknown[] = [];
-  let url: string | null = joinBaseUrl(path);
+  // Request the largest page size so list endpoints need fewer round-trips.
+  const initialPath = path.includes("?")
+    ? `${path}&limit=${env.REPORTING_PAGE_SIZE}`
+    : `${path}?limit=${env.REPORTING_PAGE_SIZE}`;
+  let url: string | null = joinBaseUrl(initialPath);
   let pages = 0;
 
-  while (url && pages < MAX_PAGES) {
+  while (url && pages < env.REPORTING_MAX_PAGES) {
     pages++;
     let res = await getUrl(url);
 
@@ -161,8 +164,11 @@ export async function fetchAllReporting(path: string): Promise<unknown[]> {
     }
   }
 
-  if (pages >= MAX_PAGES) {
-    logger.warn(`[reporting] ${path}: stopped after ${MAX_PAGES} pages — response may be incomplete`);
+  if (pages >= env.REPORTING_MAX_PAGES) {
+    logger.warn(
+      `[reporting] ${path}: stopped after ${env.REPORTING_MAX_PAGES} pages (${items.length} items so far) — ` +
+      `raise REPORTING_MAX_PAGES if the dataset is larger`,
+    );
   }
   return items;
 }

@@ -41,6 +41,22 @@ When a row fires, the endpoint is fetched (all pages) and written as JSON:
 Files are written under `REPORTING_OUTPUT_DIR/{Opslaglocatie}/`, mirroring the
 SharePoint layout `Shared Documents/API data/{Opslaglocatie}`.
 
+### Deduplication / cumulative files
+
+Records are keyed by a stable id (`uuid`, `id`, `guid` or `_id`; falls back to
+the whole record).
+
+- **Overschrijven = waar** (stable filename): fetched records are **merged** into
+the existing file, so a record is never stored twice and a changed record is
+replaced (latest wins). The file is a cumulative, deduplicated snapshot.
+- **Overschrijven = niet waar** (timestamped filename): each run writes its own
+snapshot, deduplicated within that run.
+
+This avoids storing the same record twice, but the fetch itself is still a full
+GET of the endpoint. True incremental fetching (skip already-seen records on the
+API side) needs an endpoint-specific filter such as `?updated_at__gte=<last run>`;
+that depends on the endpoint's query schema and is not yet wired.
+
 The **Voorwaarden** (conditions) column is carried through the config but not
 evaluated — the original flows never used it either.
 
@@ -73,6 +89,8 @@ executes a cycle every day at `REPORTING_TIME` in `REPORTING_TIMEZONE`
 | `REPORTING_OUTPUT_DIR` | `data/reporting` | Where JSON results are written |
 | `REPORTING_TOKEN_FILE` | `data/reporting_tokens.json` | Persists rotated tokens (`api_tokens.json` replacement); delete/unset to use env only |
 | `REPORTING_LAST_RUN_FILE` | `data/reporting_last_run.json` | Local "Laatste run" state (the original PATCHed the SharePoint list) |
+| `REPORTING_PAGE_SIZE` | `1000` | Records per page requested from Produuzit |
+| `REPORTING_MAX_PAGES` | `60` | Safety cap on pages per endpoint (raise if a list exceeds it) |
 
 Output, token and state files under `data/` are git-ignored.
 

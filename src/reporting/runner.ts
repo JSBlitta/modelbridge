@@ -17,6 +17,7 @@ import { logger } from "../logger.js";
 import { CsvScheduleSource, type ScheduleSource } from "./config.js";
 import { fetchAllReporting, refreshReportingAccessToken } from "./client.js";
 import { JsonLastRunStore, LocalFileStore, type LastRunStore, type OutputStore } from "./storage.js";
+import { mergeUnique } from "./dedupe.js";
 import { amsterdamNow, filenameFor, matchesToday } from "./dates.js";
 import type { CycleResult, EndpointRunResult, ScheduleEntry } from "./types.js";
 
@@ -46,21 +47,50 @@ export async function runOneEndpoint(
   try {
     const items = await fetchAllReporting(entry.endpoint);
     const filename = filenameFor(entry, now);
-    const { path, created } = await deps.output.write(entry.storagePath, filename, JSON.stringify(items), entry.overwrite);
+
+    let payload: unknown;
+    let newCount = items.length;
+    if (entry.overwrite) {
+      // Stable-name endpoint: merge into the existing file so records are
+      // never stored twice and history accumulates in one place.
+      const existing = parseArray(await deps.output.read(entry.storagePath, filename));
+      const merged = mergeUnique(existing, items);
+      newCount = merged.length - existing.length;
+      payload = merged;
+    } else {
+      // Timestamped snapshot: only dedupe within this run.
+      payload = mergeUnique([], items);
+    }
+
+    const { path, created } = await deps.output.write(entry.storagePath, filename, JSON.stringify(payload), entry.overwrite);
     const rel = displayPath(deps.output, path);
     await deps.lastRun.set(entry.endpoint, new Date().toISOString());
+
+    const detail = entry.overwrite
+      ? `${newCount} new · ${(payload as unknown[]).length} total → ${rel}`
+      : created ? `${items.length} items → ${rel}` : `${items.length} items · ${rel} already exists (skipped)`;
 
     recordEvent({
       category: "reporting",
       level: "info",
       summary: entry.endpoint,
-      detail: created ? `${items.length} items → ${rel}` : `${items.length} items · ${rel} already exists (skipped)`,
+      detail,
     });
     return { endpoint: entry.endpoint, matched: true, status: "ok", file: rel, itemCount: items.length };
   } catch (e) {
     const message = e instanceof Error ? e.message : String(e);
     recordEvent({ category: "reporting", level: "error", summary: `${entry.endpoint} failed`, detail: message });
     return { endpoint: entry.endpoint, matched: true, status: "error", reason: message };
+  }
+}
+
+function parseArray(text: string | null): unknown[] {
+  if (text == null) return [];
+  try {
+    const parsed = JSON.parse(text);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
   }
 }
 

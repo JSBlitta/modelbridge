@@ -15,6 +15,8 @@ export interface WriteResult {
 
 export interface OutputStore {
   write(relativeFolder: string, filename: string, content: string, overwrite: boolean): Promise<WriteResult>;
+  // Returns the current file content, or null when the file does not exist.
+  read(relativeFolder: string, filename: string): Promise<string | null>;
 }
 
 // Sanitize a SharePoint-style folder path ("Overview/Production") so it can
@@ -28,6 +30,12 @@ function sanitizeSegments(folder: string): string[] {
 
 export class LocalFileStore implements OutputStore {
   constructor(private readonly rootDir: string) {}
+
+  async read(relativeFolder: string, filename: string): Promise<string | null> {
+    const full = join(resolve(this.rootDir, ...sanitizeSegments(relativeFolder)), filename);
+    if (!existsSync(full)) return null;
+    return readFileSync(full, "utf-8");
+  }
 
   async write(relativeFolder: string, filename: string, content: string, overwrite: boolean): Promise<WriteResult> {
     const dir = resolve(this.rootDir, ...sanitizeSegments(relativeFolder));
