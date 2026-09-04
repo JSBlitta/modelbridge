@@ -3,6 +3,7 @@ import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { randomUUID } from "node:crypto";
 import { loginWithCredentials, fetchMyUser } from "../produuzit-client.js";
 import * as db from "../db.js";
+import { isAdmin } from "../settings.js";
 
 const app = new Hono();
 
@@ -55,7 +56,12 @@ app.get("/status", (c) => {
   if (!sessionId) return c.json({ authenticated: false }, 401);
   const session = db.getSession(sessionId);
   if (!session) return c.json({ authenticated: false }, 401);
-  return c.json({ authenticated: true, username: session.username, email: session.email });
+  return c.json({
+    authenticated: true,
+    username: session.username,
+    email: session.email,
+    isAdmin: isAdmin(session.username),
+  });
 });
 
 export default app;

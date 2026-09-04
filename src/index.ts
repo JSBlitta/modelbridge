@@ -18,6 +18,7 @@ import csv from "./routes/csv.js";
 import trimble from "./routes/trimble.js";
 import config from "./routes/config.js";
 import history from "./routes/history.js";
+import admin from "./routes/admin.js";
 import { startReportingScheduler } from "./reporting/runner.js";
 
 const app = new Hono();
@@ -33,6 +34,7 @@ app.route("/api/csv", csv);
 app.route("/api/trimble", trimble);
 app.route("/api/config", config);
 app.route("/api/history", history);
+app.route("/api/admin", admin);
 
 app.onError((err, c) => {
   console.error(`[${new Date().toISOString()}] ${c.req.method} ${c.req.path}:`, err.message);

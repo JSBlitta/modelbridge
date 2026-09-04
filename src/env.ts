@@ -50,6 +50,10 @@ export const env = {
   // Logging: error | warn | info | debug (default: info)
   LOG_LEVEL: optional("LOG_LEVEL", "info"),
 
+  // Admin usernames (comma-separated). These users see the admin page and can
+  // configure ModelBridge. Everyone else who can log in is a default user.
+  ADMIN_USERNAMES: optional("ADMIN_USERNAMES", ""),
+
   // Reporting scheduler — TypeScript replacement for the ProduuzitAPI
   // Power Automate solution. Uses a SEPARATE Produuzit API account.
   REPORTING_ENABLED: optional("REPORTING_ENABLED", "false") === "true",

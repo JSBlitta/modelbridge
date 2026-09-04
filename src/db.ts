@@ -56,6 +56,26 @@ export function initDb(): void {
       mapping TEXT
     )
   `);
+  d.exec(`
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    )
+  `);
+  d.exec(`
+    CREATE TABLE IF NOT EXISTS reporting_schedule (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      endpoint TEXT NOT NULL,
+      active INTEGER NOT NULL DEFAULT 1,
+      frequency TEXT NOT NULL,
+      weekdays TEXT NOT NULL DEFAULT '[]',
+      day_of_month INTEGER,
+      conditions TEXT NOT NULL DEFAULT '',
+      storage_path TEXT NOT NULL DEFAULT '',
+      overwrite INTEGER NOT NULL DEFAULT 0,
+      position INTEGER NOT NULL DEFAULT 0
+    )
+  `);
   ensureEventsTable();
 }
 
@@ -248,4 +268,84 @@ export function deleteSession(id: string): void {
 
 export function pruneExpiredSessions(): void {
   db().prepare("DELETE FROM sessions WHERE expires_at < ?").run(new Date().toISOString());
+}
+
+// --- Settings (key/value, admin-editable) ---
+
+export function getAllSettings(): Record<string, string> {
+  const rows = db().prepare("SELECT key, value FROM settings").all() as { key: string; value: string }[];
+  const out: Record<string, string> = {};
+  for (const r of rows) out[r.key] = r.value;
+  return out;
+}
+
+export function setSettings(entries: Record<string, unknown>): void {
+  const d = db();
+  const stmt = d.prepare(
+    "INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+  );
+  const tx = d.transaction((pairs: [string, string][]) => {
+    for (const [k, v] of pairs) stmt.run(k, v);
+  });
+  tx(Object.entries(entries).map(([k, v]) => [k, JSON.stringify(v)]));
+}
+
+// --- Reporting schedule (replaces the SharePoint list CSV) ---
+
+export interface ReportingScheduleRow {
+  id: number;
+  endpoint: string;
+  active: number;
+  frequency: string;
+  weekdays: string; // JSON array
+  day_of_month: number | null;
+  conditions: string;
+  storage_path: string;
+  overwrite: number;
+  position: number;
+}
+
+export function listReportingSchedule(): ReportingScheduleRow[] {
+  return db().prepare("SELECT * FROM reporting_schedule ORDER BY position, id").all() as ReportingScheduleRow[];
+}
+
+export function upsertReportingSchedule(entry: {
+  id?: number | null;
+  endpoint: string;
+  active: boolean;
+  frequency: string;
+  weekdays: string[];
+  day_of_month: number | null;
+  conditions: string;
+  storage_path: string;
+  overwrite: boolean;
+  position?: number;
+}): number {
+  const d = db();
+  const weekdaysJson = JSON.stringify(entry.weekdays ?? []);
+  if (entry.id) {
+    d.prepare(
+      `UPDATE reporting_schedule SET
+         endpoint=?, active=?, frequency=?, weekdays=?, day_of_month=?, conditions=?, storage_path=?, overwrite=?, position=?
+       WHERE id=?`,
+    ).run(
+      entry.endpoint, entry.active ? 1 : 0, entry.frequency, weekdaysJson, entry.day_of_month,
+      entry.conditions ?? "", entry.storage_path ?? "", entry.overwrite ? 1 : 0,
+      entry.position ?? 0, entry.id,
+    );
+    return entry.id;
+  }
+  const position = entry.position ?? (listReportingSchedule().length + 1);
+  const info = d.prepare(
+    `INSERT INTO reporting_schedule (endpoint, active, frequency, weekdays, day_of_month, conditions, storage_path, overwrite, position)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    entry.endpoint, entry.active ? 1 : 0, entry.frequency, weekdaysJson, entry.day_of_month,
+    entry.conditions ?? "", entry.storage_path ?? "", entry.overwrite ? 1 : 0, position,
+  );
+  return Number(info.lastInsertRowid);
+}
+
+export function deleteReportingSchedule(id: number): void {
+  db().prepare("DELETE FROM reporting_schedule WHERE id = ?").run(id);
 }
