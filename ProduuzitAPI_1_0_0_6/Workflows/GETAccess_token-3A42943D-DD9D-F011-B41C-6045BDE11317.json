@@ -1,0 +1,150 @@
+{
+  "properties": {
+    "connectionReferences": {},
+    "definition": {
+      "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+      "contentVersion": "1.0.0.0",
+      "parameters": {
+        "$authentication": {
+          "defaultValue": {},
+          "type": "SecureObject"
+        },
+        "$connections": {
+          "defaultValue": {},
+          "type": "Object"
+        },
+        "produuzit_url (bli_produuzit_url)": {
+          "defaultValue": "https://back.produuz.it/api/v2/",
+          "type": "String",
+          "metadata": {
+            "schemaName": "bli_produuzit_url",
+            "description": "De basis URL voor API calls naar het Produuzit platform."
+          }
+        }
+      },
+      "triggers": {
+        "manual": {
+          "type": "Request",
+          "kind": "PowerAppV2",
+          "inputs": {
+            "schema": {
+              "type": "object",
+              "properties": {},
+              "required": []
+            }
+          }
+        }
+      },
+      "actions": {
+        "RefreshTokenLezen": {
+          "type": "Workflow",
+          "inputs": {
+            "host": {
+              "workflowReferenceName": "17d170b4-b411-f011-998a-7c1e528368d6"
+            },
+            "body": {
+              "text": "Produuzit",
+              "text_1": "Lezen",
+              "text_2": "Refresh"
+            }
+          },
+          "runAfter": {},
+          "metadata": {
+            "operationMetadataId": "693dbdc7-5844-4f35-9300-2f637ad90c60"
+          }
+        },
+        "RefreshAccess": {
+          "type": "Http",
+          "inputs": {
+            "uri": "@{parameters('produuzit_url (bli_produuzit_url)')}my_user/token/refresh/",
+            "method": "POST",
+            "body": "@json(concat('{\"refresh\": \"',body('RefreshTokenLezen')['response'], '\"}'))"
+          },
+          "runAfter": {
+            "RefreshTokenLezen": [
+              "Succeeded"
+            ]
+          },
+          "metadata": {
+            "operationMetadataId": "e0b8d46f-0255-4a84-b13c-96e38113ff3c"
+          }
+        },
+        "access_token": {
+          "type": "ParseJson",
+          "inputs": {
+            "content": "@body('RefreshAccess')",
+            "schema": {
+              "refresh": "string",
+              "access": "string"
+            }
+          },
+          "runAfter": {
+            "RefreshAccess": [
+              "Succeeded"
+            ]
+          },
+          "metadata": {
+            "operationMetadataId": "80a952e7-b11f-47a2-8fdb-d8f54b7d59b3"
+          }
+        },
+        "AccesTokenSchrijven": {
+          "type": "Workflow",
+          "inputs": {
+            "host": {
+              "workflowReferenceName": "17d170b4-b411-f011-998a-7c1e528368d6"
+            },
+            "body": {
+              "text": "Produuzit",
+              "text_1": "Schrijven",
+              "text_2": "Access",
+              "text_3": "@body('access_token')['access']"
+            }
+          },
+          "runAfter": {
+            "access_token": [
+              "Succeeded"
+            ]
+          },
+          "runtimeConfiguration": {
+            "secureData": {
+              "properties": [
+                "inputs",
+                "outputs"
+              ]
+            }
+          }
+        },
+        "Respond_to_a_Power_App_or_flow": {
+          "type": "Response",
+          "kind": "PowerApp",
+          "inputs": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "title": "Status",
+                  "type": "number",
+                  "x-ms-content-hint": "NUMBER",
+                  "x-ms-dynamically-added": true
+                }
+              },
+              "additionalProperties": {}
+            },
+            "statusCode": 200,
+            "body": {
+              "status": "@outputs('RefreshAccess')?['statusCode']"
+            }
+          },
+          "runAfter": {
+            "AccesTokenSchrijven": [
+              "Succeeded"
+            ]
+          },
+          "operationOptions": "Asynchronous"
+        }
+      }
+    },
+    "templateName": null
+  },
+  "schemaVersion": "1.0.0.0"
+}

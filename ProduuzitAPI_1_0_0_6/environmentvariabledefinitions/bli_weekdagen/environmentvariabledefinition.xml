@@ -1,0 +1,14 @@
+<environmentvariabledefinition schemaname="bli_weekdagen">
+  <defaultvalue>{"weekdagen": ["Zondag", "Maandag", "Dinsdag", "Woensdag", "Donderdag", "Vrijdag", "Zaterdag"]}</defaultvalue>
+  <description default="Een array met de namen van de weekdagen.">
+    <label description="Een array met de namen van de weekdagen." languagecode="1043" />
+  </description>
+  <displayname default="weekdagen">
+    <label description="weekdagen" languagecode="1043" />
+  </displayname>
+  <introducedversion>1.0.0.1</introducedversion>
+  <iscustomizable>1</iscustomizable>
+  <isrequired>0</isrequired>
+  <secretstore>0</secretstore>
+  <type>100000003</type>
+</environmentvariabledefinition>

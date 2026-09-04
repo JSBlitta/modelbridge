@@ -1,0 +1,422 @@
+{
+  "properties": {
+    "connectionReferences": {
+      "shared_sharepointonline": {
+        "api": {
+          "name": "shared_sharepointonline"
+        },
+        "connection": {
+          "connectionReferenceLogicalName": "new_sharedsharepointonline_e63cc"
+        },
+        "runtimeSource": "embedded"
+      }
+    },
+    "definition": {
+      "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+      "contentVersion": "1.0.0.0",
+      "parameters": {
+        "$authentication": {
+          "defaultValue": {},
+          "type": "SecureObject"
+        },
+        "$connections": {
+          "defaultValue": {},
+          "type": "Object"
+        },
+        "weekdagen (bli_weekdagen)": {
+          "defaultValue": {
+            "weekdagen": [
+              "Zondag",
+              "Maandag",
+              "Dinsdag",
+              "Woensdag",
+              "Donderdag",
+              "Vrijdag",
+              "Zaterdag"
+            ]
+          },
+          "type": "Object",
+          "metadata": {
+            "schemaName": "bli_weekdagen",
+            "description": "Een array met de namen van de weekdagen."
+          }
+        }
+      },
+      "triggers": {
+        "Recurrence": {
+          "type": "Recurrence",
+          "recurrence": {
+            "frequency": "Day",
+            "interval": 1,
+            "startTime": "2025-09-30T16:15:00Z"
+          },
+          "metadata": {
+            "operationMetadataId": "5e5dbd27-b61e-414b-adc3-5b7fdd6b30da"
+          }
+        }
+      },
+      "actions": {
+        "Produuzit_API_frequentie": {
+          "type": "OpenApiConnection",
+          "inputs": {
+            "parameters": {
+              "dataset": "https://blittanl.sharepoint.com/sites/Produuzit-APIdata",
+              "table": "c044b2c1-21aa-48d0-9c4d-b8327f8f26e9",
+              "$top": 30
+            },
+            "host": {
+              "apiId": "/providers/Microsoft.PowerApps/apis/shared_sharepointonline",
+              "operationId": "GetItems",
+              "connectionName": "shared_sharepointonline"
+            }
+          },
+          "runAfter": {
+            "Run_a_Child_Flow": [
+              "Succeeded"
+            ]
+          },
+          "metadata": {
+            "operationMetadataId": "bc21ffb9-5bf2-4cdd-b731-39b75eb804de"
+          }
+        },
+        "Apply_to_each": {
+          "type": "Foreach",
+          "foreach": "@outputs('Produuzit_API_frequentie')?['body/value']",
+          "actions": {
+            "Condition": {
+              "type": "If",
+              "expression": {
+                "and": [
+                  {
+                    "equals": [
+                      "@items('Apply_to_each')?['InWerking']",
+                      true
+                    ]
+                  }
+                ]
+              },
+              "actions": {
+                "Switch": {
+                  "type": "Switch",
+                  "expression": "@trim(items('Apply_to_each')?['Periodiek/Value'])",
+                  "default": {
+                    "actions": {}
+                  },
+                  "cases": {
+                    "Case_Dagelijks": {
+                      "actions": {
+                        "For_each": {
+                          "type": "Foreach",
+                          "foreach": "@item()?['Dagvandeweek']",
+                          "actions": {
+                            "Append_dagvandeweek": {
+                              "type": "AppendToArrayVariable",
+                              "inputs": {
+                                "name": "dvdw",
+                                "value": "@items('For_each')?[ 'Value']"
+                              },
+                              "metadata": {
+                                "operationMetadataId": "894177d3-1bfb-497a-a6ab-6d0e9436af25"
+                              }
+                            }
+                          },
+                          "metadata": {
+                            "operationMetadataId": "dc65d537-fc80-4284-aa7c-69b74c019a7f"
+                          }
+                        },
+                        "VandaagDagelijks": {
+                          "type": "If",
+                          "expression": {
+                            "and": [
+                              {
+                                "contains": [
+                                  "@variables('dvdw')",
+                                  "@parameters('weekdagen (bli_weekdagen)')['weekdagen'][dayOfWeek(convertFromUtc(utcNow('u'), 'W. Europe Standard Time'))]"
+                                ]
+                              }
+                            ]
+                          },
+                          "actions": {
+                            "Run_a_Child_Flow_1": {
+                              "type": "Workflow",
+                              "inputs": {
+                                "host": {
+                                  "workflowReferenceName": "8cf7f7c3-4ea3-f011-bbd2-002248a0bd7b"
+                                },
+                                "body": {
+                                  "text": "@items('Apply_to_each')?['Title']",
+                                  "text_1": "@items('Apply_to_each')?['Opslaglocatie']",
+                                  "boolean": "@items('Apply_to_each')?['Overschrijven']"
+                                }
+                              },
+                              "metadata": {
+                                "operationMetadataId": "21c5e1d4-9805-4ca7-84aa-c48ad9cddd05"
+                              }
+                            },
+                            "Dagelijks_UpdateLaatsteRun": {
+                              "type": "OpenApiConnection",
+                              "inputs": {
+                                "parameters": {
+                                  "dataset": "https://blittanl.sharepoint.com/sites/Produuzit-APIdata",
+                                  "parameters/method": "PATCH",
+                                  "parameters/uri": "_api/web/lists/GetByTitle('Produuzit_API_frequentie')/items(@{items('Apply_to_each')?['ID']})",
+                                  "parameters/headers": {
+                                    "Accept": "application/json;odata=verbose",
+                                    "Content-Type": "application/json;odata=verbose",
+                                    "IF-MATCH": "*"
+                                  },
+                                  "parameters/body": "{\n  \"__metadata\": { \"type\": \"SP.Data.Produuzit_x005f_API_x005f_frequentieListItem\" },\n  \"Laatsterun\": \"@{convertFromUtc(utcNow('u'), 'W. Europe Standard Time')}\"\n}"
+                                },
+                                "host": {
+                                  "apiId": "/providers/Microsoft.PowerApps/apis/shared_sharepointonline",
+                                  "operationId": "HttpRequest",
+                                  "connectionName": "shared_sharepointonline"
+                                }
+                              },
+                              "runAfter": {
+                                "Run_a_Child_Flow_1": [
+                                  "Succeeded"
+                                ]
+                              },
+                              "metadata": {
+                                "operationMetadataId": "3ad918f3-7282-48a3-bab6-9c6e20298937"
+                              }
+                            },
+                            "Reset_variable": {
+                              "type": "SetVariable",
+                              "inputs": {
+                                "name": "dvdw",
+                                "value": []
+                              },
+                              "runAfter": {
+                                "Dagelijks_UpdateLaatsteRun": [
+                                  "Succeeded"
+                                ]
+                              },
+                              "metadata": {
+                                "operationMetadataId": "4b6aa3fe-a464-46d8-a5af-154601d30940"
+                              }
+                            }
+                          },
+                          "else": {
+                            "actions": {}
+                          },
+                          "runAfter": {
+                            "For_each": [
+                              "Succeeded"
+                            ]
+                          },
+                          "metadata": {
+                            "operationMetadataId": "ee54718a-40d9-4576-8773-fbc95a05abcf"
+                          }
+                        }
+                      },
+                      "case": "Dagelijks"
+                    },
+                    "Case_Wekelijks": {
+                      "actions": {
+                        "VandaagWekelijks": {
+                          "type": "If",
+                          "expression": {
+                            "and": [
+                              {
+                                "equals": [
+                                  "@first(items('Apply_to_each')?['DagvandeWeek'])['Value']",
+                                  "@trim(parameters('weekdagen (bli_weekdagen)')['weekdagen'][dayOfWeek(convertFromUtc(utcNow('u'), 'W. Europe Standard Time'))])"
+                                ]
+                              }
+                            ]
+                          },
+                          "actions": {
+                            "Run_a_Child_Flow_1_1": {
+                              "type": "Workflow",
+                              "inputs": {
+                                "host": {
+                                  "workflowReferenceName": "8cf7f7c3-4ea3-f011-bbd2-002248a0bd7b"
+                                },
+                                "body": {
+                                  "text": "@items('Apply_to_each')?['Title']",
+                                  "text_1": "@items('Apply_to_each')?['Opslaglocatie']",
+                                  "boolean": "@items('Apply_to_each')?['Overschrijven']"
+                                }
+                              },
+                              "metadata": {
+                                "operationMetadataId": "ca447789-63a8-42d8-865a-210d3cfa2290"
+                              }
+                            },
+                            "Wekelijks_UpdateLaatsteRun": {
+                              "type": "OpenApiConnection",
+                              "inputs": {
+                                "parameters": {
+                                  "dataset": "https://blittanl.sharepoint.com/sites/Produuzit-APIdata",
+                                  "parameters/method": "PATCH",
+                                  "parameters/uri": "_api/web/lists/GetByTitle('Produuzit_API_frequentie')/items(@{items('Apply_to_each')?['ID']})",
+                                  "parameters/headers": {
+                                    "Accept": "application/json;odata=verbose",
+                                    "Content-Type": "application/json;odata=verbose",
+                                    "IF-MATCH": "*"
+                                  },
+                                  "parameters/body": "{\n  \"__metadata\": { \"type\": \"SP.Data.Produuzit_x005f_API_x005f_frequentieListItem\" },\n  \"Laatsterun\": \"@{convertFromUtc(utcNow('u'), 'W. Europe Standard Time')}\"\n}"
+                                },
+                                "host": {
+                                  "apiId": "/providers/Microsoft.PowerApps/apis/shared_sharepointonline",
+                                  "operationId": "HttpRequest",
+                                  "connectionName": "shared_sharepointonline"
+                                }
+                              },
+                              "runAfter": {
+                                "Run_a_Child_Flow_1_1": [
+                                  "Succeeded"
+                                ]
+                              },
+                              "metadata": {
+                                "operationMetadataId": "3ad918f3-7282-48a3-bab6-9c6e20298937"
+                              }
+                            }
+                          },
+                          "else": {
+                            "actions": {}
+                          },
+                          "metadata": {
+                            "operationMetadataId": "8b4bf579-84a8-461c-930e-afc71527ba1d"
+                          }
+                        }
+                      },
+                      "case": "Wekelijks"
+                    },
+                    "Case_Maandelijks": {
+                      "actions": {
+                        "VandaagMaandelijks": {
+                          "type": "If",
+                          "expression": {
+                            "and": [
+                              {
+                                "equals": [
+                                  "@items('Apply_to_each')?['DagvandeMaand']",
+                                  "@dayOfMonth(convertFromUtc(utcNow('u'), 'W. Europe Standard Time'))"
+                                ]
+                              }
+                            ]
+                          },
+                          "actions": {
+                            "Run_a_Child_Flow_1_2": {
+                              "type": "Workflow",
+                              "inputs": {
+                                "host": {
+                                  "workflowReferenceName": "8cf7f7c3-4ea3-f011-bbd2-002248a0bd7b"
+                                },
+                                "body": {
+                                  "text": "@items('Apply_to_each')?['Title']",
+                                  "text_1": "@items('Apply_to_each')?['Opslaglocatie']",
+                                  "boolean": "@items('Apply_to_each')?['Overschrijven']"
+                                }
+                              },
+                              "metadata": {
+                                "operationMetadataId": "122b8a20-063e-4cfc-9a37-bd73192dd910"
+                              }
+                            },
+                            "Maandelijks_UpdateLaatsteRun": {
+                              "type": "OpenApiConnection",
+                              "inputs": {
+                                "parameters": {
+                                  "dataset": "https://blittanl.sharepoint.com/sites/Produuzit-APIdata",
+                                  "parameters/method": "PATCH",
+                                  "parameters/uri": "_api/web/lists/GetByTitle('Produuzit_API_frequentie')/items(@{items('Apply_to_each')?['ID']})",
+                                  "parameters/headers": {
+                                    "Accept": "application/json;odata=verbose",
+                                    "Content-Type": "application/json;odata=verbose",
+                                    "IF-MATCH": "*"
+                                  },
+                                  "parameters/body": "{\n  \"__metadata\": { \"type\": \"SP.Data.Produuzit_x005f_API_x005f_frequentieListItem\" },\n  \"Laatsterun\": \"@{convertFromUtc(utcNow('u'), 'W. Europe Standard Time')}\"\n}"
+                                },
+                                "host": {
+                                  "apiId": "/providers/Microsoft.PowerApps/apis/shared_sharepointonline",
+                                  "operationId": "HttpRequest",
+                                  "connectionName": "shared_sharepointonline"
+                                }
+                              },
+                              "runAfter": {
+                                "Run_a_Child_Flow_1_2": [
+                                  "Succeeded"
+                                ]
+                              },
+                              "metadata": {
+                                "operationMetadataId": "3ad918f3-7282-48a3-bab6-9c6e20298937"
+                              }
+                            }
+                          },
+                          "else": {
+                            "actions": {}
+                          },
+                          "metadata": {
+                            "operationMetadataId": "1e7bf600-1dbf-4327-8f3e-ce86b4f121c9"
+                          }
+                        }
+                      },
+                      "case": "Maandelijks"
+                    }
+                  },
+                  "metadata": {
+                    "operationMetadataId": "c1cbfe72-4eed-499f-bebd-c171f4ee3b7b"
+                  }
+                }
+              },
+              "else": {
+                "actions": {}
+              },
+              "metadata": {
+                "operationMetadataId": "5f9b4c1e-c3a0-4683-a486-e10e1c8f0b9d"
+              }
+            }
+          },
+          "runAfter": {
+            "Produuzit_API_frequentie": [
+              "Succeeded"
+            ],
+            "DagvandeweekArray": [
+              "Succeeded"
+            ]
+          },
+          "metadata": {
+            "operationMetadataId": "cd81a25d-588e-4cdf-90e5-0985d5bc524b"
+          }
+        },
+        "Run_a_Child_Flow": {
+          "type": "Workflow",
+          "inputs": {
+            "host": {
+              "workflowReferenceName": "3a42943d-dd9d-f011-b41c-6045bde11317"
+            }
+          },
+          "runAfter": {},
+          "metadata": {
+            "operationMetadataId": "ffb1a6c4-1fed-4510-b2cf-6926fac17542"
+          }
+        },
+        "DagvandeweekArray": {
+          "type": "InitializeVariable",
+          "inputs": {
+            "variables": [
+              {
+                "name": "dvdw",
+                "type": "array",
+                "value": []
+              }
+            ]
+          },
+          "runAfter": {
+            "Run_a_Child_Flow": [
+              "Succeeded"
+            ]
+          },
+          "metadata": {
+            "operationMetadataId": "841b81ca-5256-4c5d-8f7a-d1d1c9665a6e"
+          }
+        }
+      },
+      "description": "Deze flow leest de sharepoint lijst Produuzit_api_frequentie uit en post de antwoorden in sharepoint.\nLijst staat hier:\nhttps://blittanl.sharepoint.com/sites/Produuzit-APIdata/Lists/Produuzit_API_frequentie/AllItems.aspx"
+    },
+    "templateName": null
+  },
+  "schemaVersion": "1.0.0.0"
+}

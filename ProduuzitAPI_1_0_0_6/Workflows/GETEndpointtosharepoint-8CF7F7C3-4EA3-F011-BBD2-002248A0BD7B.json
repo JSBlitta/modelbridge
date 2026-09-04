@@ -1,0 +1,161 @@
+{
+  "properties": {
+    "connectionReferences": {},
+    "definition": {
+      "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+      "contentVersion": "1.0.0.0",
+      "parameters": {
+        "$authentication": {
+          "defaultValue": {},
+          "type": "SecureObject"
+        },
+        "$connections": {
+          "defaultValue": {},
+          "type": "Object"
+        },
+        "weekdagen (bli_weekdagen)": {
+          "defaultValue": {
+            "weekdagen": [
+              "Zondag",
+              "Maandag",
+              "Dinsdag",
+              "Woensdag",
+              "Donderdag",
+              "Vrijdag",
+              "Zaterdag"
+            ]
+          },
+          "type": "Object",
+          "metadata": {
+            "schemaName": "bli_weekdagen",
+            "description": "Een array met de namen van de weekdagen."
+          }
+        }
+      },
+      "triggers": {
+        "manual": {
+          "type": "Request",
+          "kind": "Button",
+          "inputs": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "description": "Please enter your input",
+                  "title": "Endpoint",
+                  "type": "string",
+                  "x-ms-content-hint": "TEXT",
+                  "x-ms-dynamically-added": true
+                },
+                "text_1": {
+                  "description": "Please enter your input",
+                  "title": "Opslaglocatie",
+                  "type": "string",
+                  "x-ms-content-hint": "TEXT",
+                  "x-ms-dynamically-added": true
+                },
+                "boolean": {
+                  "description": "Please select yes or no",
+                  "title": "Overschrijven",
+                  "type": "boolean",
+                  "x-ms-content-hint": "BOOLEAN",
+                  "x-ms-dynamically-added": true
+                }
+              },
+              "required": [
+                "text",
+                "text_1",
+                "boolean"
+              ]
+            }
+          }
+        }
+      },
+      "actions": {
+        "Produuzit_Endpoint": {
+          "type": "Workflow",
+          "inputs": {
+            "host": {
+              "workflowReferenceName": "cb9ba5fb-0212-f011-998a-7c1e528368d6"
+            },
+            "body": {
+              "text": "@triggerBody()?['text']"
+            }
+          },
+          "runAfter": {}
+        },
+        "Post_in_Sharepoint": {
+          "type": "Workflow",
+          "inputs": {
+            "host": {
+              "workflowReferenceName": "80e863a3-a513-f011-998a-7c1e528368d6"
+            },
+            "body": {
+              "text": "@if(equals(triggerBody()?['boolean'], true), outputs('BestandsnaamOverschrijven'), outputs('BestandsnaamNietOverschrijven'))",
+              "text_1": "@body('Produuzit_Endpoint')?['reponse']",
+              "text_2": ".json",
+              "text_3": "@triggerBody()?['text_1']",
+              "boolean": "@triggerBody()?['boolean']"
+            }
+          },
+          "runAfter": {
+            "BestandsnaamOverschrijven": [
+              "Succeeded"
+            ],
+            "BestandsnaamNietOverschrijven": [
+              "Succeeded"
+            ]
+          }
+        },
+        "Respond_to_a_Power_App_or_flow": {
+          "type": "Response",
+          "kind": "PowerApp",
+          "inputs": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "status": {
+                  "title": "Status",
+                  "type": "number",
+                  "x-ms-content-hint": "NUMBER",
+                  "x-ms-dynamically-added": true
+                }
+              },
+              "additionalProperties": {}
+            },
+            "statusCode": 200,
+            "body": {
+              "status": "@body('Post_in_Sharepoint')?['gemaakt']"
+            }
+          },
+          "runAfter": {
+            "Post_in_Sharepoint": [
+              "Succeeded"
+            ]
+          }
+        },
+        "BestandsnaamOverschrijven": {
+          "type": "Compose",
+          "inputs": "@replace(triggerBody()?['text'],'/', ' - ')",
+          "runAfter": {
+            "Produuzit_Endpoint": [
+              "Succeeded"
+            ]
+          }
+        },
+        "BestandsnaamNietOverschrijven": {
+          "type": "Compose",
+          "inputs": "@{replace(triggerBody()?['text'],'/', ' - ')} @{ parameters('weekdagen (bli_weekdagen)')['weekdagen'][dayOfWeek(utcNow())]} - Week @{div(add(dayofyear(addDays(subtractFromTime(formatDateTime(utcNow(),'yyyy-MM-dd'), if(equals(dayofweek(formatDateTime(utcNow(),'yyyy-MM-dd')),0),6,sub(dayofweek(formatDateTime(utcNow(),'yyyy-MM-dd')),1)), 'Day'),3)),6),7)}",
+          "runAfter": {
+            "Produuzit_Endpoint": [
+              "Succeeded"
+            ]
+          }
+        }
+      },
+      "description": "Deze flow maakt elke dag een call naar Overview/production, met uitzondering van het weekend."
+    },
+    "templateName": null
+  },
+  "schemaVersion": "1.0.0.0"
+}

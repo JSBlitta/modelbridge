@@ -1,0 +1,243 @@
+{
+  "properties": {
+    "connectionReferences": {
+      "shared_sharepointonline-1": {
+        "api": {
+          "name": "shared_sharepointonline"
+        },
+        "connection": {
+          "connectionReferenceLogicalName": "new_sharedsharepointonline_e63cc"
+        },
+        "runtimeSource": "embedded"
+      },
+      "shared_sharepointonline": {
+        "api": {
+          "name": "shared_sharepointonline"
+        },
+        "connection": {
+          "connectionReferenceLogicalName": "new_sharedsharepointonline_e1a24"
+        },
+        "runtimeSource": "embedded"
+      }
+    },
+    "definition": {
+      "$schema": "https://schema.management.azure.com/providers/Microsoft.Logic/schemas/2016-06-01/workflowdefinition.json#",
+      "contentVersion": "1.0.0.0",
+      "parameters": {
+        "$authentication": {
+          "defaultValue": {},
+          "type": "SecureObject"
+        },
+        "$connections": {
+          "defaultValue": {},
+          "type": "Object"
+        }
+      },
+      "triggers": {
+        "manual": {
+          "type": "Request",
+          "kind": "PowerAppV2",
+          "inputs": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "title": "bestandsnaam",
+                  "type": "string",
+                  "x-ms-dynamically-added": true,
+                  "description": "Please enter your input",
+                  "x-ms-content-hint": "TEXT"
+                },
+                "text_1": {
+                  "title": "inhoud",
+                  "type": "string",
+                  "x-ms-dynamically-added": true,
+                  "description": "Please enter your input",
+                  "x-ms-content-hint": "TEXT"
+                },
+                "text_2": {
+                  "title": "bestandstype",
+                  "type": "string",
+                  "x-ms-dynamically-added": true,
+                  "description": "",
+                  "enum": [
+                    ".json",
+                    ".txt",
+                    ".csv"
+                  ],
+                  "x-ms-content-hint": "TEXT"
+                },
+                "text_3": {
+                  "description": "Please enter your input",
+                  "title": "map",
+                  "type": "string",
+                  "x-ms-content-hint": "TEXT",
+                  "x-ms-dynamically-added": true
+                },
+                "boolean": {
+                  "description": "Please select yes or no",
+                  "title": "overschrijf",
+                  "type": "boolean",
+                  "x-ms-content-hint": "BOOLEAN",
+                  "x-ms-dynamically-added": true
+                }
+              },
+              "required": [
+                "text",
+                "text_1",
+                "text_2",
+                "text_3",
+                "boolean"
+              ]
+            }
+          },
+          "metadata": {
+            "operationMetadataId": "f0c72fe9-d88f-45aa-8e21-a3cf77d3b648"
+          }
+        }
+      },
+      "actions": {
+        "Respond_to_a_Power_App_or_flow": {
+          "type": "Response",
+          "kind": "PowerApp",
+          "inputs": {
+            "schema": {
+              "type": "object",
+              "properties": {
+                "gemaakt": {
+                  "title": "Gemaakt",
+                  "type": "string",
+                  "x-ms-content-hint": "TEXT",
+                  "x-ms-dynamically-added": true
+                }
+              },
+              "additionalProperties": {}
+            },
+            "statusCode": 200,
+            "body": {
+              "gemaakt": "@{outputs('Create_file')?['body/Path']}@{outputs('Create_file')?['body/DisplayName']}"
+            }
+          },
+          "runAfter": {
+            "Condition": [
+              "Succeeded"
+            ]
+          },
+          "operationOptions": "Asynchronous"
+        },
+        "Condition": {
+          "type": "If",
+          "expression": {
+            "and": [
+              {
+                "equals": [
+                  "@triggerBody()?['boolean']",
+                  true
+                ]
+              }
+            ]
+          },
+          "actions": {
+            "Delete_file": {
+              "type": "OpenApiConnection",
+              "inputs": {
+                "parameters": {
+                  "dataset": "https://blittanl.sharepoint.com/sites/Produuzit-APIdata",
+                  "id": "@outputs('Get_file_metadata_using_path')?['body/Id']"
+                },
+                "host": {
+                  "apiId": "/providers/Microsoft.PowerApps/apis/shared_sharepointonline",
+                  "operationId": "DeleteFile",
+                  "connectionName": "shared_sharepointonline-1"
+                }
+              },
+              "runAfter": {
+                "Get_file_metadata_using_path": [
+                  "Succeeded"
+                ]
+              }
+            },
+            "Create_file_1": {
+              "type": "OpenApiConnection",
+              "inputs": {
+                "parameters": {
+                  "dataset": "https://blittanl.sharepoint.com/sites/Produuzit-APIdata/",
+                  "folderPath": "Shared Documents/API data/@{triggerBody()?['text_3']}",
+                  "name": "@{triggerBody()['text']}@{triggerBody()['text_2']}",
+                  "body": "@triggerBody()['text_1']"
+                },
+                "host": {
+                  "apiId": "/providers/Microsoft.PowerApps/apis/shared_sharepointonline",
+                  "operationId": "CreateFile",
+                  "connectionName": "shared_sharepointonline"
+                }
+              },
+              "runAfter": {
+                "Delete_file": [
+                  "Succeeded",
+                  "FAILED",
+                  "TIMEDOUT",
+                  "SKIPPED"
+                ]
+              },
+              "runtimeConfiguration": {
+                "contentTransfer": {
+                  "transferMode": "Chunked"
+                }
+              },
+              "metadata": {
+                "operationMetadataId": "c1284bbf-80a2-400f-9cb3-d117dda9a9a2"
+              }
+            },
+            "Get_file_metadata_using_path": {
+              "type": "OpenApiConnection",
+              "inputs": {
+                "parameters": {
+                  "dataset": "https://blittanl.sharepoint.com/sites/Produuzit-APIdata",
+                  "path": "Shared Documents/API data/@{triggerBody()?['text_3']}/@{triggerBody()['text']}@{triggerBody()['text_2']}"
+                },
+                "host": {
+                  "apiId": "/providers/Microsoft.PowerApps/apis/shared_sharepointonline",
+                  "operationId": "GetFileMetadataByPath",
+                  "connectionName": "shared_sharepointonline-1"
+                }
+              }
+            }
+          },
+          "else": {
+            "actions": {
+              "Create_file": {
+                "type": "OpenApiConnection",
+                "inputs": {
+                  "parameters": {
+                    "dataset": "https://blittanl.sharepoint.com/sites/Produuzit-APIdata/",
+                    "folderPath": "Shared Documents/API data/@{triggerBody()?['text_3']}",
+                    "name": "@{triggerBody()['text']}@{triggerBody()['text_2']}",
+                    "body": "@triggerBody()['text_1']"
+                  },
+                  "host": {
+                    "apiId": "/providers/Microsoft.PowerApps/apis/shared_sharepointonline",
+                    "operationId": "CreateFile",
+                    "connectionName": "shared_sharepointonline"
+                  }
+                },
+                "runtimeConfiguration": {
+                  "contentTransfer": {
+                    "transferMode": "Chunked"
+                  }
+                },
+                "metadata": {
+                  "operationMetadataId": "c1284bbf-80a2-400f-9cb3-d117dda9a9a2"
+                }
+              }
+            }
+          },
+          "runAfter": {}
+        }
+      },
+      "description": "Post de inhoud in de root map van de Produuzit/API data Sharepoint."
+    },
+    "templateName": null
+  },
+  "schemaVersion": "1.0.0.0"
+}
