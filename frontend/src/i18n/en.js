@@ -1,7 +1,7 @@
 // English locale
 export default {
   app: {
-    title: 'Produuzit',
+    title: 'ModelBridge',
     openPlatform: 'Open Produuzit',
     signOut: 'Sign out',
     error: 'Error',
@@ -19,7 +19,7 @@ export default {
     pdf: 'PDF',
   },
   login: {
-    title: 'Produuzit',
+    title: 'ModelBridge',
     subtitle: 'Sign in with your Produuzit account',
     username: 'Username',
     usernamePlaceholder: 'your.name',
@@ -29,8 +29,8 @@ export default {
     loginFailed: 'Login failed',
   },
   landing: {
-    title: 'Produuzit',
-    subtitle: 'Production data coupler \u2014 import, manage, and sync assemblies between CSV and Produuzit.',
+    title: 'ModelBridge',
+    subtitle: 'ModelBridge \u2014 import, manage, and sync assemblies between CSV, Trimble Connect, and Produuzit.',
     openPlatform: 'Open Produuzit Platform',
     cards: {
       import: {

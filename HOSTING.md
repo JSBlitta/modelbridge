@@ -1,4 +1,4 @@
-# API Coupler - Windows VM Hosting Guide
+# ModelBridge - Windows VM Hosting Guide
 
 ## Architecture
 
@@ -54,10 +54,10 @@ Enable ARR proxy in IIS Manager:
 
 ```powershell
 # 1. Copy to permanent location
-Copy-Item -Recurse .\webapp-ts C:\Apps\api-coupler
+Copy-Item -Recurse .\webapp-ts C:\Apps\modelbridge
 
 # 2. Install dependencies
-cd C:\Apps\api-coupler
+cd C:\Apps\modelbridge
 npm install --production
 
 # 3. Create logs directory
@@ -71,6 +71,7 @@ notepad .env
 #   TRIMBLE_CLIENT_ID=<from Configuration.json>
 #   TRIMBLE_CLIENT_SECRET=<from Configuration.json>
 #   TRIMBLE_CALLBACK_URLS=https://produuzit.blitta.nl/api/trimble/auth/callback,http://localhost/api/trimble/auth/callback
+#   REPORTING_REFRESH_TOKEN=<reporting account token>  (optional — reporting scheduler)
 
 # 5. Build the Vue frontend (one-time, or after frontend changes)
 cd ..\webapp\frontend
@@ -81,43 +82,43 @@ cd ..\..\webapp-ts
 
 # 6. Test it runs
 npx tsx src/index.ts
-# Should print: API Coupler listening on http://localhost:3000
+# Should print: ModelBridge listening on http://localhost:3000
 # Ctrl+C to stop
 ```
 
 ## Configure as Windows Service
 
 ```powershell
-nssm install ApiCoupler "C:\Program Files\nodejs\node.exe"
-nssm set ApiCoupler AppDirectory "C:\Apps\api-coupler"
-nssm set ApiCoupler AppParameters "node_modules\.bin\tsx" "src\index.ts"
-nssm set ApiCoupler Description "API Coupler - Produuzit and Trimble Connect bridge"
+nssm install ModelBridge "C:\Program Files\nodejs\node.exe"
+nssm set ModelBridge AppDirectory "C:\Apps\modelbridge"
+nssm set ModelBridge AppParameters "node_modules\.bin\tsx" "src\index.ts"
+nssm set ModelBridge Description "ModelBridge - Produuzit and Trimble Connect bridge"
 
 # Auto-restart on crash
-nssm set ApiCoupler AppRestartDelay 5000
+nssm set ModelBridge AppRestartDelay 5000
 
 # Logging
-nssm set ApiCoupler AppStdout "C:\Apps\api-coupler\logs\stdout.log"
-nssm set ApiCoupler AppStderr "C:\Apps\api-coupler\logs\stderr.log"
-nssm set ApiCoupler AppRotateFiles 1
-nssm set ApiCoupler AppRotateBytes 1048576
+nssm set ModelBridge AppStdout "C:\Apps\modelbridge\logs\stdout.log"
+nssm set ModelBridge AppStderr "C:\Apps\modelbridge\logs\stderr.log"
+nssm set ModelBridge AppRotateFiles 1
+nssm set ModelBridge AppRotateBytes 1048576
 
 # Auto-start with Windows
-nssm set ApiCoupler Start SERVICE_AUTO_START
+nssm set ModelBridge Start SERVICE_AUTO_START
 
 # Start the service
-nssm start ApiCoupler
+nssm start ModelBridge
 ```
 
 ### Manage the Service
 
 ```powershell
-nssm status ApiCoupler       # Check status
-nssm restart ApiCoupler      # Restart after config changes
-nssm stop ApiCoupler         # Stop
-nssm edit ApiCoupler         # Edit settings (GUI)
+nssm status ModelBridge       # Check status
+nssm restart ModelBridge      # Restart after config changes
+nssm stop ModelBridge         # Stop
+nssm edit ModelBridge         # Edit settings (GUI)
 
-# Or use services.msc — search for "ApiCoupler"
+# Or use services.msc — search for "ModelBridge"
 ```
 
 ## IIS Reverse Proxy
@@ -126,13 +127,13 @@ nssm edit ApiCoupler         # Edit settings (GUI)
 
 1. Open IIS Manager
 2. Right-click Sites > Add Website
-   - Site name: `ApiCoupler`
-   - Physical path: `C:\Apps\api-coupler\frontend-dist`
+   - Site name: `ModelBridge`
+   - Physical path: `C:\Apps\modelbridge\frontend-dist`
    - Binding: `produuzit.blitta.nl` on port 80 (or 443 with SSL cert)
 
 ### Add web.config
 
-Create `C:\Apps\api-coupler\frontend-dist\web.config`:
+Create `C:\Apps\modelbridge\frontend-dist\web.config`:
 
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
@@ -171,13 +172,13 @@ Register these callback URLs at Trimble:
 ## Updating
 
 ```powershell
-nssm stop ApiCoupler
+nssm stop ModelBridge
 
 # Copy new backend files
-xcopy /E /I /Y .\webapp-ts\* C:\Apps\api-coupler\ /EXCLUDE:exclude.txt
+xcopy /E /I /Y .\webapp-ts\* C:\Apps\modelbridge\ /EXCLUDE:exclude.txt
 
 # Install deps if package.json changed
-cd C:\Apps\api-coupler
+cd C:\Apps\modelbridge
 npm install --production
 
 # Rebuild frontend if changed
@@ -187,7 +188,7 @@ npm run build
 xcopy /E /I /Y dist ..\..\webapp-ts\frontend-dist
 cd ..\..\webapp-ts
 
-nssm start ApiCoupler
+nssm start ModelBridge
 ```
 
 ## Config Changes
@@ -195,6 +196,7 @@ nssm start ApiCoupler
 - **Produuzit token rotation** (~January 2027): update `PRODUUZIT_REFRESH_TOKEN` in `.env`, restart service
 - **Column synonyms / suffixes**: edit `config.yaml`, restart service
 - **Trimble credentials**: update `.env`, restart service
+- **Reporting schedule**: edit `data/produuzit_api_frequentie.csv`, restart service (or run `npm run reporting` manually)
 
 Config is file-based only. There is no config editor in the web UI.
 
@@ -203,7 +205,7 @@ Config is file-based only. There is no config editor in the web UI.
 ### Service won't start
 ```powershell
 # Check logs
-Get-Content C:\Apps\api-coupler\logs\stderr.log -Tail 20
+Get-Content C:\Apps\modelbridge\logs\stderr.log -Tail 20
 
 # Common: missing .env, missing node_modules
 ```
@@ -211,7 +213,7 @@ Get-Content C:\Apps\api-coupler\logs\stderr.log -Tail 20
 ### 502 Bad Gateway from IIS
 ```powershell
 # App not running
-nssm status ApiCoupler
+nssm status ModelBridge
 
 # Check if port 3000 is listening
 netstat -an | findstr 3000

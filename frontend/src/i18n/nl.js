@@ -1,7 +1,7 @@
 // Dutch locale
 export default {
   app: {
-    title: 'Produuzit',
+    title: 'ModelBridge',
     openPlatform: 'Open Produuzit',
     signOut: 'Uitloggen',
     error: 'Fout',
@@ -19,7 +19,7 @@ export default {
     pdf: 'PDF',
   },
   login: {
-    title: 'Produuzit',
+    title: 'ModelBridge',
     subtitle: 'Log in met je Produuzit-account',
     username: 'Gebruikersnaam',
     usernamePlaceholder: 'jouw.naam',
@@ -29,8 +29,8 @@ export default {
     loginFailed: 'Inloggen mislukt',
   },
   landing: {
-    title: 'Produuzit',
-    subtitle: 'Productiedata-koppelaar — importeer, beheer en synchroniseer elementen tussen CSV en Produuzit.',
+    title: 'ModelBridge',
+    subtitle: 'ModelBridge — importeer, beheer en synchroniseer elementen tussen CSV, Trimble Connect en Produuzit.',
     openPlatform: 'Open Produuzit Platform',
     cards: {
       import: {

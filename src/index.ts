@@ -53,7 +53,7 @@ initDb();
 pruneExpiredSessions();
 setInterval(pruneExpiredSessions, 60 * 60 * 1000);
 
-logger.info(`API Coupler starting on port ${env.PORT}`);
+logger.info(`ModelBridge starting on port ${env.PORT}`);
 logger.info(`  Produuzit: ${env.PRODUUZIT_BASE_URL}`);
 if (env.PRODUUZIT_REFRESH_TOKEN) {
   logger.info(`  Service token: configured via PRODUUZIT_REFRESH_TOKEN`);
@@ -73,5 +73,5 @@ if (env.REPORTING_ENABLED) {
 }
 
 serve({ fetch: app.fetch, port: env.PORT }, (info) => {
-  logger.info(`API Coupler listening on http://localhost:${info.port}`);
+  logger.info(`ModelBridge listening on http://localhost:${info.port}`);
 });

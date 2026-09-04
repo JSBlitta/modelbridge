@@ -3,7 +3,7 @@ setlocal
 
 echo.
 echo ============================================
-echo  API Coupler - Setup ^& Build
+echo  ModelBridge - Setup ^& Build
 echo ============================================
 echo.
 

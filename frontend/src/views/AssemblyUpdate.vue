@@ -146,7 +146,7 @@ async function loadDbBatches() {
     _dbBatchesCache = dbRes.data || []
     dbBatches.value = _dbBatchesCache
   } catch (e) {
-    console.error('[api-coupler] Failed to load db batches:', e?.response?.data || e?.message)
+    console.error('[modelbridge] Failed to load db batches:', e?.response?.data || e?.message)
   }
 }
 
