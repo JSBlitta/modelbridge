@@ -1,4 +1,5 @@
 import { env } from "./env.js";
+import { recordEvent } from "./db.js";
 
 // Service account token state — shared across all requests, not per-user
 let serviceRefreshToken: string | null = env.PRODUUZIT_REFRESH_TOKEN || null;
@@ -21,6 +22,7 @@ async function obtainAccessToken(refreshToken: string): Promise<string> {
   if (!res.ok) {
     const body = await res.text();
     console.error("[produuzit] Token refresh failed:", res.status, body);
+    recordEvent({ category: "produuzit", level: "error", summary: "Token refresh failed", detail: `${res.status} ${body.slice(0, 300)}` });
     throw new Error(`Token refresh failed: ${res.status} ${body}`);
   }
   const data = await res.json() as { access: string; refresh?: string };
@@ -28,8 +30,10 @@ async function obtainAccessToken(refreshToken: string): Promise<string> {
   if (data.refresh && data.refresh !== refreshToken) {
     serviceRefreshToken = data.refresh;
     console.log("[produuzit] New refresh token received (rotation)");
+    recordEvent({ category: "produuzit", level: "info", summary: "Refresh token rotated" });
   }
   console.log("[produuzit] Access token refreshed successfully");
+  recordEvent({ category: "produuzit", level: "info", summary: "Access token refreshed" });
   return data.access;
 }
 
@@ -154,46 +158,61 @@ async function request(
   path: string,
   opts?: { params?: Record<string, string | number>; json?: unknown; formData?: FormData },
 ): Promise<unknown> {
-  await ensureServiceToken();
-
-  const base = env.PRODUUZIT_BASE_URL;
-  let url = `${base}${path}`;
-  if (opts?.params) {
-    const qs = new URLSearchParams();
-    for (const [k, v] of Object.entries(opts.params)) {
-      if (v !== undefined && v !== null) qs.set(k, String(v));
-    }
-    const qstr = qs.toString();
-    if (qstr) url += `?${qstr}`;
-  }
-
-  const buildInit = (): RequestInit => {
-    const h = serviceHeaders();
-    const init: RequestInit = { method, headers: h };
-    if (opts?.formData) {
-      delete (h as Record<string, string>)["Content-Type"];
-      init.body = opts.formData;
-    } else if (opts?.json !== undefined) {
-      init.body = JSON.stringify(opts.json);
-    }
-    return init;
+  const started = Date.now();
+  let failed = false;
+  const recordFailure = (detail: string) => {
+    failed = true;
+    recordEvent({ category: "produuzit", level: "error", summary: `${method} ${path}`, detail });
   };
 
-  let res = await fetch(url, buildInit());
-  if (res.status === 401 || res.status === 403) {
-    // Token expired or invalid — refresh and retry once
-    console.log(`[produuzit] Got ${res.status} on ${method} ${path}, refreshing token...`);
-    await refreshService();
-    res = await fetch(url, buildInit());
-    if (res.status === 401 || res.status === 403) {
-      console.error(`[produuzit] Still getting ${res.status} after token refresh on ${method} ${path}`);
+  try {
+    await ensureServiceToken();
+
+    const base = env.PRODUUZIT_BASE_URL;
+    let url = `${base}${path}`;
+    if (opts?.params) {
+      const qs = new URLSearchParams();
+      for (const [k, v] of Object.entries(opts.params)) {
+        if (v !== undefined && v !== null) qs.set(k, String(v));
+      }
+      const qstr = qs.toString();
+      if (qstr) url += `?${qstr}`;
     }
+
+    const buildInit = (): RequestInit => {
+      const h = serviceHeaders();
+      const init: RequestInit = { method, headers: h };
+      if (opts?.formData) {
+        delete (h as Record<string, string>)["Content-Type"];
+        init.body = opts.formData;
+      } else if (opts?.json !== undefined) {
+        init.body = JSON.stringify(opts.json);
+      }
+      return init;
+    };
+
+    let res = await fetch(url, buildInit());
+    if (res.status === 401 || res.status === 403) {
+      // Token expired or invalid — refresh and retry once
+      console.log(`[produuzit] Got ${res.status} on ${method} ${path}, refreshing token...`);
+      await refreshService();
+      res = await fetch(url, buildInit());
+      if (res.status === 401 || res.status === 403) {
+        console.error(`[produuzit] Still getting ${res.status} after token refresh on ${method} ${path}`);
+      }
+    }
+    if (!res.ok) {
+      const body = await res.text();
+      recordFailure(`${res.status} ${body.slice(0, 300)} · ${Date.now() - started}ms`);
+      throw new Error(`Produuzit ${method} ${path}: ${res.status} ${body}`);
+    }
+    const json = await res.json();
+    recordEvent({ category: "produuzit", level: "info", summary: `${method} ${path}`, detail: `${res.status} · ${Date.now() - started}ms` });
+    return json;
+  } catch (e) {
+    if (!failed) recordFailure(e instanceof Error ? e.message : String(e));
+    throw e;
   }
-  if (!res.ok) {
-    const body = await res.text();
-    throw new Error(`Produuzit ${method} ${path}: ${res.status} ${body}`);
-  }
-  return res.json();
 }
 
 export async function apiGet(path: string, params?: Record<string, string | number>): Promise<unknown> {

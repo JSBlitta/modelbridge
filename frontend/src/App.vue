@@ -51,7 +51,7 @@
         <div class="notif-header">
           <span>{{ $t('notifications.title') }}</span>
           <div style="display:flex;gap:0.4rem;">
-            <Button :label="$t('notifications.clearAll')" size="small" text @click="clearAll" />
+            <Button :label="$t('notifications.clearAll')" size="small" text @click="clearAllNotifications" />
           </div>
         </div>
         <div v-if="!notifications.length" class="notif-empty">{{ $t('notifications.empty') }}</div>
@@ -83,7 +83,7 @@ const toast = useToast()
 const username = ref('')
 const { t, locale } = useI18n()
 
-const { notifications, unreadCount, notify, registerToaster, clearAll } = useNotifications()
+const { notifications, unreadCount, notify, registerToaster, clearAll, hydrateFromServer } = useNotifications()
 const showNotifications = ref(false)
 
 // Wire notification history into the PrimeVue toast
@@ -97,6 +97,11 @@ function toggleNotifications() {
     // mark all read when opening the panel
     notifications.value.forEach((n) => { n.read = true })
   }
+}
+
+async function clearAllNotifications() {
+  await api.delete('/api/history').catch(() => {})
+  clearAll()
 }
 
 function formatTime(iso) {
@@ -124,6 +129,7 @@ onMounted(async () => {
     const res = await api.get('/api/auth/status')
     username.value = res.data.username ?? ''
   } catch { /* router guard handles redirect */ }
+  hydrateFromServer(api)
 })
 
 async function logout() {

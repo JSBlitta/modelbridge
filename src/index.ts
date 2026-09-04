@@ -17,6 +17,7 @@ import cloudstorage from "./routes/cloudstorage.js";
 import csv from "./routes/csv.js";
 import trimble from "./routes/trimble.js";
 import config from "./routes/config.js";
+import history from "./routes/history.js";
 
 const app = new Hono();
 
@@ -30,6 +31,7 @@ app.route("/api/cloudstorage", cloudstorage);
 app.route("/api/csv", csv);
 app.route("/api/trimble", trimble);
 app.route("/api/config", config);
+app.route("/api/history", history);
 
 app.onError((err, c) => {
   console.error(`[${new Date().toISOString()}] ${c.req.method} ${c.req.path}:`, err.message);
@@ -59,6 +61,9 @@ if (env.PRODUUZIT_REFRESH_TOKEN) {
 } else {
   logger.warn(`  No service token configured — set PRODUUZIT_REFRESH_TOKEN in .env`);
 }
+
+// Reporting scheduler (replaces the ProduuzitAPI Power Automate solution)
+// (wired in a follow-up commit)
 
 serve({ fetch: app.fetch, port: env.PORT }, (info) => {
   logger.info(`API Coupler listening on http://localhost:${info.port}`);

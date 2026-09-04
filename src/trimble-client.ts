@@ -1,5 +1,6 @@
 import { createServer, type Server } from "node:net";
 import { env } from "./env.js";
+import { recordEvent } from "./db.js";
 
 let accessToken: string | null = null;
 let refreshTokenVal: string | null = null;
@@ -206,17 +207,30 @@ export async function trimbleGet(url: string, params?: Record<string, string>): 
   const qs = params ? `?${new URLSearchParams(params)}` : "";
   const h: Record<string, string> = {};
   if (accessToken) h.Authorization = `Bearer ${accessToken}`;
+  const started = Date.now();
 
-  let res = await fetch(`${url}${qs}`, { headers: h });
-  if (res.status === 401 && refreshTokenVal) {
-    const refreshed = await refreshAccessToken();
-    if (refreshed) {
-      h.Authorization = `Bearer ${refreshed}`;
-      res = await fetch(`${url}${qs}`, { headers: h });
+  try {
+    let res = await fetch(`${url}${qs}`, { headers: h });
+    if (res.status === 401 && refreshTokenVal) {
+      const refreshed = await refreshAccessToken();
+      if (refreshed) {
+        h.Authorization = `Bearer ${refreshed}`;
+        res = await fetch(`${url}${qs}`, { headers: h });
+      }
     }
+    if (!res.ok) {
+      recordEvent({ category: "trimble", level: "error", summary: `GET ${url}`, detail: `${res.status} · ${Date.now() - started}ms` });
+      throw new Error(`Trimble GET ${url}: ${res.status}`);
+    }
+    const json = await res.json();
+    recordEvent({ category: "trimble", level: "info", summary: `GET ${url}`, detail: `${res.status} · ${Date.now() - started}ms` });
+    return json;
+  } catch (e) {
+    if (e instanceof Error && !e.message.startsWith("Trimble GET")) {
+      recordEvent({ category: "trimble", level: "error", summary: `GET ${url}`, detail: e.message });
+    }
+    throw e;
   }
-  if (!res.ok) throw new Error(`Trimble GET ${url}: ${res.status}`);
-  return res.json();
 }
 
 export async function fetchAllTrimblePages(

@@ -56,6 +56,76 @@ export function initDb(): void {
       mapping TEXT
     )
   `);
+  ensureEventsTable();
+}
+
+let _eventsReady = false;
+
+function ensureEventsTable(): void {
+  if (_eventsReady) return;
+  db().exec(`
+    CREATE TABLE IF NOT EXISTS events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      ts TEXT NOT NULL,
+      category TEXT NOT NULL,
+      level TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      detail TEXT
+    )
+  `);
+  _eventsReady = true;
+}
+
+// --- Event history (persistent action log) ---
+
+export interface EventRow {
+  id: number;
+  ts: string;
+  category: string;
+  level: string;
+  summary: string;
+  detail: string | null;
+}
+
+const MAX_EVENTS = 5000;
+
+// Record a single action into the persistent history.
+// Categories: "produuzit" (API actions), "trimble" (API actions), "reporting" (scheduled exports).
+export function recordEvent(input: {
+  category: string;
+  level?: string;
+  summary: string;
+  detail?: string;
+}): void {
+  try {
+    ensureEventsTable();
+    db()
+      .prepare("INSERT INTO events (ts, category, level, summary, detail) VALUES (?, ?, ?, ?, ?)")
+      .run(new Date().toISOString(), input.category, input.level ?? "info", input.summary, input.detail ?? null);
+    // Keep the table bounded — retain the most recent events only
+    db().prepare("DELETE FROM events WHERE id NOT IN (SELECT id FROM events ORDER BY id DESC LIMIT ?)").run(MAX_EVENTS);
+  } catch {
+    // History must never break the action it is recording
+  }
+}
+
+export function listEvents(opts?: { limit?: number; category?: string; level?: string }): EventRow[] {
+  ensureEventsTable();
+  const limit = Math.min(opts?.limit ?? 100, 1000);
+  const conds: string[] = [];
+  const args: unknown[] = [];
+  if (opts?.category) { conds.push("category = ?"); args.push(opts.category); }
+  if (opts?.level) { conds.push("level = ?"); args.push(opts.level); }
+  const where = conds.length ? ` WHERE ${conds.join(" AND ")}` : "";
+  return db()
+    .prepare(`SELECT * FROM events${where} ORDER BY id DESC LIMIT ?`)
+    .all(...args, limit) as EventRow[];
+}
+
+export function clearEvents(category?: string): void {
+  ensureEventsTable();
+  if (category) db().prepare("DELETE FROM events WHERE category = ?").run(category);
+  else db().prepare("DELETE FROM events").run();
 }
 
 export function upsertBatch(

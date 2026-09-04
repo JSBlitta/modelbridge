@@ -27,5 +27,33 @@ export function useNotifications() {
     notifications.value = []
   }
 
-  return { notifications, unreadCount, notify, registerToaster, markAllRead, clearAll }
+  // Merge the persistent server-side event log into the in-memory history.
+  // Server events are shown as already-read so only live in-session actions toast.
+  async function hydrateFromServer(api) {
+    try {
+      const res = await api.get('/api/history', { params: { limit: 100 } })
+      const events = res.data?.events || []
+      if (!events.length) return
+      const known = new Set(notifications.value.map((n) => n.serverId).filter(Boolean))
+      const items = events
+        .filter((e) => !known.has(e.id))
+        .map((e) => ({
+          id: ++_seq,
+          serverId: e.id,
+          severity: e.level === 'error' ? 'error' : e.level === 'warn' ? 'warn' : 'info',
+          summary: `${e.category}: ${e.summary}`,
+          detail: e.detail || '',
+          time: e.ts,
+          read: true,
+        }))
+      if (!items.length) return
+      notifications.value.push(...items)
+      notifications.value.sort((a, b) => new Date(b.time) - new Date(a.time))
+      if (notifications.value.length > 200) notifications.value.length = 200
+    } catch {
+      // History endpoint unavailable — keep in-memory notifications only
+    }
+  }
+
+  return { notifications, unreadCount, notify, registerToaster, markAllRead, clearAll, hydrateFromServer }
 }
