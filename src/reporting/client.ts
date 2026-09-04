@@ -50,6 +50,16 @@ function persistTokens(): void {
   }
 }
 
+// Join the reporting base URL with a path, tolerating either a trailing slash
+// on the base or a leading slash on the path. Endpoints in the schedule CSV
+// have no leading slash (e.g. "overview/production/"), so this is essential.
+function joinBaseUrl(pathOrUrl: string): string {
+  if (/^https?:\/\//i.test(pathOrUrl)) return pathOrUrl;
+  const base = env.REPORTING_BASE_URL.replace(/\/+$/, "");
+  const p = pathOrUrl.replace(/^\/+/, "");
+  return `${base}/${p}`;
+}
+
 export async function refreshReportingAccessToken(): Promise<string> {
   loadStoredTokens();
   const rt = refreshToken;
@@ -59,8 +69,9 @@ export async function refreshReportingAccessToken(): Promise<string> {
       "(separate Produuzit API account from PRODUUZIT_REFRESH_TOKEN).",
     );
   }
-  logger.debug(`[reporting] Refreshing access token via ${env.REPORTING_BASE_URL}/my_user/token/refresh/`);
-  const res = await fetch(`${env.REPORTING_BASE_URL}/my_user/token/refresh/`, {
+  const refreshUrl = joinBaseUrl("my_user/token/refresh/");
+  logger.debug(`[reporting] Refreshing access token via ${refreshUrl}`);
+  const res = await fetch(refreshUrl, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ refresh: rt }),
@@ -103,17 +114,14 @@ async function getUrl(url: string): Promise<Response> {
 
 function isNextUrl(next: unknown): string | null {
   if (typeof next !== "string" || !next.trim()) return null;
-  const v = next.trim();
-  // Produuzit returns absolute URLs; accept relative paths too
-  if (v.startsWith("http://") || v.startsWith("https://")) return v;
-  return `${env.REPORTING_BASE_URL}${v.startsWith("/") ? v.slice(1) : v}`;
+  return joinBaseUrl(next.trim());
 }
 
 // Fetch one endpoint and collect all pages of results.
 // Handles paginated bodies ({ results, next }), plain arrays and single objects.
 export async function fetchAllReporting(path: string): Promise<unknown[]> {
   const items: unknown[] = [];
-  let url: string | null = `${env.REPORTING_BASE_URL}${path}`;
+  let url: string | null = joinBaseUrl(path);
   let pages = 0;
 
   while (url && pages < MAX_PAGES) {
