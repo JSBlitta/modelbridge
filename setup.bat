@@ -17,13 +17,23 @@ echo [1/5] Node.js: OK
 
 :: Install backend deps
 echo [2/5] Installing backend dependencies...
-call npm install
-if errorlevel 1 ( echo ERROR: npm install failed. & exit /b 1 )
+echo      First run downloads a prebuilt native module (better-sqlite3).
+echo      This can take a few minutes and needs access to registry.npmjs.org and github.com.
+call npm install --no-audit --no-fund
+if errorlevel 1 (
+    echo.
+    echo ERROR: npm install failed. If it hung for a long time:
+    echo   - check network access to registry.npmjs.org and github.com
+    echo   - try:  npm cache clean --force
+    echo   - diagnose the hang with:  npm install --verbose
+    echo.
+    exit /b 1
+)
 
 :: Install frontend deps
 echo [3/5] Installing frontend dependencies...
 cd frontend
-call npm install
+call npm install --no-audit --no-fund
 if errorlevel 1 ( echo ERROR: frontend npm install failed. & cd .. & exit /b 1 )
 
 :: Build frontend
