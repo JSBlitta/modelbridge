@@ -13,3 +13,4 @@ scratch
 data/reporting/
 data/reporting_tokens.json
 data/reporting_last_run.json
+constructibles*.json

@@ -65,15 +65,12 @@ export function matchesToday(entry: ScheduleEntry, now: Date): boolean {
 }
 
 // Build the output filename.
-//   overwrite=true : "overview - production.json"          (stable name)
-//   overwrite=false: "overview - production Donderdag - Week 36.json" (timestamped)
-// The original flow replaced every "/" with " - ", which left a trailing
-// separator on endpoints ending in "/" — trimmed here for clean names.
+//   overwrite=true : "constructibles - batches.json"          (stable name)
+//   overwrite=false: "constructibles - batches Maandag - Week 47.json" (timestamped)
+// Slashes become " - "; trailing slashes are dropped so endpoints ending in "/"
+// don't leave a dangling separator before the extension.
 export function filenameFor(entry: ScheduleEntry, now: Date): string {
-  const base = entry.endpoint
-    .replace(/\/+/g, " - ")
-    .trim()
-    .replace(/\s+-\s+$/, "");
+  const base = entry.endpoint.split("/").filter(Boolean).join(" - ");
   if (entry.overwrite) return `${base}.json`;
   const weekday = DUTCH_WEEKDAYS[now.getUTCDay()];
   return `${base} ${weekday} - Week ${isoWeek(now)}.json`;
