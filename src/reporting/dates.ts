@@ -64,13 +64,13 @@ export function matchesToday(entry: ScheduleEntry, now: Date): boolean {
   }
 }
 
-// Build the output filename.
-//   overwrite=true : "constructibles - batches.json"          (stable name)
-//   overwrite=false: "constructibles - batches Maandag - Week 47.json" (timestamped)
-// Slashes become " - "; trailing slashes are dropped so endpoints ending in "/"
-// don't leave a dangling separator before the extension.
+// Build the output filename to match the Power Automate convention exactly.
+// The existing Power BI report filters on the literal filename
+// (e.g. "constructibles - batches - .json"), so we keep PA's replace('/', ' - ')
+// output — including the trailing " - " on endpoints that end in a slash —
+// rather than cleaning it up.
 export function filenameFor(entry: ScheduleEntry, now: Date): string {
-  const base = entry.endpoint.split("/").filter(Boolean).join(" - ");
+  const base = entry.endpoint.replace(/\//g, " - ");
   if (entry.overwrite) return `${base}.json`;
   const weekday = DUTCH_WEEKDAYS[now.getUTCDay()];
   return `${base} ${weekday} - Week ${isoWeek(now)}.json`;
