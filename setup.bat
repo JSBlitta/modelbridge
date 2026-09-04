@@ -43,6 +43,9 @@ if not exist .env (
     echo   PRODUUZIT_REFRESH_TOKEN  -or-  PRODUUZIT_ADMIN_USERNAME + PRODUUZIT_ADMIN_PASSWORD
     echo   TRIMBLE_CLIENT_ID
     echo   TRIMBLE_CLIENT_SECRET
+    echo   REPORTING_REFRESH_TOKEN  (optional - only for the reporting scheduler)
+    echo.
+    echo   Reporting scheduler also needs:  data\produuzit_api_frequentie.csv
     echo.
     echo Then run:  node_modules\.bin\tsx src\index.ts
 ) else (
