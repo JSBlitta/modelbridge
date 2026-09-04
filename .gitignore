@@ -9,3 +9,7 @@ scratch
 *.png
 *.har
 *.zip
+# Reporting scheduler output, tokens and last-run state
+data/reporting/
+data/reporting_tokens.json
+data/reporting_last_run.json

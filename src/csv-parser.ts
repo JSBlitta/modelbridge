@@ -1,7 +1,7 @@
 const PROJECT_PATTERN = /^(\d+)-([A-Za-z])(?:-(.+))?$/;
 
 // Detect comma vs semicolon delimiter from the header line (outside quotes)
-function detectDelimiter(headerLine: string): "," | ";" {
+export function detectDelimiter(headerLine: string): "," | ";" {
   let commas = 0;
   let semis = 0;
   let inQuotes = false;
@@ -204,7 +204,7 @@ function parseRows(lines: string[], headers: string[], delim: "," | ";"): Record
   return rows;
 }
 
-function splitCsvLine(line: string, delim: "," | ";"): string[] {
+export function splitCsvLine(line: string, delim: "," | ";"): string[] {
   const result: string[] = [];
   let current = "";
   let inQuotes = false;

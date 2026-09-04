@@ -18,6 +18,7 @@ import csv from "./routes/csv.js";
 import trimble from "./routes/trimble.js";
 import config from "./routes/config.js";
 import history from "./routes/history.js";
+import { startReportingScheduler } from "./reporting/runner.js";
 
 const app = new Hono();
 
@@ -63,7 +64,13 @@ if (env.PRODUUZIT_REFRESH_TOKEN) {
 }
 
 // Reporting scheduler (replaces the ProduuzitAPI Power Automate solution)
-// (wired in a follow-up commit)
+if (env.REPORTING_ENABLED) {
+  startReportingScheduler();
+  logger.info(`  Reporting scheduler: daily at ${env.REPORTING_TIME} (${env.REPORTING_TIMEZONE})`);
+  if (!env.REPORTING_REFRESH_TOKEN) {
+    logger.warn(`  Reporting: no REPORTING_REFRESH_TOKEN configured — token refresh will fail`);
+  }
+}
 
 serve({ fetch: app.fetch, port: env.PORT }, (info) => {
   logger.info(`API Coupler listening on http://localhost:${info.port}`);

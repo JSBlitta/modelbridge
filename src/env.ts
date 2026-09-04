@@ -22,11 +22,13 @@ function optional(key: string, fallback = ""): string {
   return process.env[key] || fallback;
 }
 
+const produuzitBaseUrl = optional("PRODUUZIT_BASE_URL", "https://back.produuz.it/api/v2");
+
 export const env = {
   PORT: parseInt(optional("PORT", "3000"), 10),
 
   // Produuzit API
-  PRODUUZIT_BASE_URL: optional("PRODUUZIT_BASE_URL", "https://back.produuz.it/api/v2"),
+  PRODUUZIT_BASE_URL: produuzitBaseUrl,
 
   // Service account — priority 1: long-lived refresh token
   PRODUUZIT_REFRESH_TOKEN: optional("PRODUUZIT_REFRESH_TOKEN"),
@@ -47,4 +49,16 @@ export const env = {
 
   // Logging: error | warn | info | debug (default: info)
   LOG_LEVEL: optional("LOG_LEVEL", "info"),
+
+  // Reporting scheduler — TypeScript replacement for the ProduuzitAPI
+  // Power Automate solution. Uses a SEPARATE Produuzit API account.
+  REPORTING_ENABLED: optional("REPORTING_ENABLED", "false") === "true",
+  REPORTING_REFRESH_TOKEN: optional("REPORTING_REFRESH_TOKEN"),
+  REPORTING_BASE_URL: optional("REPORTING_BASE_URL") || produuzitBaseUrl,
+  REPORTING_TIME: optional("REPORTING_TIME", "18:15"),
+  REPORTING_TIMEZONE: optional("REPORTING_TIMEZONE", "Europe/Amsterdam"),
+  REPORTING_CONFIG_CSV: optional("REPORTING_CONFIG_CSV", "data/produuzit_api_frequentie.csv"),
+  REPORTING_OUTPUT_DIR: optional("REPORTING_OUTPUT_DIR", "data/reporting"),
+  REPORTING_TOKEN_FILE: optional("REPORTING_TOKEN_FILE", "data/reporting_tokens.json"),
+  REPORTING_LAST_RUN_FILE: optional("REPORTING_LAST_RUN_FILE", "data/reporting_last_run.json"),
 };
