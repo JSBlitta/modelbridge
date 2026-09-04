@@ -70,7 +70,7 @@ app.patch("/schedule/:id", async (c) => {
     active: (body.active as boolean) ?? Boolean(existing.active),
     frequency: (body.frequency as string) ?? existing.frequency,
     weekdays: (body.weekdays as string[]) ?? JSON.parse(existing.weekdays || "[]"),
-    day_of_month: (body.day_of_month as number | null) ?? existing.day_of_month,
+    day_of_month: "day_of_month" in body ? (body.day_of_month as number | null) : existing.day_of_month,
     conditions: (body.conditions as string) ?? existing.conditions,
     storage_path: (body.storage_path as string) ?? existing.storage_path,
     overwrite: (body.overwrite as boolean) ?? Boolean(existing.overwrite),
