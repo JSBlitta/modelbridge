@@ -63,7 +63,6 @@ export const env = {
   REPORTING_TIMEZONE: optional("REPORTING_TIMEZONE", "Europe/Amsterdam"),
   REPORTING_CONFIG_CSV: optional("REPORTING_CONFIG_CSV", "data/produuzit_api_frequentie.csv"),
   REPORTING_OUTPUT_DIR: optional("REPORTING_OUTPUT_DIR", "data/reporting"),
-  REPORTING_TOKEN_FILE: optional("REPORTING_TOKEN_FILE", "data/reporting_tokens.json"),
   REPORTING_LAST_RUN_FILE: optional("REPORTING_LAST_RUN_FILE", "data/reporting_last_run.json"),
   REPORTING_PAGE_SIZE: parseInt(optional("REPORTING_PAGE_SIZE", "1000"), 10),
   REPORTING_MAX_PAGES: parseInt(optional("REPORTING_MAX_PAGES", "60"), 10),

@@ -20,6 +20,7 @@ import config from "./routes/config.js";
 import history from "./routes/history.js";
 import admin from "./routes/admin.js";
 import { startReportingScheduler } from "./reporting/runner.js";
+import { getReportingSettings } from "./settings.js";
 
 const app = new Hono();
 
@@ -65,13 +66,14 @@ if (env.PRODUUZIT_REFRESH_TOKEN) {
   logger.warn(`  No service token configured — set PRODUUZIT_REFRESH_TOKEN in .env`);
 }
 
-// Reporting scheduler (replaces the ProduuzitAPI Power Automate solution)
-if (env.REPORTING_ENABLED) {
-  startReportingScheduler();
-  logger.info(`  Reporting scheduler: daily at ${env.REPORTING_TIME} (${env.REPORTING_TIMEZONE})`);
-  if (!env.REPORTING_REFRESH_TOKEN) {
-    logger.warn(`  Reporting: no REPORTING_REFRESH_TOKEN configured — token refresh will fail`);
-  }
+// Reporting scheduler (replaces the ProduuzitAPI Power Automate solution).
+// Always armed — the tick checks the `reporting_enabled` setting so it can be
+// toggled from the admin page without a restart.
+startReportingScheduler();
+const reportingCfg = getReportingSettings();
+logger.info(`  Reporting scheduler: ${reportingCfg.enabled ? `daily at ${reportingCfg.time} (${reportingCfg.timezone})` : "disabled"}`);
+if (reportingCfg.enabled && !reportingCfg.refreshToken) {
+  logger.warn(`  Reporting: no refresh token configured — set REPORTING_REFRESH_TOKEN or the admin page`);
 }
 
 serve({ fetch: app.fetch, port: env.PORT }, (info) => {

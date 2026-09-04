@@ -2,7 +2,7 @@
 // Power Automate solution. See REPORTING.md for the full mapping.
 export { runReportingCycle, startReportingScheduler, runOneEndpoint, defaultDeps } from "./runner.js";
 export { fetchAllReporting, refreshReportingAccessToken } from "./client.js";
-export { CsvScheduleSource, parseScheduleCsv, type ScheduleSource } from "./config.js";
+export { CsvScheduleSource, DbScheduleSource, parseScheduleCsv, type ScheduleSource } from "./config.js";
 export { LocalFileStore, JsonLastRunStore, type OutputStore, type LastRunStore } from "./storage.js";
 export { mergeUnique, stableKey } from "./dedupe.js";
 export { DUTCH_WEEKDAYS, amsterdamNow, isoWeek, matchesToday, filenameFor } from "./dates.js";

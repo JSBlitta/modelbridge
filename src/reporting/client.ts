@@ -7,69 +7,37 @@
 //   - "Produuzit pagination" (GET with Bearer token, follows `next` links)
 //
 // Token seeding/persistence:
-//   - REPORTING_REFRESH_TOKEN (.env) seeds the refresh token.
-//   - If REPORTING_TOKEN_FILE is set, rotated tokens are persisted there in the
-//     same shape as the original api_tokens.json ({ Produuzit: { Access, Refresh } }),
-//     so the freshest refresh token survives restarts.
+//   - The refresh token is a setting (reporting_refresh_token), seeded from
+//     REPORTING_REFRESH_TOKEN in .env and editable on the admin page.
+//   - On rotation the new refresh token is saved back to the settings store, so
+//     the freshest token survives restarts.
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
-import { env } from "../env.js";
 import { recordEvent } from "../db.js";
 import { logger } from "../logger.js";
+import { getReportingSettings, saveSettings } from "../settings.js";
 
-interface StoredTokens {
-  Produuzit?: { Access?: string; Refresh?: string };
-}
-
-let refreshToken: string | null = null;
 let accessToken: string | null = null;
 
-function loadStoredTokens(): void {
-  if (refreshToken || accessToken) return;
-  let stored: StoredTokens = {};
-  if (env.REPORTING_TOKEN_FILE && existsSync(env.REPORTING_TOKEN_FILE)) {
-    try {
-      stored = JSON.parse(readFileSync(env.REPORTING_TOKEN_FILE, "utf-8")) as StoredTokens;
-    } catch {
-      logger.warn(`[reporting] Could not parse ${env.REPORTING_TOKEN_FILE} — ignoring stored tokens`);
-    }
-  }
-  refreshToken = stored.Produuzit?.Refresh ?? env.REPORTING_REFRESH_TOKEN ?? null;
-  accessToken = stored.Produuzit?.Access ?? null;
-}
-
-function persistTokens(): void {
-  if (!env.REPORTING_TOKEN_FILE) return;
-  try {
-    mkdirSync(dirname(env.REPORTING_TOKEN_FILE), { recursive: true });
-    const payload: StoredTokens = { Produuzit: { Access: accessToken ?? "", Refresh: refreshToken ?? "" } };
-    writeFileSync(env.REPORTING_TOKEN_FILE, JSON.stringify(payload, null, 2));
-  } catch (e) {
-    logger.warn(`[reporting] Could not persist tokens to ${env.REPORTING_TOKEN_FILE}: ${String(e)}`);
-  }
-}
-
 // Join the reporting base URL with a path, tolerating either a trailing slash
-// on the base or a leading slash on the path. Endpoints in the schedule CSV
-// have no leading slash (e.g. "overview/production/"), so this is essential.
-function joinBaseUrl(pathOrUrl: string): string {
+// on the base or a leading slash on the path. Endpoints in the schedule have no
+// leading slash (e.g. "overview/production/"), so this is essential.
+function joinBaseUrl(baseUrl: string, pathOrUrl: string): string {
   if (/^https?:\/\//i.test(pathOrUrl)) return pathOrUrl;
-  const base = env.REPORTING_BASE_URL.replace(/\/+$/, "");
+  const base = baseUrl.replace(/\/+$/, "");
   const p = pathOrUrl.replace(/^\/+/, "");
   return `${base}/${p}`;
 }
 
 export async function refreshReportingAccessToken(): Promise<string> {
-  loadStoredTokens();
-  const rt = refreshToken;
+  const s = getReportingSettings();
+  const rt = s.refreshToken;
   if (!rt) {
     throw new Error(
       "No reporting refresh token configured. Set REPORTING_REFRESH_TOKEN in .env " +
-      "(separate Produuzit API account from PRODUUZIT_REFRESH_TOKEN).",
+      "or configure it on the admin page (separate Produuzit API account).",
     );
   }
-  const refreshUrl = joinBaseUrl("my_user/token/refresh/");
+  const refreshUrl = joinBaseUrl(s.baseUrl, "my_user/token/refresh/");
   logger.debug(`[reporting] Refreshing access token via ${refreshUrl}`);
   const res = await fetch(refreshUrl, {
     method: "POST",
@@ -84,16 +52,14 @@ export async function refreshReportingAccessToken(): Promise<string> {
   const data = (await res.json()) as { access: string; refresh?: string };
   accessToken = data.access;
   if (data.refresh && data.refresh !== rt) {
-    refreshToken = data.refresh;
+    saveSettings({ reporting_refresh_token: data.refresh });
     recordEvent({ category: "reporting", level: "info", summary: "Refresh token rotated" });
   }
-  persistTokens();
   recordEvent({ category: "reporting", level: "info", summary: "Access token refreshed" });
   return data.access;
 }
 
 async function ensureAccessToken(): Promise<string> {
-  loadStoredTokens();
   if (!accessToken) await refreshReportingAccessToken();
   return accessToken as string;
 }
@@ -111,23 +77,19 @@ async function getUrl(url: string): Promise<Response> {
   return res;
 }
 
-function isNextUrl(next: unknown): string | null {
-  if (typeof next !== "string" || !next.trim()) return null;
-  return joinBaseUrl(next.trim());
-}
-
 // Fetch one endpoint and collect all pages of results.
 // Handles paginated bodies ({ results, next }), plain arrays and single objects.
 export async function fetchAllReporting(path: string): Promise<unknown[]> {
+  const s = getReportingSettings();
   const items: unknown[] = [];
   // Request the largest page size so list endpoints need fewer round-trips.
   const initialPath = path.includes("?")
-    ? `${path}&limit=${env.REPORTING_PAGE_SIZE}`
-    : `${path}?limit=${env.REPORTING_PAGE_SIZE}`;
-  let url: string | null = joinBaseUrl(initialPath);
+    ? `${path}&limit=${s.pageSize}`
+    : `${path}?limit=${s.pageSize}`;
+  let url: string | null = joinBaseUrl(s.baseUrl, initialPath);
   let pages = 0;
 
-  while (url && pages < env.REPORTING_MAX_PAGES) {
+  while (url && pages < s.maxPages) {
     pages++;
     let res = await getUrl(url);
 
@@ -142,9 +104,8 @@ export async function fetchAllReporting(path: string): Promise<unknown[]> {
 
     if (!res.ok) {
       const body = await res.text();
-      const message = `GET ${path}: ${res.status} ${body.slice(0, 300)}`;
       recordEvent({ category: "reporting", level: "error", summary: `GET ${path}`, detail: `${res.status} ${body.slice(0, 300)}` });
-      throw new Error(message);
+      throw new Error(`GET ${path}: ${res.status} ${body.slice(0, 300)}`);
     }
 
     const json: unknown = await res.json();
@@ -154,20 +115,19 @@ export async function fetchAllReporting(path: string): Promise<unknown[]> {
       url = null;
     } else if (json && typeof json === "object" && Array.isArray((json as { results?: unknown[] }).results)) {
       // Paginated list response — flatten results and follow the next link.
-      // (The original flow only flattened when `next` was non-null, wrapping
-      // single-page responses — fixed here.)
       items.push(...(json as { results: unknown[] }).results);
-      url = isNextUrl((json as { next?: unknown }).next);
+      const next = (json as { next?: unknown }).next;
+      url = typeof next === "string" && next.trim() ? joinBaseUrl(s.baseUrl, next.trim()) : null;
     } else {
       items.push(json);
       url = null;
     }
   }
 
-  if (pages >= env.REPORTING_MAX_PAGES) {
+  if (pages >= s.maxPages) {
     logger.warn(
-      `[reporting] ${path}: stopped after ${env.REPORTING_MAX_PAGES} pages (${items.length} items so far) — ` +
-      `raise REPORTING_MAX_PAGES if the dataset is larger`,
+      `[reporting] ${path}: stopped after ${s.maxPages} pages (${items.length} items so far) — ` +
+      `raise reporting_max_pages if the dataset is larger`,
     );
   }
   return items;

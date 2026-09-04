@@ -14,7 +14,8 @@
 import { env } from "../env.js";
 import { recordEvent } from "../db.js";
 import { logger } from "../logger.js";
-import { CsvScheduleSource, type ScheduleSource } from "./config.js";
+import { getReportingSettings } from "../settings.js";
+import { DbScheduleSource, type ScheduleSource } from "./config.js";
 import { fetchAllReporting, refreshReportingAccessToken } from "./client.js";
 import { JsonLastRunStore, LocalFileStore, type LastRunStore, type OutputStore } from "./storage.js";
 import { mergeUnique } from "./dedupe.js";
@@ -29,8 +30,8 @@ export interface ReportingDeps {
 
 export function defaultDeps(): Required<ReportingDeps> {
   return {
-    source: new CsvScheduleSource(env.REPORTING_CONFIG_CSV),
-    output: new LocalFileStore(env.REPORTING_OUTPUT_DIR),
+    source: new DbScheduleSource(env.REPORTING_CONFIG_CSV),
+    output: new LocalFileStore(getReportingSettings().outputDir),
     lastRun: new JsonLastRunStore(env.REPORTING_LAST_RUN_FILE),
   };
 }
@@ -95,7 +96,7 @@ function parseArray(text: string | null): unknown[] {
 }
 
 export async function runReportingCycle(
-  now: Date = amsterdamNow(env.REPORTING_TIMEZONE),
+  now: Date = amsterdamNow(getReportingSettings().timezone),
   depsOverride?: ReportingDeps,
 ): Promise<CycleResult> {
   const deps: Required<ReportingDeps> = { ...defaultDeps(), ...depsOverride };
@@ -163,12 +164,17 @@ export function startReportingScheduler(intervalMs = 30_000): NodeJS.Timeout {
   const dayKey = (d: Date) => `${d.getUTCFullYear()}-${pad(d.getUTCMonth() + 1)}-${pad(d.getUTCDate())}`;
 
   const tick = () => {
-    const now = amsterdamNow(env.REPORTING_TIMEZONE);
+    const s = getReportingSettings();
+    if (!s.enabled) {
+      lastRunDay = null; // re-arm if it gets enabled later today
+      return;
+    }
+    const now = amsterdamNow(s.timezone);
     const hhmm = `${pad(now.getUTCHours())}:${pad(now.getUTCMinutes())}`;
     const today = dayKey(now);
-    if (hhmm === env.REPORTING_TIME && lastRunDay !== today) {
+    if (hhmm === s.time && lastRunDay !== today) {
       lastRunDay = today; // set first so a slow cycle never double-fires
-      logger.info(`[reporting] Scheduled run triggered (${env.REPORTING_TIME} ${env.REPORTING_TIMEZONE})`);
+      logger.info(`[reporting] Scheduled run triggered (${s.time} ${s.timezone})`);
       runReportingCycle(now).catch((e) => {
         logger.error(`[reporting] Scheduled run failed: ${e instanceof Error ? e.message : String(e)}`);
       });

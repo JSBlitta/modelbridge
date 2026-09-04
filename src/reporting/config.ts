@@ -1,12 +1,13 @@
 // Schedule configuration.
 //
-// The Power Automate solution is steered by the SharePoint list
-// "Produuzit_API_frequentie". The user exported that list as CSV; for now we
-// read the same CSV from disk. A SharePoint-backed source can be added later
-// by implementing ScheduleSource.
+// The schedule now lives in the `reporting_schedule` SQLite table (editable via
+// the admin page). On first use it is seeded from the SharePoint list CSV export
+// (REPORTING_CONFIG_CSV). A SharePoint-backed source can still be added later by
+// implementing ScheduleSource.
 
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { detectDelimiter, splitCsvLine } from "../csv-parser.js";
+import * as db from "../db.js";
 import { logger } from "../logger.js";
 import type { Frequency, ScheduleEntry } from "./types.js";
 
@@ -97,5 +98,46 @@ export class CsvScheduleSource implements ScheduleSource {
   async load(): Promise<ScheduleEntry[]> {
     const text = readFileSync(this.path, "utf-8");
     return parseScheduleCsv(text);
+  }
+}
+
+function rowToEntry(r: db.ReportingScheduleRow): ScheduleEntry {
+  return {
+    endpoint: r.endpoint,
+    active: Boolean(r.active),
+    frequency: r.frequency as Frequency,
+    weekdays: parseWeekdays(r.weekdays),
+    dayOfMonth: r.day_of_month,
+    conditions: r.conditions,
+    lastRun: "",
+    storagePath: r.storage_path,
+    overwrite: Boolean(r.overwrite),
+  };
+}
+
+// Loads the schedule from SQLite, seeding from the CSV on the first run.
+export class DbScheduleSource implements ScheduleSource {
+  constructor(private readonly seedCsvPath: string) {}
+
+  async load(): Promise<ScheduleEntry[]> {
+    let rows = db.listReportingSchedule();
+    if (!rows.length && this.seedCsvPath && existsSync(this.seedCsvPath)) {
+      logger.info(`[reporting] Seeding schedule from ${this.seedCsvPath}`);
+      const entries = parseScheduleCsv(readFileSync(this.seedCsvPath, "utf-8"));
+      for (const e of entries) {
+        db.upsertReportingSchedule({
+          endpoint: e.endpoint,
+          active: e.active,
+          frequency: e.frequency,
+          weekdays: e.weekdays,
+          day_of_month: e.dayOfMonth,
+          conditions: e.conditions,
+          storage_path: e.storagePath,
+          overwrite: e.overwrite,
+        });
+      }
+      rows = db.listReportingSchedule();
+    }
+    return rows.map(rowToEntry);
   }
 }
