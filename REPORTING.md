@@ -9,17 +9,19 @@ JSON responses to a folder structure.
 
 | Power Automate flow | TypeScript module | Notes |
 |---------------------|-------------------|-------|
-| `API_tokens json lezen schrijven` | `src/reporting/client.ts` | SharePoint `api_tokens.json` replaced by `REPORTING_REFRESH_TOKEN` (env) + optional `REPORTING_TOKEN_FILE` for rotated tokens |
+| `API_tokens json lezen schrijven` | `src/reporting/client.ts` | SharePoint `api_tokens.json` replaced by the `reporting_refresh_token` setting (seeded from `REPORTING_REFRESH_TOKEN`) |
 | `GET Access token` | `src/reporting/client.ts` (`refreshReportingAccessToken`) | Same `POST /my_user/token/refresh/` call, on a **separate Produuzit API account** |
 | `Produuzit pagination` | `src/reporting/client.ts` (`fetchAllReporting`) | Follows `next` links, max 60 pages, Bearer auth |
 | `GET Endpoint to sharepoint` | `src/reporting/runner.ts` (`runOneEndpoint`) | Fetches, builds filename, writes to output store |
 | `Post in Sharepoint` | `src/reporting/storage.ts` (`LocalFileStore`) | Writes locally; SharePoint adapter can implement the same `OutputStore` interface later |
-| `Produuzit data` (daily recurrence) | `src/reporting/runner.ts` (`runReportingCycle`, `startReportingScheduler`) | Schedule comes from the exported SharePoint list CSV |
+| `Produuzit data` (daily recurrence) | `src/reporting/runner.ts` (`runReportingCycle`, `startReportingScheduler`) | Schedule lives in SQLite (seeded from the list CSV), editable on the admin page |
 | Teams error card | event history | Failures are recorded in the persistent history and surface in the notification bell |
 
 The SharePoint list **Produuzit_API_frequentie** is read as CSV from
 `REPORTING_CONFIG_CSV` (default `data/produuzit_api_frequentie.csv` — a copy of
-the list export). A SharePoint-backed `ScheduleSource` can be added later.
+the list export). On first run the schedule is seeded from that CSV into the
+SQLite `reporting_schedule` table; afterwards it is edited on the **admin page**
+(not the CSV).
 
 ## How the schedule works
 
@@ -76,18 +78,35 @@ Set `REPORTING_ENABLED=true` in `.env` — the running server (`npm start`)
 executes a cycle every day at `REPORTING_TIME` in `REPORTING_TIMEZONE`
 (mirrors the original recurrence of 16:15 UTC = 18:15 NL time).
 
+## Admin & configuration
+
+Two kinds of users: **admins** (usernames listed in the `admin_usernames`
+setting, seeded from `ADMIN_USERNAMES` in `.env`) and **everyone else** who can
+log in to Produuzit. Admins see an **Admin** page where they configure
+ModelBridge:
+
+- admin usernames
+- reporting settings (enabled, time, timezone, page size, max pages, output
+  directory, base URL, refresh token)
+- the reporting schedule (add / edit / delete endpoints)
+
+Settings seed from environment variables and are stored in SQLite; the reporting
+module reads them from the settings store, so changes take effect without a
+restart (the scheduler re-checks `enabled` and `time` each tick). The reporting
+refresh token is a setting too, and rotated tokens are saved back to it.
+
 ## Environment variables
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `REPORTING_ENABLED` | `false` | Start the in-server daily scheduler |
-| `REPORTING_REFRESH_TOKEN` | — | Refresh token of the **reporting** API account (separate from `PRODUUZIT_REFRESH_TOKEN`) |
+| `ADMIN_USERNAMES` | — | Comma-separated admin usernames (seed for the admin list) |
+| `REPORTING_ENABLED` | `false` | Seed for the reporting-enabled setting |
+| `REPORTING_REFRESH_TOKEN` | — | Seed for the reporting refresh-token setting (separate account) |
 | `REPORTING_BASE_URL` | `PRODUUZIT_BASE_URL` | Produuzit base URL for reporting |
-| `REPORTING_TIME` | `18:15` | Local run time (HH:mm) for the in-server scheduler |
+| `REPORTING_TIME` | `18:15` | Seed for the daily run time |
 | `REPORTING_TIMEZONE` | `Europe/Amsterdam` | Time zone for "today" decisions |
-| `REPORTING_CONFIG_CSV` | `data/produuzit_api_frequentie.csv` | Schedule config (SharePoint list export) |
+| `REPORTING_CONFIG_CSV` | `data/produuzit_api_frequentie.csv` | One-time seed source for the schedule |
 | `REPORTING_OUTPUT_DIR` | `data/reporting` | Where JSON results are written |
-| `REPORTING_TOKEN_FILE` | `data/reporting_tokens.json` | Persists rotated tokens (`api_tokens.json` replacement); delete/unset to use env only |
 | `REPORTING_LAST_RUN_FILE` | `data/reporting_last_run.json` | Local "Laatste run" state (the original PATCHed the SharePoint list) |
 | `REPORTING_PAGE_SIZE` | `1000` | Records per page requested from Produuzit |
 | `REPORTING_MAX_PAGES` | `60` | Safety cap on pages per endpoint (raise if a list exceeds it) |

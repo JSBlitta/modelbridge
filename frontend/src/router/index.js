@@ -7,6 +7,7 @@ import BatchManager from '../views/BatchManager.vue'
 import AssemblyUpdate from '../views/AssemblyUpdate.vue'
 import PdfUpload from '../views/PdfUpload.vue'
 import TrimbleImport from '../views/TrimbleImport.vue'
+import Admin from '../views/Admin.vue'
 
 const routes = [
   { path: '/login', component: Login, meta: { public: true } },
@@ -16,6 +17,7 @@ const routes = [
   { path: '/batches', component: BatchManager },
   { path: '/update', component: AssemblyUpdate },
   { path: '/pdf', component: PdfUpload },
+  { path: '/admin', component: Admin },
 ]
 
 const router = createRouter({ history: createWebHistory(), routes })

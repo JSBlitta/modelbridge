@@ -25,6 +25,10 @@
         <RouterLink to="/pdf" class="nav-link" active-class="active">
           <i class="pi pi-file-pdf"></i> {{ $t('nav.pdf') }}
         </RouterLink>
+        <div v-if="isAdmin" class="nav-separator"></div>
+        <RouterLink v-if="isAdmin" to="/admin" class="nav-link" active-class="active">
+          <i class="pi pi-cog"></i> {{ $t('nav.admin') }}
+        </RouterLink>
       </nav>
       <div class="sidebar-footer">
         <div class="lang-switcher">
@@ -81,6 +85,7 @@ import { useNotifications } from './composables/useNotifications.js'
 const router = useRouter()
 const toast = useToast()
 const username = ref('')
+const isAdmin = ref(false)
 const { t, locale } = useI18n()
 
 const { notifications, unreadCount, notify, registerToaster, clearAll, hydrateFromServer } = useNotifications()
@@ -128,6 +133,7 @@ onMounted(async () => {
   try {
     const res = await api.get('/api/auth/status')
     username.value = res.data.username ?? ''
+    isAdmin.value = res.data.isAdmin ?? false
   } catch { /* router guard handles redirect */ }
   hydrateFromServer(api)
 })
