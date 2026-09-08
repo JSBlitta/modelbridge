@@ -66,4 +66,13 @@ export const env = {
   REPORTING_LAST_RUN_FILE: optional("REPORTING_LAST_RUN_FILE", "data/reporting_last_run.json"),
   REPORTING_PAGE_SIZE: parseInt(optional("REPORTING_PAGE_SIZE", "1000"), 10),
   REPORTING_MAX_PAGES: parseInt(optional("REPORTING_MAX_PAGES", "60"), 10),
+
+  // SharePoint (reporting output). When all four connection vars are set, the
+  // reporting module writes its JSON snapshots to SharePoint instead of the
+  // local output dir (see REPORTING.md for the Azure AD app registration).
+  SHAREPOINT_SITE_URL: optional("SHAREPOINT_SITE_URL"),
+  SHAREPOINT_TENANT_ID: optional("SHAREPOINT_TENANT_ID"),
+  SHAREPOINT_CLIENT_ID: optional("SHAREPOINT_CLIENT_ID"),
+  SHAREPOINT_CLIENT_SECRET: optional("SHAREPOINT_CLIENT_SECRET"),
+  SHAREPOINT_BASE_FOLDER: optional("SHAREPOINT_BASE_FOLDER", "Shared Documents/API data"),
 };

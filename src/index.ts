@@ -21,6 +21,7 @@ import history from "./routes/history.js";
 import admin from "./routes/admin.js";
 import { startReportingScheduler } from "./reporting/runner.js";
 import { getReportingSettings } from "./settings.js";
+import { isSharePointConfigured } from "./sharepoint-client.js";
 
 const app = new Hono();
 
@@ -74,6 +75,11 @@ const reportingCfg = getReportingSettings();
 logger.info(`  Reporting scheduler: ${reportingCfg.enabled ? `daily at ${reportingCfg.time} (${reportingCfg.timezone})` : "disabled"}`);
 if (reportingCfg.enabled && !reportingCfg.refreshToken) {
   logger.warn(`  Reporting: no refresh token configured — set REPORTING_REFRESH_TOKEN or the admin page`);
+}
+if (isSharePointConfigured()) {
+  logger.info(`  Reporting output: SharePoint (${env.SHAREPOINT_SITE_URL})`);
+} else {
+  logger.info(`  Reporting output: local (${reportingCfg.outputDir})`);
 }
 
 serve({ fetch: app.fetch, port: env.PORT }, (info) => {

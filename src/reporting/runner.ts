@@ -17,7 +17,8 @@ import { logger } from "../logger.js";
 import { getReportingSettings } from "../settings.js";
 import { DbScheduleSource, type ScheduleSource } from "./config.js";
 import { fetchAllReporting, refreshReportingAccessToken } from "./client.js";
-import { JsonLastRunStore, LocalFileStore, type LastRunStore, type OutputStore } from "./storage.js";
+import { JsonLastRunStore, LocalFileStore, SharePointFileStore, type LastRunStore, type OutputStore } from "./storage.js";
+import { isSharePointConfigured } from "../sharepoint-client.js";
 import { mergeUnique } from "./dedupe.js";
 import { amsterdamNow, filenameFor, matchesToday } from "./dates.js";
 import type { CycleResult, EndpointRunResult, ScheduleEntry } from "./types.js";
@@ -31,7 +32,9 @@ export interface ReportingDeps {
 export function defaultDeps(): Required<ReportingDeps> {
   return {
     source: new DbScheduleSource(env.REPORTING_CONFIG_CSV),
-    output: new LocalFileStore(getReportingSettings().outputDir),
+    output: isSharePointConfigured()
+      ? new SharePointFileStore()
+      : new LocalFileStore(getReportingSettings().outputDir),
     lastRun: new JsonLastRunStore(env.REPORTING_LAST_RUN_FILE),
   };
 }

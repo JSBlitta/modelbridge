@@ -7,6 +7,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
+import { sharepointFileExists, sharepointRead, sharepointUpload } from "../sharepoint-client.js";
 
 export interface WriteResult {
   path: string;        // absolute path of the file
@@ -57,6 +58,24 @@ export class LocalFileStore implements OutputStore {
     } catch {
       return absPath;
     }
+  }
+}
+
+// Writes reporting output to SharePoint (replaces the "Post in Sharepoint"
+// flow). Mirrors LocalFileStore's overwrite semantics: non-overwrite mode skips
+// files that already exist instead of clobbering them.
+export class SharePointFileStore implements OutputStore {
+  async read(relativeFolder: string, filename: string): Promise<string | null> {
+    return sharepointRead(relativeFolder, filename);
+  }
+
+  async write(relativeFolder: string, filename: string, content: string, overwrite: boolean): Promise<WriteResult> {
+    const display = `${relativeFolder}/${filename}`.replace(/\/+/g, "/");
+    if (!overwrite && (await sharepointFileExists(relativeFolder, filename))) {
+      return { path: display, created: false };
+    }
+    await sharepointUpload(relativeFolder, filename, content, overwrite);
+    return { path: display, created: true };
   }
 }
 
