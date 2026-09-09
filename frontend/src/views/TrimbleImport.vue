@@ -375,6 +375,7 @@ const hasSelectedProjects = computed(() => selectedProjectUuids.value.size > 0)
 const selectedTargetProjects = computed(() => filteredProjects.value.filter(p => selectedProjectUuids.value.has(p.uuid)))
 
 const columnMapping = ref({})
+const synonyms = ref({})
 
 const allSelectedProps = computed(() => {
   const props = []
@@ -383,14 +384,45 @@ const allSelectedProps = computed(() => {
   return props
 })
 
+function normalizedKey(s) {
+  return String(s ?? '').trim().toLowerCase().replace(/[\s_-]+/g, '')
+}
+
+// Reverse lookup: normalized synonym → canonical Produuzit field (from config.yaml)
+const synonymLookup = computed(() => {
+  const map = {}
+  for (const [canonical, syns] of Object.entries(synonyms.value)) {
+    for (const syn of Array.isArray(syns) ? syns : []) {
+      const key = normalizedKey(syn)
+      if (key) map[key] = canonical
+    }
+  }
+  return map
+})
+
 const initialIfcMapping = computed(() => {
   const m = {}
+  // config.yaml canonical keys → Produuzit target names
+  const CANONICAL_TARGET = { design: 'design_name', batch: 'batch_number' }
+  const lookup = synonymLookup.value
+  // Longest synonym first so substring fallback prefers the most specific match
+  const entries = Object.entries(lookup).sort((a, b) => b[0].length - a[0].length)
+
   for (const prop of allSelectedProps.value) {
-    const leaf = prop.split('.').pop()?.toLowerCase() || ''
-    if ((leaf.includes('element') || leaf.includes('nummer') || leaf.includes('name')) && !Object.values(m).includes('design_name'))
-      m[prop] = 'design_name'
-    else if ((leaf.includes('batch') || leaf.includes('levering') || leaf.includes('productie')) && !leaf.includes('bestelling') && !Object.values(m).includes('batch_number'))
-      m[prop] = 'batch_number'
+    const leaf = normalizedKey(prop.split('.').pop())
+    if (!leaf) continue
+    let canonical = lookup[leaf]
+    if (!canonical) {
+      for (const [synKey, canon] of entries) {
+        if (synKey.length >= 3 && leaf.includes(synKey)) {
+          canonical = canon
+          break
+        }
+      }
+    }
+    if (!canonical) continue
+    const target = CANONICAL_TARGET[canonical] || canonical
+    if (target && !Object.values(m).includes(target)) m[prop] = target
   }
   return m
 })
@@ -579,6 +611,7 @@ const previewRowsForMapping = computed(() => {
 })
 
 onMounted(async () => {
+  loadSynonyms()
   if (route.query.auth === 'success') {
     await loadAuthStatus()
     if (authStatus.value) await loadTrimbleProjects()
@@ -586,6 +619,11 @@ onMounted(async () => {
   await Promise.all([loadAuthStatus()])
   if (authStatus.value) await loadTrimbleProjects()
 })
+
+async function loadSynonyms() {
+  try { const r = await api.get('/api/config/synonyms'); synonyms.value = r.data || {} }
+  catch { synonyms.value = {} }
+}
 
 async function loadAuthStatus() {
   loadingStatus.value = true
