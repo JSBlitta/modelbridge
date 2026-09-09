@@ -5,7 +5,7 @@ import { getConfig } from "../config.js";
 import * as db from "../db.js";
 import { findSource, targetsOf, parseCount, generateOrderIds } from "../lib/mapping.js";
 import type { ColumnMapping } from "../lib/mapping.js";
-import { upsertProductionCounts } from "../lib/production-counts.js";
+import { getProductionCounts, upsertProductionCounts } from "../lib/production-counts.js";
 
 const app = new Hono();
 
@@ -257,6 +257,7 @@ app.post("/preview-import", async (c) => {
   const createdDesigns = new Map<string, string>();
   const batchById = new Map<string, Record<string, unknown>>();
   for (const b of batches) batchById.set(b.uuid as string, b);
+  const existingCounts = await getProductionCounts(body.project_uuid);
 
   for (const row of body.rows) {
     const batchNum = batchNumberCol ? (row[batchNumberCol] ?? "") : "";
@@ -287,17 +288,33 @@ app.post("/preview-import", async (c) => {
       else countMap.set(key, { design: designUuid, design_name: designName || designUuid, phase: batchPhase, count });
     }
 
-    const rowPreviews = [...countMap.values()].map((e) => ({
-      design_name: e.design_name,
-      design_uuid: e.design,
-      phase: e.phase,
-      count_requested: e.count,
-      count_to_create: dbState === "definitive" ? 0 : e.count,
-      status: dbState === "definitive" ? "blocked" : "new",
-      changed_fields: [],
-      proposed: null,
-      existing: null,
-    }));
+    const rowPreviews = [...countMap.values()].map((e) => {
+      const existing = existingCounts.get(`${batchUuid}|${e.phase}|${e.design}`) ?? 0;
+      let status: "new" | "changed" | "identical" | "blocked" = "new";
+      let countToCreate = e.count;
+      if (dbState === "definitive") {
+        status = "blocked";
+        countToCreate = 0;
+      } else if (existing >= e.count) {
+        status = "identical";
+        countToCreate = 0;
+      } else if (existing > 0) {
+        status = "changed";
+        countToCreate = e.count - existing;
+      }
+      return {
+        design_name: e.design_name,
+        design_uuid: e.design,
+        phase: e.phase,
+        count_requested: e.count,
+        count_existing: existing,
+        count_to_create: countToCreate,
+        status,
+        changed_fields: [],
+        proposed: null,
+        existing: existing > 0 ? { count: existing } : null,
+      };
+    });
 
     batchPreviews.push({
       batch_uuid: batchUuid,
@@ -306,10 +323,10 @@ app.post("/preview-import", async (c) => {
       blocked: dbState === "definitive",
       rows: rowPreviews,
       summary: {
-        total: rowPreviews.reduce((a, r) => a + (r.count_to_create || 0), 0),
+        total: rowPreviews.reduce((a, r) => a + (r.count_requested || 0), 0),
         new: rowPreviews.filter((r) => r.status === "new").reduce((a, r) => a + (r.count_to_create || 0), 0),
-        changed: 0,
-        identical: 0,
+        changed: rowPreviews.filter((r) => r.status === "changed").reduce((a, r) => a + (r.count_to_create || 0), 0),
+        identical: rowPreviews.filter((r) => r.status === "identical").length,
       },
     });
   }

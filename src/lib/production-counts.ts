@@ -11,6 +11,22 @@ export interface ProductionCountEntry {
 // Read-modify-write the project's meta.quantities so the "Production Counts"
 // page reflects our imported counts. Produuzit stores quantities on the project
 // object — there is no dedicated endpoint.
+// Read the project's current production counts from meta.quantities.
+// Returns a Map keyed by `${batch}|${phase}|${design}` → count.
+export async function getProductionCounts(projectUuid: string): Promise<Map<string, number>> {
+  const project = (await apiGet(`/company/projects/${projectUuid}/`)) as Record<string, any>;
+  const meta = (project.meta ?? {}) as Record<string, any>;
+  const quantities = (meta.quantities ?? {}) as Record<string, any>;
+  const batchCounts: Record<string, any>[] = Array.isArray(quantities.assd_batch_counts)
+    ? quantities.assd_batch_counts
+    : [];
+  const map = new Map<string, number>();
+  for (const b of batchCounts) {
+    map.set(`${b.batch}|${b.phase}|${b.design}`, Number(b.count ?? 0));
+  }
+  return map;
+}
+
 export async function upsertProductionCounts(
   projectUuid: string,
   entries: ProductionCountEntry[],
