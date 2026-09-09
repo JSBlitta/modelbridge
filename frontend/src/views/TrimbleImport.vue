@@ -286,6 +286,34 @@
       </template>
     </Card>
 
+    <Card v-if="previewData?.unresolved_phases?.length" class="mb-card card-danger-border">
+      <template #title>{{ $t('trimble.missingPhasesTitle') }}</template>
+      <template #content>
+        <Message severity="warn" :closable="false" style="margin-bottom:0.75rem;">
+          {{ $t('trimble.missingPhasesBody', { phases: previewData.unresolved_phases.join(', ') }) }}
+        </Message>
+        <ConfirmedButton
+          :label="$t('trimble.createPhasesBtn', { count: previewData.unresolved_phases.length })"
+          icon="pi pi-plus"
+          :confirm-label="$t('trimble.confirmCreatePhases', { count: previewData.unresolved_phases.length })"
+          :loading="creatingPhases"
+          @action="createMissingPhasesAction" />
+
+        <div v-if="phaseCreateResults.length" style="margin-top:0.75rem;">
+          <Message v-if="phaseCreateFailedCount === 0" severity="success" :closable="false" size="small">
+            {{ $t('trimble.phasesCreated', { count: phaseCreateCreatedCount }) }}
+          </Message>
+          <Message v-else severity="error" :closable="false" size="small">
+            {{ $t('trimble.phasesCreatePartial', { created: phaseCreateCreatedCount, failed: phaseCreateFailedCount }) }}
+          </Message>
+          <DataTable v-if="phaseCreateFailedCount" :value="phaseCreateFailedRows" size="small" style="margin-top:0.5rem;">
+            <Column field="phase" :header="$t('trimble.phase')" />
+            <Column field="reason" :header="$t('trimble.reason')" />
+          </DataTable>
+        </div>
+      </template>
+    </Card>
+
     <Card v-if="previewData && canExecute" class="mb-card card-warn-border">
       <template #title>{{ $t('trimble.pushToProduuzitTitle') }}</template>
       <template #content>
@@ -473,6 +501,12 @@ const designCreateResults = ref([])
 const designCreateCreatedCount = computed(() => designCreateResults.value.filter(r => r.status === 'created').length)
 const designCreateFailedCount = computed(() => designCreateResults.value.filter(r => r.status === 'error').length)
 const designCreateFailedRows = computed(() => designCreateResults.value.filter(r => r.status === 'error'))
+
+const creatingPhases = ref(false)
+const phaseCreateResults = ref([])
+const phaseCreateCreatedCount = computed(() => phaseCreateResults.value.filter(r => r.status === 'created').length)
+const phaseCreateFailedCount = computed(() => phaseCreateResults.value.filter(r => r.status === 'error').length)
+const phaseCreateFailedRows = computed(() => phaseCreateResults.value.filter(r => r.status === 'error'))
 
 const selectedEntityIndices = ref(new Set())
 
@@ -889,6 +923,34 @@ async function createMissingDesignsAction() {
     notify({ severity: 'error', summary: t('trimble.createDesignsFailed'), detail: msg, life: 8000 })
   } finally {
     creatingDesigns.value = false
+  }
+}
+
+async function createMissingPhasesAction() {
+  const missing = previewData.value?.unresolved_phases || []
+  if (!missing.length) return
+  creatingPhases.value = true
+  phaseCreateResults.value = []
+  try {
+    const projectUuid = [...selectedProjectUuids.value][0]
+    const r = await api.post('/api/trimble/create-missing-phases', {
+      project_uuid: projectUuid,
+      phases: missing,
+    })
+    phaseCreateResults.value = r.data.results || []
+    const summary = r.data.summary || { created: 0, failed: 0 }
+    if (summary.failed) {
+      notify({ severity: 'error', summary: t('trimble.phasesCreatePartial', { created: summary.created, failed: summary.failed }), life: 8000 })
+    } else if (summary.created) {
+      notify({ severity: 'success', summary: t('trimble.phasesCreated', { count: summary.created }), life: 5000 })
+    }
+    // Refresh the preview so the newly created phases are recognized.
+    if (summary.created) await doPreview()
+  } catch (e) {
+    const msg = e?.response?.data?.detail || e?.response?.data?.error || e?.message || String(e)
+    notify({ severity: 'error', summary: t('trimble.createPhasesFailed'), detail: msg, life: 8000 })
+  } finally {
+    creatingPhases.value = false
   }
 }
 

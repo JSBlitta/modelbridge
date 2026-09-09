@@ -17,7 +17,7 @@ import {
   stopOAuthServer,
   trimbleGet,
 } from "../trimble-client.js";
-import { apiPost, fetchAllPages } from "../produuzit-client.js";
+import { apiGet, apiPatch, apiPost, fetchAllPages } from "../produuzit-client.js";
 import * as db from "../db.js";
 import { findSource, parseCount } from "../lib/mapping.js";
 import type { ColumnMapping } from "../lib/mapping.js";
@@ -361,11 +361,14 @@ app.post("/preview-import", async (c) => {
   const batches = await loadBatches(body.project_uuid);
   const dbBatches = new Map(db.getBatches(body.project_uuid).map((b) => [b.uuid, b]));
   const existingCounts = await getProductionCounts(body.project_uuid);
+  const projectPhases = await loadProjectPhases(body.project_uuid);
+  const existingPhases = new Set(projectPhases.map((p) => p.trim().toLowerCase()));
 
   const designProp = resolveProp(body.column_mapping, "design_name");
   const batchProp = resolveProp(body.column_mapping, "batch_number");
   const orderProp = resolveProp(body.column_mapping, "client_order_id");
   const countProp = resolveProp(body.column_mapping, "count");
+  const phaseProp = resolveProp(body.column_mapping, "phase");
 
   let entities = body.entities;
   if (body.unique_only) {
@@ -407,6 +410,16 @@ app.post("/preview-import", async (c) => {
   const byBatch = new Map<string, Record<string, unknown>[]>();
   const unresolvedBatches = new Set<string>();
   const unresolvedDesigns = new Set<string>();
+  const unresolvedPhases = new Set<string>();
+
+  // Detect missing phases across ALL entities (independent of batch matching),
+  // so the user can create them before importing.
+  if (phaseProp) {
+    for (const entity of entities) {
+      const entityPhase = (extractProp(entity, phaseProp) || "").trim();
+      if (entityPhase && !existingPhases.has(entityPhase.toLowerCase())) unresolvedPhases.add(entityPhase);
+    }
+  }
 
   if (!batchProp) {
     for (const entity of entities) {
@@ -423,7 +436,8 @@ app.post("/preview-import", async (c) => {
   } else {
     for (const entity of entities) {
       const batchRaw = extractProp(entity, batchProp);
-      const matched = batchRaw ? matchBatchByNumber(batches, batchRaw) : null;
+      const entityPhase = phaseProp ? (extractProp(entity, phaseProp) || "").trim() : "";
+      const matched = batchRaw ? matchBatchByNumber(batches, batchRaw, entityPhase) : null;
       if (!matched) { if (batchRaw) unresolvedBatches.add(batchRaw); continue; }
       const uuid = matched.uuid as string;
       if (!byBatch.has(uuid)) byBatch.set(uuid, []);
@@ -449,11 +463,13 @@ app.post("/preview-import", async (c) => {
       const designUuid = fuzzyDesignLookup(designsMap, dn) ?? null;
       if (dn && !designUuid) { unresolvedDesigns.add(dn); continue; }
       if (!designUuid) continue;
+      const entityPhase = phaseProp ? (extractProp(entity, phaseProp) || "").trim() : "";
+      const phase = entityPhase || batchPhase;
       const count = countProp ? parseCount(extractProp(entity, countProp)) : 1;
-      const key = `${batchPhase}|${designUuid}`;
+      const key = `${phase}|${designUuid}`;
       const entry = countMap.get(key);
       if (entry) entry.count += count;
-      else countMap.set(key, { design: designUuid, design_name: dn || designUuid, phase: batchPhase, count });
+      else countMap.set(key, { design: designUuid, design_name: dn || designUuid, phase, count });
     }
 
     const rowPreviews = [...countMap.values()].map((e) => {
@@ -502,6 +518,7 @@ app.post("/preview-import", async (c) => {
     batch_previews: batchPreviews,
     unresolved_batches: [...unresolvedBatches].sort(),
     unresolved_designs: [...unresolvedDesigns].sort(),
+    unresolved_phases: [...unresolvedPhases].sort(),
   });
 });
 
@@ -525,6 +542,7 @@ app.post("/import", async (c) => {
   const batchProp = resolveProp(body.column_mapping, "batch_number");
   const orderProp = resolveProp(body.column_mapping, "client_order_id");
   const countProp = resolveProp(body.column_mapping, "count");
+  const phaseProp = resolveProp(body.column_mapping, "phase");
 
   let entities = body.entities;
   if (body.unique_only) {
@@ -573,14 +591,16 @@ app.post("/import", async (c) => {
   } else {
     for (const entity of entities) {
       const batchRaw = extractProp(entity, batchProp);
-      const matched = batchRaw ? matchBatchByNumber(batches, batchRaw) : null;
+      const entityPhase = phaseProp ? (extractProp(entity, phaseProp) || "").trim() : "";
+      const matched = batchRaw ? matchBatchByNumber(batches, batchRaw, entityPhase) : null;
       if (matched) {
         const uuid = matched.uuid as string;
         if (!byBatch.has(uuid)) byBatch.set(uuid, []);
         byBatch.get(uuid)!.push(entity);
       } else if (batchRaw) {
         // Graceful error — record unmatched batch value for notification
-        results.push({ design_name: designProp ? extractProp(entity, designProp) : "", batch: batchRaw, status: "error", reason: `No batch named "${batchRaw}" found in project` });
+        const phaseSuffix = entityPhase ? ` (phase "${entityPhase}")` : "";
+        results.push({ design_name: designProp ? extractProp(entity, designProp) : "", batch: batchRaw, phase: entityPhase || undefined, status: "error", reason: `No batch named "${batchRaw}"${phaseSuffix} found in project` });
       }
     }
   }
@@ -605,11 +625,13 @@ app.post("/import", async (c) => {
         results.push({ design_name: dn, batch: batchName, status: "error", reason: `Design '${dn}' not found` });
         continue;
       }
+      const entityPhase = phaseProp ? (extractProp(entity, phaseProp) || "").trim() : "";
+      const phase = entityPhase || batchPhase;
       const count = countProp ? parseCount(extractProp(entity, countProp)) : 1;
-      const key = `${batchUuid}|${batchPhase}|${designUuid}`;
+      const key = `${batchUuid}|${phase}|${designUuid}`;
       const entry = countMap.get(key);
       if (entry) entry.count += count;
-      else countMap.set(key, { batch: batchUuid, phase: batchPhase, design: designUuid, design_name: dn || designUuid, count });
+      else countMap.set(key, { batch: batchUuid, phase, design: designUuid, design_name: dn || designUuid, count });
     }
   }
 
@@ -676,6 +698,52 @@ app.post("/create-missing-designs", async (c) => {
     results,
     summary: {
       created: results.filter((r) => r.status === "created").length,
+      failed: results.filter((r) => r.status === "error").length,
+    },
+  });
+});
+
+// Create missing phases explicitly — separate from the import confirmation,
+// mirroring the missing-designs flow. Phases live on the project (project.phases).
+app.post("/create-missing-phases", async (c) => {
+  const body = await c.req.json<{ project_uuid: string; phases: string[] }>();
+
+  if (!body.project_uuid) return c.json({ error: "Missing project_uuid" }, 400);
+  if (!body.phases?.length) return c.json({ results: [], summary: { created: 0, failed: 0 } });
+
+  const project = (await apiGet(`/company/projects/${body.project_uuid}/`)) as Record<string, unknown>;
+  const existingPhases = (Array.isArray(project.phases) ? project.phases : []).map((p) => String(p));
+  const existingNorm = new Set(existingPhases.map((p) => p.trim().toLowerCase()));
+
+  const results: Record<string, unknown>[] = [];
+  const toAdd: string[] = [];
+  const seen = new Set<string>();
+
+  for (const rawPhase of body.phases) {
+    const phase = String(rawPhase ?? "").trim();
+    if (!phase || seen.has(phase)) continue;
+    seen.add(phase);
+    if (existingNorm.has(phase.toLowerCase())) {
+      results.push({ phase, status: "already_exists" });
+      continue;
+    }
+    toAdd.push(phase);
+  }
+
+  if (toAdd.length) {
+    try {
+      await apiPatch(`/company/projects/${body.project_uuid}/`, { phases: [...existingPhases, ...toAdd] });
+      for (const p of toAdd) results.push({ phase: p, status: "created" });
+    } catch (e) {
+      for (const p of toAdd) results.push({ phase: p, status: "error", reason: e instanceof Error ? e.message : String(e) });
+    }
+  }
+
+  return c.json({
+    results,
+    summary: {
+      created: results.filter((r) => r.status === "created").length,
+      already_exists: results.filter((r) => r.status === "already_exists").length,
       failed: results.filter((r) => r.status === "error").length,
     },
   });
@@ -765,15 +833,25 @@ async function loadBatches(projectUuid: string): Promise<Record<string, unknown>
   return (await fetchAllPages("/constructibles/batches/", { project: projectUuid })) as Record<string, unknown>[];
 }
 
-function matchBatchByNumber(batches: Record<string, unknown>[], batchRaw: string): Record<string, unknown> | null {
-  // Strict exact match: entity value must fully match a batch name.
-  // "130-vbw" only matches a batch named "130-vbw" (case-insensitive).
-  // No partial, prefix, or phase-less fallback matching.
+// Load the project's phase list (project.phases) — phases are project-scoped.
+async function loadProjectPhases(projectUuid: string): Promise<string[]> {
+  const project = (await apiGet(`/company/projects/${projectUuid}/`)) as Record<string, unknown>;
+  return (Array.isArray(project.phases) ? project.phases : []).map((p) => String(p));
+}
+
+function matchBatchByNumber(batches: Record<string, unknown>[], batchRaw: string, phase = ""): Record<string, unknown> | null {
+  // Strict exact match on batch name. When a phase is supplied, the match is
+  // also scoped to that phase, tying the batch number definitively to the phase
+  // it belongs to. Without a phase, name-only matching is preserved.
   const raw = String(batchRaw ?? "").trim().toLowerCase();
   if (!raw) return null;
+  const phaseNorm = String(phase ?? "").trim().toLowerCase();
   for (const b of batches) {
     const name = String(b.name ?? "").trim().toLowerCase();
-    if (name === raw) return b;
+    if (name !== raw) continue;
+    if (!phaseNorm) return b;
+    const bPhase = String(b.phase ?? "").trim().toLowerCase();
+    if (bPhase === phaseNorm) return b;
   }
   return null;
 }
