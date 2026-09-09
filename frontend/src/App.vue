@@ -5,7 +5,7 @@
   <div v-else class="app-layout">
     <aside class="sidebar">
       <div class="sidebar-header">
-        <h2>{{ $t('app.title') }}</h2>
+        <img class="sidebar-logo" :src="logoUrl" alt="ModelBridge" />
         <span class="sidebar-user">{{ username }}</span>
       </div>
       <nav class="sidebar-nav">
@@ -81,6 +81,7 @@ import { useToast } from 'primevue/usetoast'
 import { api, onApiError, onUnauthorized } from './api.js'
 import ConfirmDialog from 'primevue/confirmdialog'
 import { useNotifications } from './composables/useNotifications.js'
+import logoUrl from './assets/v9-hang.svg'
 
 const router = useRouter()
 const toast = useToast()
@@ -159,7 +160,7 @@ body { font-family: var(--p-font-family, sans-serif); background: #f5f5f5; }
 /* Sidebar — fixed position, independently scrollable. Top red bar lives here. */
 .sidebar { width: 220px; background: #1c1c1e; color: white; display: flex; flex-direction: column; flex-shrink: 0; position: fixed; top: 0; bottom: 10px; left: 0; overflow-y: auto; z-index: 10; border-top: 10px solid #e40520; }
 .sidebar-header { padding: 1.25rem 1rem 1rem; border-bottom: 1px solid #2d2d30; }
-.sidebar-header h2 { font-size: 1.25rem; font-weight: 700; color: #e40520; }
+.sidebar-logo { display: block; height: 40px; width: auto; }
 .sidebar-user { font-size: .7rem; color: #8e8e93; display: block; margin-top: .2rem; }
 .sidebar-nav { display: flex; flex-direction: column; padding: 1rem 0; gap: .25rem; flex: 1; }
 .nav-link { display: flex; align-items: center; gap: .6rem; padding: .65rem 1.25rem; color: #b0b0b5; text-decoration: none; border-radius: .25rem; margin: 0 .5rem; transition: background .15s; }
