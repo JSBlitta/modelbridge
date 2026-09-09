@@ -28,17 +28,23 @@
               <small>→ client_meta.<em>{{ newMetaKeys[col] || '...' }}</em></small>
             </div>
             <!-- Duplicate mappings: same source column to additional Produuzit targets -->
-            <div v-for="dup in dupsOf(col)" :key="dup.id" class="dup-row">
-              <Select
-                v-model="dup.target"
-                :options="targetOptions"
-                option-label="label"
-                option-value="name"
-                :placeholder="$t('columnMapper.ignore')"
-                class="field-select"
-                @change="emitMapping"
-              />
-              <Button icon="pi pi-times" text size="small" severity="danger" @click="removeDuplicate(dup.id)" />
+            <div v-for="dup in dupsOf(col)" :key="dup.id" class="dup-block">
+              <div class="dup-row">
+                <Select
+                  v-model="dup.target"
+                  :options="targetOptions"
+                  option-label="label"
+                  option-value="name"
+                  :placeholder="$t('columnMapper.ignore')"
+                  class="field-select"
+                  @change="emitMapping"
+                />
+                <Button icon="pi pi-times" text size="small" severity="danger" @click="removeDuplicate(dup.id)" />
+              </div>
+              <div v-if="dup.target === '__new_meta__'" class="dup-meta-row">
+                <InputText v-model="dup.metaKey" :placeholder="$t('columnMapper.keyName')" style="width:120px;font-size:0.8rem;" @input="emitMapping" />
+                <small>→ client_meta.<em>{{ dup.metaKey || '...' }}</em></small>
+              </div>
             </div>
           </td>
           <td class="preview-val">{{ previewValue(col) }}</td>
@@ -154,7 +160,11 @@ function emitMapping() {
     const primary = target === '__new_meta__'
       ? (newMetaKeys.value[col]?.trim() ? `client_meta.${newMetaKeys.value[col].trim()}` : '')
       : target
-    const dupTargets = dupsOf(col).map(d => d.target).filter(Boolean)
+    const dupTargets = dupsOf(col).map(d =>
+      d.target === '__new_meta__'
+        ? (d.metaKey?.trim() ? `client_meta.${d.metaKey.trim()}` : '')
+        : d.target
+    ).filter(Boolean)
     const allTargets = [primary, ...dupTargets].filter(Boolean)
     if (!allTargets.length) continue
     result[col] = allTargets.length === 1 ? allTargets[0] : allTargets
@@ -171,7 +181,9 @@ function emitMapping() {
 .map-table tr.row-warn { background: #fffbeb; }
 .csv-col { font-family: monospace; font-size: 0.82rem; background: #e2e8f0; padding: 0.2rem 0.5rem; border-radius: 4px; white-space: nowrap; }
 .field-select { min-width: 210px; }
-.dup-row { display: flex; align-items: center; gap: 0.3rem; margin-top: 0.35rem; }
+.dup-block { margin-top: 0.35rem; }
+.dup-row { display: flex; align-items: center; gap: 0.3rem; }
+.dup-meta-row { display: flex; align-items: center; gap: 0.4rem; margin-top: 0.3rem; padding-left: 0.25rem; }
 .preview-val { color: #6b7280; font-size: 0.8rem; font-family: monospace; max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .warn-icon { color: #b45309; font-size: 0.8rem; white-space: nowrap; }
 </style>
