@@ -626,7 +626,8 @@ app.post("/import", async (c) => {
   }
 
   const summary = {
-    created: results.filter((r) => r.status === "created").length,
+    designs_created: results.filter((r) => r.status === "created").length,
+    constructibles_created: results.filter((r) => r.status === "created").reduce((a, r) => a + (Number(r.count) || 0), 0),
     updated: results.filter((r) => r.status === "updated").length,
     skipped: results.filter((r) => r.status === "skipped").length,
     blocked: results.filter((r) => r.status === "blocked").length,

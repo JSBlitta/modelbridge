@@ -311,7 +311,8 @@
           {{ $t('trimble.importPartialSuccess') }}
         </Message>
         <div class="summary-chips" style="margin-bottom:0.75rem;">
-          <span class="chip-new">{{ importSummary.created }} {{ $t('trimble.created') }}</span>
+          <span class="chip-new">{{ importSummary.designs_created }} {{ $t('trimble.designsCreated') }}</span>
+          <span class="chip-new">{{ importSummary.constructibles_created }} {{ $t('trimble.constructiblesCreated') }}</span>
           <span class="chip-changed">{{ importSummary.updated }} {{ $t('trimble.updated') }}</span>
           <span class="chip-identical">{{ importSummary.skipped }} {{ $t('trimble.skipped') }}</span>
           <span v-if="importSummary.blocked" class="chip-blocked">{{ importSummary.blocked }} {{ $t('trimble.blocked') }}</span>
@@ -432,7 +433,7 @@ const previewing = ref(false)
 const previewData = ref(null)
 const previewError = ref('')
 const importResults = ref([])
-const importSummary = ref({ created: 0, updated: 0, skipped: 0, blocked: 0, error: 0 })
+const importSummary = ref({ designs_created: 0, constructibles_created: 0, updated: 0, skipped: 0, blocked: 0, error: 0 })
 const uniqueOnlyImport = ref(true)
 
 const creatingDesigns = ref(false)
@@ -810,7 +811,7 @@ async function doImport() {
     const body = { project_uuid: projectUuid, column_mapping: columnMapping.value, entities: ents, unique_only: uniqueOnlyImport.value }
     const r = await api.post('/api/trimble/import', body)
     importResults.value = r.data.results || []
-    importSummary.value = r.data.summary || { created: 0, updated: 0, skipped: 0, blocked: 0, error: 0 }
+    importSummary.value = r.data.summary || { designs_created: 0, constructibles_created: 0, updated: 0, skipped: 0, blocked: 0, error: 0 }
     previewData.value = null
     const unmatched = importResults.value.filter(x => x.status === 'error' && /No batch named/.test(x.reason || ''))
     if (importSummary.value.error) {
@@ -818,8 +819,8 @@ async function doImport() {
     }
     if (unmatched.length) {
       notify({ severity: 'warn', summary: t('trimble.batchesNotMatched', { batches: unmatched.map(x => x.batch).join(', ') }), detail: '', life: 8000 })
-    } else if (importSummary.value.created || importSummary.value.updated) {
-      notify({ severity: 'success', summary: t('trimble.pushToProduuzitTitle'), detail: t('trimble.importSuccessDetail', { created: importSummary.value.created, updated: importSummary.value.updated }), life: 5000 })
+    } else if (importSummary.value.designs_created || importSummary.value.constructibles_created || importSummary.value.updated) {
+      notify({ severity: 'success', summary: t('trimble.pushToProduuzitTitle'), detail: t('trimble.importSuccessDetail', { designs: importSummary.value.designs_created, constructibles: importSummary.value.constructibles_created }), life: 5000 })
     }
   } finally { importing.value = false }
 }
