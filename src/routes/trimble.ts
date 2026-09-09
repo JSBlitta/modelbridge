@@ -371,7 +371,12 @@ app.post("/preview-import", async (c) => {
   if (body.unique_only) {
     const seen = new Set<string>();
     entities = entities.filter((e) => {
-      const key = `${designProp ? extractProp(e, designProp) : ""}|${batchProp ? extractProp(e, batchProp) : ""}`;
+      const design = designProp ? extractProp(e, designProp) : "";
+      const batch = batchProp ? extractProp(e, batchProp) : "";
+      // client_order_id distinguishes distinct production constructs — don't
+      // collapse them into a single design count.
+      const order = orderProp ? extractProp(e, orderProp) : "";
+      const key = `${design}|${batch}|${order}`;
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
@@ -525,7 +530,12 @@ app.post("/import", async (c) => {
   if (body.unique_only) {
     const seen = new Set<string>();
     entities = entities.filter((e) => {
-      const key = `${designProp ? extractProp(e, designProp) : ""}|${batchProp ? extractProp(e, batchProp) : ""}`;
+      const design = designProp ? extractProp(e, designProp) : "";
+      const batch = batchProp ? extractProp(e, batchProp) : "";
+      // client_order_id distinguishes distinct production constructs — don't
+      // collapse them into a single design count.
+      const order = orderProp ? extractProp(e, orderProp) : "";
+      const key = `${design}|${batch}|${order}`;
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
