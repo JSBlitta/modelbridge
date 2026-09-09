@@ -258,6 +258,34 @@
       </template>
     </Card>
 
+    <Card v-if="previewData?.unresolved_designs?.length" class="mb-card card-danger-border">
+      <template #title>{{ $t('trimble.missingDesignsTitle') }}</template>
+      <template #content>
+        <Message severity="warn" :closable="false" style="margin-bottom:0.75rem;">
+          {{ $t('trimble.missingDesignsBody', { designs: previewData.unresolved_designs.join(', ') }) }}
+        </Message>
+        <ConfirmedButton
+          :label="$t('trimble.createDesignsBtn', { count: previewData.unresolved_designs.length })"
+          icon="pi pi-plus"
+          :confirm-label="$t('trimble.confirmCreateDesigns', { count: previewData.unresolved_designs.length })"
+          :loading="creatingDesigns"
+          @action="createMissingDesignsAction" />
+
+        <div v-if="designCreateResults.length" style="margin-top:0.75rem;">
+          <Message v-if="designCreateFailedCount === 0" severity="success" :closable="false" size="small">
+            {{ $t('trimble.designsCreated', { count: designCreateCreatedCount }) }}
+          </Message>
+          <Message v-else severity="error" :closable="false" size="small">
+            {{ $t('trimble.designsCreatePartial', { created: designCreateCreatedCount, failed: designCreateFailedCount }) }}
+          </Message>
+          <DataTable v-if="designCreateFailedCount" :value="designCreateFailedRows" size="small" style="margin-top:0.5rem;">
+            <Column field="design_name" :header="$t('trimble.design')" />
+            <Column field="reason" :header="$t('trimble.reason')" />
+          </DataTable>
+        </div>
+      </template>
+    </Card>
+
     <Card v-if="previewData && canExecute" class="mb-card card-warn-border">
       <template #title>{{ $t('trimble.pushToProduuzitTitle') }}</template>
       <template #content>
@@ -309,6 +337,7 @@ const { t } = useI18n()
 const route = useRoute()
 import { api } from '../api.js'
 import ColumnMapper from '../components/ColumnMapper.vue'
+import ConfirmedButton from '../components/ConfirmedButton.vue'
 import { useProduuzitProjects } from '../composables/useProduuzitProjects.js'
 import { useNotifications } from '../composables/useNotifications.js'
 
@@ -405,6 +434,12 @@ const previewError = ref('')
 const importResults = ref([])
 const importSummary = ref({ created: 0, updated: 0, skipped: 0, blocked: 0, error: 0 })
 const uniqueOnlyImport = ref(true)
+
+const creatingDesigns = ref(false)
+const designCreateResults = ref([])
+const designCreateCreatedCount = computed(() => designCreateResults.value.filter(r => r.status === 'created').length)
+const designCreateFailedCount = computed(() => designCreateResults.value.filter(r => r.status === 'error').length)
+const designCreateFailedRows = computed(() => designCreateResults.value.filter(r => r.status === 'error'))
 
 const selectedEntityIndices = ref(new Set())
 
@@ -775,6 +810,35 @@ async function doImport() {
   } finally { importing.value = false }
 }
 
+async function createMissingDesignsAction() {
+  const missing = previewData.value?.unresolved_designs || []
+  if (!missing.length) return
+  creatingDesigns.value = true
+  designCreateResults.value = []
+  try {
+    const projectUuid = [...selectedProjectUuids.value][0]
+    const r = await api.post('/api/trimble/create-missing-designs', {
+      project_uuid: projectUuid,
+      design_names: missing,
+    })
+    designCreateResults.value = r.data.results || []
+    const summary = r.data.summary || { created: 0, failed: 0 }
+    if (summary.failed) {
+      notify({ severity: 'error', summary: t('trimble.designsCreatePartial', { created: summary.created, failed: summary.failed }), life: 8000 })
+    } else if (summary.created) {
+      notify({ severity: 'success', summary: t('trimble.designsCreated', { count: summary.created }), life: 5000 })
+    }
+    // Refresh the preview so the newly created designs resolve and appear in
+    // the normal import confirmation step.
+    if (summary.created) await doPreview()
+  } catch (e) {
+    const msg = e?.response?.data?.detail || e?.response?.data?.error || e?.message || String(e)
+    notify({ severity: 'error', summary: t('trimble.createDesignsFailed'), detail: msg, life: 8000 })
+  } finally {
+    creatingDesigns.value = false
+  }
+}
+
 function resolveProp(columnMappingObj, target) {
   for (const [ifcProp, prodTarget] of Object.entries(columnMappingObj)) {
     if (prodTarget === target) return ifcProp
@@ -793,6 +857,7 @@ function resolveProp(columnMappingObj, target) {
 .wide { width: 100%; }
 .mb-card { margin-bottom: 1rem; }
 .card-warn-border { border-left: 4px solid #f59e0b; }
+.card-danger-border { border-left: 4px solid #ef4444; }
 
 .pset-block { margin-bottom: 0.5rem; border: 1px solid #e5e7eb; border-radius: 6px; overflow: hidden; }
 .pset-header { display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.75rem; background: #f9fafb; }

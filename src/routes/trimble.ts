@@ -17,7 +17,7 @@ import {
   stopOAuthServer,
   trimbleGet,
 } from "../trimble-client.js";
-import { fetchAllPages } from "../produuzit-client.js";
+import { apiPost, fetchAllPages } from "../produuzit-client.js";
 import * as db from "../db.js";
 import { findSource, parseCount } from "../lib/mapping.js";
 import type { ColumnMapping } from "../lib/mapping.js";
@@ -623,6 +623,51 @@ app.post("/import", async (c) => {
     error: results.filter((r) => r.status === "error").length,
   };
   return c.json({ results, summary });
+});
+
+// Create missing designs explicitly — separate from the import confirmation.
+// This lets the user review exactly which designs will be added and confirm
+// them before any production counts are pushed.
+app.post("/create-missing-designs", async (c) => {
+  const body = await c.req.json<{ project_uuid: string; design_names: string[] }>();
+
+  if (!body.project_uuid) return c.json({ error: "Missing project_uuid" }, 400);
+  if (!body.design_names?.length) return c.json({ results: [], summary: { created: 0, failed: 0 } });
+
+  const designsMap = await loadDesigns(body.project_uuid);
+  const results: Record<string, unknown>[] = [];
+  const created = new Set<string>();
+
+  for (const rawName of body.design_names) {
+    const name = String(rawName ?? "").trim();
+    if (!name) continue;
+    // Skip designs that already exist (including 4th-char fuzzy variants) or
+    // were created earlier in this same request.
+    if (fuzzyDesignLookup(designsMap, name) || created.has(name)) continue;
+
+    try {
+      const res = (await apiPost("/constructibles/assembly_designs/", { name, project: body.project_uuid })) as Record<string, unknown>;
+      const uuid = res.uuid as string;
+      if (uuid) {
+        created.add(name);
+        results.push({ design_name: name, status: "created", uuid });
+      } else {
+        results.push({ design_name: name, status: "error", reason: "Produuzit returned no uuid for the new design" });
+      }
+    } catch (e) {
+      // Surface the Produuzit error so the user is notified when additional
+      // information is required before the design can be created.
+      results.push({ design_name: name, status: "error", reason: e instanceof Error ? e.message : String(e) });
+    }
+  }
+
+  return c.json({
+    results,
+    summary: {
+      created: results.filter((r) => r.status === "created").length,
+      failed: results.filter((r) => r.status === "error").length,
+    },
+  });
 });
 
 // --- Helpers ---
