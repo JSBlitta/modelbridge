@@ -39,7 +39,7 @@ app.route("/api/history", history);
 app.route("/api/admin", admin);
 
 app.onError((err, c) => {
-  console.error(`[${new Date().toISOString()}] ${c.req.method} ${c.req.path}:`, err.message);
+  logger.error(`[${new Date().toISOString()}] ${c.req.method} ${c.req.path}:`, err.message);
   if (err.message.includes("No active session") || err.message.includes("service token")) {
     return c.json({ error: err.message, code: "UNAUTHENTICATED" }, 401);
   }
@@ -52,7 +52,7 @@ app.get("/assets/*", serveStatic({ root: "./frontend-dist" }));
 app.get("/*", serveStatic({ root: "./frontend-dist", path: "index.html" }));
 
 loadConfig();
-initLogger(env.LOG_LEVEL);
+initLogger(env.LOG_LEVEL, env.LOG_FILE);
 initDb();
 pruneExpiredSessions();
 setInterval(pruneExpiredSessions, 60 * 60 * 1000);

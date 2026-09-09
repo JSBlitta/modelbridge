@@ -1,5 +1,6 @@
 import { env } from "./env.js";
 import { recordEvent } from "./db.js";
+import { logger } from "./logger.js";
 
 // Service account token state — shared across all requests, not per-user
 let serviceRefreshToken: string | null = env.PRODUUZIT_REFRESH_TOKEN || null;
@@ -13,7 +14,7 @@ async function rawFetch(url: string, init: RequestInit): Promise<Response> {
 }
 
 async function obtainAccessToken(refreshToken: string): Promise<string> {
-  console.log("[produuzit] Refreshing access token...");
+  logger.info("[produuzit] Refreshing access token...");
   const res = await rawFetch(`${env.PRODUUZIT_BASE_URL}/my_user/token/refresh/`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -21,7 +22,7 @@ async function obtainAccessToken(refreshToken: string): Promise<string> {
   });
   if (!res.ok) {
     const body = await res.text();
-    console.error("[produuzit] Token refresh failed:", res.status, body);
+    logger.error("[produuzit] Token refresh failed:", res.status, body);
     recordEvent({ category: "produuzit", level: "error", summary: "Token refresh failed", detail: `${res.status} ${body.slice(0, 300)}` });
     throw new Error(`Token refresh failed: ${res.status} ${body}`);
   }
@@ -29,10 +30,10 @@ async function obtainAccessToken(refreshToken: string): Promise<string> {
   // Handle refresh token rotation — Produuzit may issue a new refresh token
   if (data.refresh && data.refresh !== refreshToken) {
     serviceRefreshToken = data.refresh;
-    console.log("[produuzit] New refresh token received (rotation)");
+    logger.info("[produuzit] New refresh token received (rotation)");
     recordEvent({ category: "produuzit", level: "info", summary: "Refresh token rotated" });
   }
-  console.log("[produuzit] Access token refreshed successfully");
+  logger.info("[produuzit] Access token refreshed successfully");
   recordEvent({ category: "produuzit", level: "info", summary: "Access token refreshed" });
   return data.access;
 }
@@ -45,7 +46,7 @@ async function bootstrapFromAdmin(): Promise<void> {
     );
   }
 
-  console.log("[produuzit] Bootstrapping service token from admin credentials...");
+  logger.info("[produuzit] Bootstrapping service token from admin credentials...");
 
   // 1. Login as admin to get their access token
   const loginRes = await rawFetch(`${env.PRODUUZIT_BASE_URL}/my_user/token/`, {
@@ -66,10 +67,10 @@ async function bootstrapFromAdmin(): Promise<void> {
     const list = await listRes.json() as { results?: { id: number; username: string }[] };
     const accounts = list.results ?? (Array.isArray(list) ? list as { id: number; username: string }[] : []);
     if (!accounts.length) throw new Error("No API accounts found in Produuzit. Create a service account in the Produuzit admin.");
-    console.log("[produuzit] Available API accounts:");
-    accounts.forEach((a) => console.log(`  id=${a.id} username=${a.username}`));
+    logger.info("[produuzit] Available API accounts:");
+    accounts.forEach((a) => logger.info(`  id=${a.id} username=${a.username}`));
     accountId = String(accounts[0].id);
-    console.log(`[produuzit] Using account id=${accountId}. Set PRODUUZIT_API_ACCOUNT_ID in .env to be explicit.`);
+    logger.info(`[produuzit] Using account id=${accountId}. Set PRODUUZIT_API_ACCOUNT_ID in .env to be explicit.`);
   }
 
   // 3. Get token for the service account
@@ -81,7 +82,7 @@ async function bootstrapFromAdmin(): Promise<void> {
   if (!tokenRes.ok) throw new Error(`get_token failed: ${tokenRes.status} ${await tokenRes.text()}`);
   const tokenData = await tokenRes.json() as Record<string, unknown>;
 
-  console.log("[produuzit] get_token response keys:", Object.keys(tokenData));
+  logger.debug("[produuzit] get_token response keys:", Object.keys(tokenData));
 
   // Extract whatever token fields Produuzit returns
   const refresh = (tokenData.refresh ?? tokenData.refresh_token ?? tokenData.token) as string | undefined;
@@ -90,7 +91,7 @@ async function bootstrapFromAdmin(): Promise<void> {
   if (refresh) {
     serviceRefreshToken = refresh;
     serviceAccessToken = access ?? null;
-    console.log(
+    logger.info(
       `\n[produuzit] ✓ Service token acquired for account ${accountId}.\n` +
       `Add this to your .env to skip bootstrap on next start:\n` +
       `PRODUUZIT_REFRESH_TOKEN=${refresh}\n`
@@ -98,13 +99,13 @@ async function bootstrapFromAdmin(): Promise<void> {
   } else if (access) {
     // Only got an access token — use it directly (will expire, no refresh)
     serviceAccessToken = access;
-    console.log(
+    logger.warn(
       `[produuzit] ⚠ Only got an access token (no refresh). It will expire in ~1h.\n` +
       `Full response: ${JSON.stringify(tokenData)}\n` +
       `Check Produuzit docs for how to get a long-lived token.`
     );
   } else {
-    console.log(`[produuzit] get_token full response: ${JSON.stringify(tokenData)}`);
+    logger.error(`[produuzit] get_token full response: ${JSON.stringify(tokenData)}`);
     throw new Error("get_token returned no recognizable token field. See console for full response.");
   }
 }
@@ -133,7 +134,7 @@ async function ensureServiceToken(): Promise<void> {
 async function refreshService(): Promise<void> {
   // Prevent concurrent refresh calls — if already refreshing, wait for that one
   if (refreshPromise) {
-    console.log("[produuzit] Refresh already in progress, waiting...");
+    logger.info("[produuzit] Refresh already in progress, waiting...");
     await refreshPromise;
     return;
   }
@@ -194,11 +195,11 @@ async function request(
     let res = await fetch(url, buildInit());
     if (res.status === 401 || res.status === 403) {
       // Token expired or invalid — refresh and retry once
-      console.log(`[produuzit] Got ${res.status} on ${method} ${path}, refreshing token...`);
+      logger.info(`[produuzit] Got ${res.status} on ${method} ${path}, refreshing token...`);
       await refreshService();
       res = await fetch(url, buildInit());
       if (res.status === 401 || res.status === 403) {
-        console.error(`[produuzit] Still getting ${res.status} after token refresh on ${method} ${path}`);
+        logger.error(`[produuzit] Still getting ${res.status} after token refresh on ${method} ${path}`);
       }
     }
     if (!res.ok) {

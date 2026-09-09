@@ -103,6 +103,10 @@ nssm set ModelBridge AppStderr "C:\Apps\modelbridge\logs\stderr.log"
 nssm set ModelBridge AppRotateFiles 1
 nssm set ModelBridge AppRotateBytes 1048576
 
+# App-level logging (optional) — set in .env:
+#   LOG_LEVEL=info                 # error | warn | info | debug
+#   LOG_FILE=logs\app.log           # also append every log line to this file
+
 # Auto-start with Windows
 nssm set ModelBridge Start SERVICE_AUTO_START
 

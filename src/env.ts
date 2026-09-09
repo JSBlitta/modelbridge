@@ -49,6 +49,8 @@ export const env = {
 
   // Logging: error | warn | info | debug (default: info)
   LOG_LEVEL: optional("LOG_LEVEL", "info"),
+  // Optional log file — when set, all log lines are also appended here
+  LOG_FILE: optional("LOG_FILE", ""),
 
   // Admin usernames (comma-separated). These users see the admin page and can
   // configure ModelBridge. Everyone else who can log in is a default user.

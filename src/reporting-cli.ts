@@ -10,7 +10,7 @@ import { initLogger, logger } from "./logger.js";
 import { initDb } from "./db.js";
 import { runReportingCycle } from "./reporting/runner.js";
 
-initLogger(env.LOG_LEVEL);
+initLogger(env.LOG_LEVEL, env.LOG_FILE);
 initDb();
 
 runReportingCycle()

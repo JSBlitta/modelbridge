@@ -1,16 +1,62 @@
-const LEVELS = { error: 0, warn: 1, info: 2, debug: 3 } as const
-type Level = keyof typeof LEVELS
+import { appendFileSync, mkdirSync } from "node:fs";
+import { dirname } from "node:path";
 
-let _level: number = LEVELS.info
+const LEVELS = { error: 0, warn: 1, info: 2, debug: 3 } as const;
+type Level = keyof typeof LEVELS;
 
-export function initLogger(level?: string) {
-  const lvl = (level || process.env.LOG_LEVEL || 'info').toLowerCase()
-  if (lvl in LEVELS) _level = LEVELS[lvl as Level]
+let _level: number = LEVELS.info;
+let _logFile: string | null = null;
+
+// Configure level ("error" | "warn" | "info" | "debug", default "info") and an
+// optional log file. When LOG_FILE is set, every message is also appended to
+// that file (timestamped) in addition to the console.
+export function initLogger(level?: string, logFile?: string): void {
+  const lvl = (level || process.env.LOG_LEVEL || "info").toLowerCase();
+  if (lvl in LEVELS) _level = LEVELS[lvl as Level];
+
+  _logFile = logFile || process.env.LOG_FILE || "";
+  if (_logFile) {
+    try {
+      const dir = dirname(_logFile);
+      if (dir && dir !== ".") mkdirSync(dir, { recursive: true });
+    } catch { /* ignore — logging must never crash the app */ }
+  }
+}
+
+function formatArg(arg: unknown): string {
+  if (typeof arg === "string") return arg;
+  if (arg instanceof Error) return arg.stack || arg.message;
+  try {
+    return JSON.stringify(arg);
+  } catch {
+    return String(arg);
+  }
+}
+
+function write(level: Level, args: unknown[]): void {
+  if (_level < LEVELS[level]) return;
+
+  const line = `${new Date().toISOString()} [${level.toUpperCase()}] ${args.map(formatArg).join(" ")}`;
+
+  // Console output (gated by level)
+  const consoleFn =
+    level === "error" ? console.error
+    : level === "warn" ? console.warn
+    : level === "info" ? console.info
+    : console.debug;
+  consoleFn(...args);
+
+  // File output (not gated — the level check above already applies)
+  if (_logFile) {
+    try {
+      appendFileSync(_logFile, line + "\n");
+    } catch { /* ignore */ }
+  }
 }
 
 export const logger = {
-  error: (...args: unknown[]) => { if (_level >= LEVELS.error) console.error(...args) },
-  warn:  (...args: unknown[]) => { if (_level >= LEVELS.warn)  console.warn(...args) },
-  info:  (...args: unknown[]) => { if (_level >= LEVELS.info)  console.info(...args) },
-  debug: (...args: unknown[]) => { if (_level >= LEVELS.debug) console.debug(...args) },
-}
+  error: (...args: unknown[]) => write("error", args),
+  warn: (...args: unknown[]) => write("warn", args),
+  info: (...args: unknown[]) => write("info", args),
+  debug: (...args: unknown[]) => write("debug", args),
+};
