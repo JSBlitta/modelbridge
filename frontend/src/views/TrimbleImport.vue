@@ -176,8 +176,8 @@
             </div>
           </template>
           <Column :header="$t('trimble.selectAllEntities')" style="width:3rem;">
-            <template #body="{ index }">
-              <Checkbox :model-value="selectedEntityIndices.has(index)" :binary="true" @change="toggleEntity(index)" />
+            <template #body="{ data }">
+              <Checkbox :model-value="selectedEntityIndices.has(entityIndex(data))" :binary="true" @change="toggleEntity(entityIndex(data))" />
             </template>
           </Column>
           <Column v-for="prop in displayProps" :key="prop" :field="prop" :header="prop.split('.').pop()" style="min-width:120px;" sortable>
@@ -477,7 +477,21 @@ const selectedEntities = computed(() =>
   previewEntities.value.filter((_, i) => selectedEntityIndices.value.has(i))
 )
 
+// Map entity object → its index in previewEntities. Selection is tracked by
+// index, but the DataTable's row `index` reflects the sorted/filtered view, so
+// we resolve the real index from the row object itself.
+const entityIndexMap = computed(() => {
+  const m = new Map()
+  previewEntities.value.forEach((e, i) => m.set(e, i))
+  return m
+})
+
+function entityIndex(entity) {
+  return entityIndexMap.value.get(entity) ?? -1
+}
+
 function toggleEntity(index) {
+  if (index < 0) return
   const s = new Set(selectedEntityIndices.value)
   s.has(index) ? s.delete(index) : s.add(index)
   selectedEntityIndices.value = s
