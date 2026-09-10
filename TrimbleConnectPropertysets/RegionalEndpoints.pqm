@@ -1,0 +1,62 @@
+let
+    RegionStatic = (region as text) as record =>
+    let
+    hardcodeRegion = Record.Field(
+                        [
+        northamerica = [
+              Core           = "https://app.connect.trimble.com/tc/api/2.0/",
+              Organizer      = "https://org-api.us-east-1.connect.trimble.com/v1/",
+              Propertyset    = "https://pset-api.us-east-1.connect.trimble.com/v1/",
+              Model          = "https://model-api11.connect.trimble.com/",
+              Topic          = "https://open11.connect.trimble.com/",
+            #"Model-feature" = "https://model-wf11.connect.trimble.com/v1/"
+        ],
+        europe = [
+              Core           = "https://app21.connect.trimble.com/tc/api/2.0/",
+              Organizer      = "https://org-api.eu-west-1.connect.trimble.com/v1/",
+              Propertyset    = "https://pset-api.eu-west-1.connect.trimble.com/v1/",
+              Model          = "https://model-api21.connect.trimble.com/",
+              Topic          = "https://open21.connect.trimble.com/",
+            #"Model-feature" = "https://model-wf21.connect.trimble.com/v1/"
+        ],
+        asia = [
+              Core           = "https://app31.connect.trimble.com/tc/api/2.0/",
+              Organizer      = "https://org-api.ap-southeast-1.connect.trimble.com/v1/",
+              Propertyset    = "https://pset-api.ap-southeast-1.connect.trimble.com/v1/",
+              Model          = "https://model-api31.connect.trimble.com/",
+              Topic          = "https://open31.connect.trimble.com/",
+            #"Model-feature" = "https://model-wf31.connect.trimble.com/v1/"
+        ],
+        australia = [
+              Core           = "https://app32.connect.trimble.com/tc/api/2.0/",
+              Organizer      = "https://org-api.ap-southeast-2.connect.trimble.com/v1/",
+              Propertyset    = "https://pset-api.ap-southeast-2.connect.trimble.com/v1/",
+              Model          = "https://model-api32.connect.trimble.com/",
+              Topic          = "https://open32.connect.trimble.com/",
+            #"Model-feature" = "https://model-wf32.connect.trimble.com/v1/"
+        ]
+    ], "region")
+    in
+    hardcodeRegion,
+   
+    Regions = (region as text) as record =>
+        let
+            base_url = Json.Document(Extension.Contents("Configuration.json"))[trimbleConnectURLs],
+            firstendpoint = base_url[regionsUri],
+            request = Json.Document(Web.Contents(firstendpoint)),
+            filter = List.Select(request, each Text.Lower(_[location]) = Text.Lower(region)){0},
+            rename = Record.RenameFields(filter, { 
+                    {"tc-api", "Core"},
+                    {"org-api", "Organizer"},
+                    {"pset-api", "Propertyset"},
+                    {"model-api", "Model"},
+                    {"topic-api", "Topic"},
+                    {"model-feature-api", "Model-feature"} }, MissingField.Ignore),
+            endpoints = Record.SelectFields(rename, {"Core", "Organizer", "Propertyset", "Model", "Topic", "Model-feature"}, MissingField.Ignore)
+        in       
+        endpoints
+in
+    [
+        RegionStatic = RegionStatic,
+        Regions      = Regions        
+    ]

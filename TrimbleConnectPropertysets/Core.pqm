@@ -1,0 +1,387 @@
+let
+    Configuration     = Json.Document(Extension.Contents("Configuration.json")),
+    ConnectorSettings = Configuration[connectorSettings],
+    ProjectsColumns   = Configuration[tableColumns][projectsColumns],
+    FolderColumns     = Configuration[tableColumns][folderColumns],
+    releaseColumns    = Configuration[tableColumns][releaseColumns],
+
+    FetchPages = Extension.LoadFunction("Pagination.pqm")[FetchPages],
+
+    Model                   = Extension.LoadFunction("Model.pqm"),
+    GetIdentifiers          = Model[GetIdentifiers],
+    ifcCollection           = Model[ifcCollection],
+    GetModelData            = Model[GetModelData],
+
+    Helpers                 = Extension.LoadFunction("Helpers.pqm"),
+    NormalizeName           = Helpers[NormalizeName],
+    Table.ToNavigationTable = Helpers[Table.ToNavigationTable],
+    GetAll                  = Helpers[GetAll],
+    FileProcessor           = Helpers[FileProcessor],
+    IsValidModelFileType    = Helpers[IsValidModelFileType],
+
+    Organizer               = Extension.LoadFunction("Organizer.pqm"),
+    GetProjectTrees         = Organizer[GetProjectTrees],
+    GetProjectLibraryIds    = Organizer[GetProjectLibraryIds],
+    TreeFlow                = Organizer[TreeFlow],
+
+    Propertyset             = Extension.LoadFunction("Propertyset.pqm"),
+    GetTrimbleData          = Propertyset[GetTrimbleData],
+    GetPSetLibDefs          = Propertyset[GetPSetLibDefs],
+
+SearchProject = (endpoints as record, projectRef as text) =>
+    let           
+        url = endpoints[Core] & "search?query=" & projectRef,
+        request = Json.Document(Web.Contents(url)),
+        selectProjects = List.Select(request, each Record.Field(_,"type") = "PROJECT"),
+        projectId = Record.Field(Record.Field(selectProjects{0}, "details"), "id")
+    in
+        projectId,
+
+   
+GetProjects = (endpoints as record) as table =>
+    let
+        url         = endpoints[Core] & "projects?",
+        queryParams = [fullyLoaded = "false", sort = "-name"],
+        queryString = Uri.BuildQueryString(queryParams),
+
+        response = Web.Contents(url & queryString, [
+            ManualStatusHandling = {400, 404, 429, 500, 503}
+        ]),
+        responseMetadata = Value.Metadata(response),
+        statusCode       = if Record.HasFields(responseMetadata, "Response.Status")
+                     then responseMetadata[Response.Status] else 200,
+        projectsAsJson = if statusCode >= 400 then
+                            error Extension.LoadString("GetProjectsError") & " " & Text.From(statusCode)
+                         else
+                            Json.Document(response),
+        toTable       = Table.FromList(projectsAsJson, Splitter.SplitByNothing(), {"Projects"}),
+        projectsTable = Table.Buffer(
+            Table.ExpandRecordColumn(toTable, "Projects", ProjectsColumns)
+        ),
+        withType   = Table.AddColumn(projectsTable, "type", each "Folder", type text),
+        withIsLeaf = Table.AddColumn(withType, "IsLeaf", each false, type logical),
+        withChecks = Table.AddColumn(withIsLeaf, "checks", each  
+            let
+                organizerAPI = GetProjectTrees(endpoints, [id]),
+                psetAPI      = GetProjectLibraryIds(endpoints, [id])
+            in
+                [
+                    #"Organizer API"   = if Table.IsEmpty(organizerAPI) then false else organizerAPI,
+                    #"PropertySet API" = if List.IsEmpty(psetAPI) then false else psetAPI
+                ]
+        )
+    in
+        withChecks,
+
+GetReleases = (endpoints as record, projectId as text, checks as record) =>
+    let
+          // Create cache key for memoization
+        cacheKey = "releases_" & projectId,
+        
+          // Function to fetch releases
+        FetchReleases = () =>
+            let
+                  // Build URL
+                uri = endpoints[Core] & "releases?projectId=" & projectId,
+                
+                  // Fetch releases with error handling
+                response = Web.Contents(uri, [
+                    ManualStatusHandling = {400, 404, 429, 500, 503},
+                    Timeout              = #duration(0, 0, 1, 0)       // 1 minute timeout
+                ]),
+                
+                  // Check for HTTP errors
+                responseMetadata = Value.Metadata(response),
+                status           = if Record.HasFields(responseMetadata, "Response.Status")
+                        then responseMetadata[Response.Status] else 200,
+                        
+                  // Parse JSON response
+                json = if status >= 400 then
+                            error Error.Record(
+                                "HTTP Error",
+                                Extension.LoadString("ReleasesError") & " " & Text.From(status),
+                                "Failed to fetch releases"
+                            )
+                        else
+                            Json.Document(response),           
+                                            
+                  // Create table
+                resultTable = Table.FromRecords(json, releaseColumns, 2),
+                
+                    // Normalize names
+                selectColumns = Table.SelectColumns(resultTable, releaseColumns),
+                withChecks  = Table.Buffer(Table.AddColumn(selectColumns, "checks", each checks))
+            in
+                withChecks
+        in
+            FetchReleases(),
+
+    GetReleaseFiles = (endpoints as record, releaseId as text, projectId as text, checks as record) as table =>
+        let
+              // Create cache key for memoization
+            cacheKey = "releaseFiles_" & releaseId,
+            
+            // Function to fetch release files
+            FetchReleaseFiles = () =>
+                let
+                    // Build URL
+                    uri = endpoints[Core] & "releases/" & releaseId & "/files",
+                    
+                    // Fetch files with error handling
+                    response = Web.Contents(uri, [
+                        ManualStatusHandling = {400, 404, 429, 500, 503},
+                        Timeout = #duration(0, 0, 1, 0)  // 1 minute timeout
+                    ]),
+                    
+                    // Check for HTTP errors
+                    responseMetadata = Value.Metadata(response),
+                    status = if Record.HasFields(responseMetadata, "Response.Status")
+                            then responseMetadata[Response.Status] else 200,
+                            
+                    // Parse JSON response
+                    json = if status >= 400 then
+                              error Error.Record(
+                                  "HTTP Error",
+                                  Extension.LoadString("ReleaseFilesError") & " " & Text.From(status),
+                                  "Failed to fetch release files"
+                              )
+                           else
+                              Json.Document(response),
+                              
+                    // Convert to table
+                    raw = Table.FromRecords(json),
+                    
+                    // Select only needed columns to reduce memory usage
+                    cols          = {"id", "name", "type", "versionId", "revision", "modifiedOn", "modifiedBy"},
+                    sel           = Table.SelectColumns(raw, cols, MissingField.UseNull),
+                    passProjectId = Table.AddColumn(sel, "projectId", each projectId, type text),
+                    withChecks    = Table.Buffer(Table.AddColumn(passProjectId, "checks", each checks))
+                in
+                    withChecks
+            in
+                FetchReleaseFiles(),
+
+GetFileVersions = (endpoints as record, fileId as text) =>
+    let
+        // Create cache key for memoization
+        cacheKey = "fileVersions_" & fileId,
+        
+        // Function to fetch file versions
+        FetchFileVersions = () =>
+            let
+                // Build URL
+                url = endpoints[Core] & "files/" & fileId & "/versions",
+                
+                // Fetch versions with error handling
+                response = Web.Contents(url, [
+                    ManualStatusHandling = {400, 404, 429, 500, 503},
+                    Timeout = #duration(0, 0, 1, 0)  // 1 minute timeout
+                ]),
+                
+                // Check for HTTP errors
+                responseMetadata = Value.Metadata(response),
+                status = if Record.HasFields(responseMetadata, "Response.Status")
+                        then responseMetadata[Response.Status] else 200,
+                        
+                // Parse JSON response
+                itemVersionAsJson = if status >= 400 then
+                                        error Error.Record(
+                                            "HTTP Error",
+                                            Extension.LoadString("FileVersionsError") )
+                                    else
+                                        Json.Document(response),               
+                                        
+                // Convert to table
+                toTable = Table.FromList(
+                    itemVersionAsJson, Splitter.SplitByNothing(), {"versions"}, null, ExtraValues.Error),
+                
+                // Get version columns
+                versionColumns = Record.FieldNames(toTable{0}[versions]),
+                
+                // Expand version columns
+                expandCol  = Table.Buffer(Table.ExpandRecordColumn(toTable, "versions", versionColumns)),
+                reviseName = Table.ReplaceValue(expandCol, each [name], each Text.Combine( {Text.From([name]), Text.From([revision]) }, " Rev.  " ), Replacer.ReplaceText, {"name"})
+            in
+                reviseName
+        in
+            FetchFileVersions(),
+
+    GetFolderItems = (
+        endpoints as record, folderId as text, optional companyFilter, optional folderOverride as logical
+    ) =>
+        let
+            // Create cache key for memoization
+            cacheKey = Text.Combine({
+                "folderItems",
+                folderId,
+                Text.From(companyFilter),
+                Text.From(folderOverride)
+            }, "|"),
+
+                    // Build URL
+                    url = endpoints[Core] & "folders/" & folderId & "/items",
+                    
+                    // Fetch folder items with error handling
+                    request = Web.Contents(url, [
+                        ManualStatusHandling = {400, 404, 429, 500, 503},
+                        Timeout = #duration(0, 0, 1, 0)  // 1 minute timeout
+                    ]),
+                    
+                    // Check for HTTP errors
+                    responseMetadata = Value.Metadata(request),
+                    status = if Record.HasFields(responseMetadata, "Response.Status")
+                            then responseMetadata[Response.Status] else 200,
+                            
+                    // Parse JSON response
+                    foldersAsJson = if status >= 400 then
+                                      error Error.Record(
+                                          "HTTP Error",
+                                          Extension.LoadString("FolderItemsError") & " " & Text.From(status),
+                                          "Failed to fetch folder items"
+                                      )
+                                   else
+                                      Json.Document(request),
+                                      
+                    // Get folder columns
+                    allFolderColumns = Record.FieldNames(foldersAsJson{0}),
+                    
+                    // Convert to table
+                    folderTable = Table.Buffer(Table.FromRecords(foldersAsJson, allFolderColumns, 2)),
+                    
+                    normalizeType = Table.TransformColumns(folderTable, {{"type", each Text.Proper(_), type text}}),
+                    // Apply company folder filtering if needed
+                    levelSwitch =
+                        if
+                            folderOverride = false
+                            and ConnectorSettings[companyFolderOnly] = true
+                            and List.Contains(normalizeType[parentId], companyFilter, Comparer.OrdinalIgnoreCase)
+                            and List.Contains(normalizeType[name], ConnectorSettings[companyName], Comparer.OrdinalIgnoreCase)
+                        then
+                            Table.SelectRows(
+                                normalizeType,
+                                each
+                                    Text.Contains(
+                                        Text.From([name]), ConnectorSettings[companyName], Comparer.OrdinalIgnoreCase
+                                    )
+                            )
+                        else
+                            normalizeType,
+                            normalizeRecord = (r as record) =>
+                                Record.FromList(
+                                    List.Transform(allFolderColumns, each Record.FieldOrDefault(r, _, "PQ_row")),
+                                    allFolderColumns
+                                ),
+                        projectQueries = if List.Contains(levelSwitch[parentId], companyFilter, Comparer.OrdinalIgnoreCase) 
+                        then
+                        let projectQueries =
+                            {
+                                [
+                                    id = "queryToDos",
+                                    name = "Project To Dos",
+                                    type = "Function",
+                                    versionId = "TODO" & Text.From(DateTime.ToText(DateTime.LocalNow(), "ddMMyyyyHHmm")),
+                                    projectId = Table.Column(levelSwitch, "projectId"){0},
+                                    createdBy = "Power Query"
+                                ],
+                                 [
+                                    id = "queryActivities",
+                                    name = "Project Activities",
+                                    type = "Function",
+                                    versionId = "ACT" & Text.From(DateTime.ToText(DateTime.LocalNow(), "ddMMyyyyHHmm")),
+                                    projectId = Table.Column(levelSwitch, "projectId"){0},
+                                    createdBy = "Power Query"
+                                ]
+                                //  ,[
+                                //     id = "queryClashSets",
+                                //     name = "Project Clash Sets",
+                                //     type = "Function",
+                                //     versionId = "CLASH" & Text.From(DateTime.ToText(DateTime.LocalNow(), "ddMMyyyyHHmm")),
+                                //     projectId = Table.Column(levelSwitch, "projectId"){0},
+                                //     createdBy = "Power Query"
+                                // ],
+                                //  [
+                                //     id = "queryComments",
+                                //     name = "Project Comments",
+                                //     type = "Function",
+                                //     versionId = "COMM" & Text.From(DateTime.ToText(DateTime.LocalNow(), "ddMMyyyyHHmm")),
+                                //     projectId = Table.Column(levelSwitch, "projectId"){0},
+                                //     createdBy = "Power Query"
+                                // ]
+                            },
+                        normalizeQueryRows = List.Transform(projectQueries, each normalizeRecord(_) ),
+                        addProjectQueries = Table.InsertRows(levelSwitch,Table.RowCount(levelSwitch),normalizeQueryRows)
+                        in
+                            addProjectQueries
+                        else
+                            levelSwitch,
+                    selectFolderColumns = Table.SelectColumns(projectQueries, FolderColumns, MissingField.UseNull)
+                in
+                    selectFolderColumns,
+
+GetFolderContent = (
+        endpoints as record,
+        folderId as text,
+        projectId as nullable text,
+        fields as text,
+        checks as record,
+        optional filterString as text,
+        optional folderOverride as logical,
+        optional companyFilter as text
+    ) =>
+        let
+            folderFilter = if companyFilter = null then folderId else companyFilter,
+            folderItems = GetFolderItems(endpoints, folderId, folderFilter, folderOverride),
+            withResult = Table.AddColumn(
+                folderItems,
+                "Data",
+                each
+                    if Text.Contains([type], "Folder", Comparer.OrdinalIgnoreCase) then
+                        @GetFolderContent(
+                            endpoints, [id], [projectId], fields, checks, filterString, folderOverride, folderFilter
+                        )
+                    else if let
+                    fileCheck = Text.Proper([type]) = "File" and IsValidModelFileType([name])
+                    in
+                    fileCheck
+
+then let
+APIs = FileProcessor(_, endpoints, checks, fields, filterString, {"Core", "Model", "Organizer", "PropertySet"})
+in
+APIs
+                    else if Text.Contains([type], "Function", Comparer.OrdinalIgnoreCase) and Text.From([id]) = "queryToDos" 
+                    then  Json.Document(Web.Contents(endpoints[Core] & "todos?projectId=" & [projectId] )) 
+                    else if Text.Contains([type], "Function", Comparer.OrdinalIgnoreCase) and Text.From([id]) = "queryActivities"
+                    then Json.Document(Web.Contents(endpoints[Core] & "activities?projectId=" & [projectId] ))  
+                    // else if Text.Contains([type], "Function", Comparer.OrdinalIgnoreCase) and Text.From([id]) = "queryClashSets"
+                    // then Json.Document(Web.Contents(endpoints[Core] & "clashsets?projectId=" & [projectId] )) 
+                    // else if Text.Contains([type], "Function", Comparer.OrdinalIgnoreCase) and Text.From([id]) = "queryComments"
+                    // then Json.Document(Web.Contents(endpoints[Core] & "comments?projectId=" & [projectId] & "&objectType=FOLDER" ))                   
+                    else
+                        Extension.LoadString("FiletypeUnsupportedI")
+                            & Text.AfterDelimiter([name], ".", {0, RelativePosition.FromEnd})
+                            & Extension.LoadString("FiletypeUnsupportedII"),
+                type table
+            ),      
+            withIsLeaf = Table.AddColumn(
+                withResult,
+                "IsLeaf",
+                each if [type]  = "Function" or  Text.Proper([type]) = "File"
+    and not IsValidModelFileType([name]) then true else false,
+                type logical
+            ),
+            navTable = Table.ToNavigationTable(
+                withIsLeaf, {"id"}, "name", "Data", "type", "name", "IsLeaf"
+            )
+        in
+            navTable 
+in
+    [
+        SearchProject    = SearchProject,
+        GetProjects      = GetProjects,
+        GetReleases      = GetReleases,
+        GetReleaseFiles  = GetReleaseFiles,
+        GetFileVersions  = GetFileVersions,
+        GetFolderItems   = GetFolderItems,
+        GetFolderContent = GetFolderContent
+    ]
+ 

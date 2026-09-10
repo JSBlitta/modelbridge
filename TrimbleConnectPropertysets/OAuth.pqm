@@ -1,0 +1,77 @@
+let
+    TrimbleConnectAuthorization = Json.Document(Extension.Contents("Configuration.json"))[trimbleConnectAuthorization],
+    TrimbleCOnnectURLs = Json.Document(Extension.Contents("Configuration.json"))[trimbleConnectURLs],
+    authorizationUrl = TrimbleCOnnectURLs[authorizeUri],
+    tokenUri = TrimbleCOnnectURLs[tokenUri],
+    redirectUrl = TrimbleCOnnectURLs[redirectUri],
+    clientId = TrimbleConnectAuthorization[clientId],
+    clientSecret = TrimbleConnectAuthorization[clientSecret],
+    scope = TrimbleConnectAuthorization[scope],
+    
+    StartLogin = (resourceUrl, state, display) =>
+        let
+            AuthorizeUrl = authorizationUrl
+                & "?"
+                & Uri.BuildQueryString(
+                    [
+                        scope = scope,
+                        response_type = "code",
+                        redirect_uri = redirectUrl,
+                        client_id = clientId,
+                        client_secret = clientSecret,
+                        state = state
+                    ]
+                )
+        in
+            [
+                LoginUri = AuthorizeUrl,
+                CallbackUri = redirectUrl,
+                WindowHeight = 1000,
+                WindowWidth = 800
+            ],
+    FinishLogin = (c, dataSourcePath, context, callbackUri, state) =>
+        let
+            Parts = Uri.Parts(callbackUri)[Query]
+        in
+            TokenMethod(dataSourcePath, Parts[code], "authorization_code", context),
+    TokenMethod = (dataSourcePath, code, grant_type, optional verifier) =>
+        let
+            codeVerifier = if (verifier <> null) then [code_verifier = verifier] else [],
+            codeParameter = if (grant_type = "authorization_code") then [code = code] else [refresh_token = code],
+            query = codeVerifier
+                & codeParameter
+                & [
+                    client_id = clientId,
+                    client_secret = clientSecret,
+                    grant_type = grant_type,
+                    redirect_uri = redirectUrl
+                ],
+            ManualHandlingStatusCodes = {},
+            Response = Web.Contents(
+                tokenUri,
+                [
+                    Content = Text.ToBinary(Uri.BuildQueryString(query)),
+                    Headers = [
+                        #"Content-type" = "application/x-www-form-urlencoded",
+                        #"Accept" = "application/json"
+                    ],
+                    ManualStatusHandling = ManualHandlingStatusCodes
+                ]
+            ),
+            Parts = Json.Document(Response)
+        in        
+            if (Parts[error]? <> null) then
+                error Error.Record(Parts[error], Parts[message]?)
+            else
+                Parts,
+    Refresh = (ca, resourceUrl, oldCredentials) =>
+        TokenMethod(resourceUrl, oldCredentials[refresh_token], "refresh_token")
+
+in
+    [
+        StartLogin = StartLogin,
+        FinishLogin = FinishLogin,
+        Refresh = Refresh
+       
+    ]
+

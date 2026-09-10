@@ -1,0 +1,283 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<root>
+  <xsd:schema id="root" xmlns="" xmlns:xsd="http://www.w3.org/2001/XMLSchema" xmlns:msdata="urn:schemas-microsoft-com:xml-msdata">
+    <xsd:import namespace="http://www.w3.org/XML/1998/namespace"/>
+    <xsd:element name="root" msdata:IsDataSet="true">
+      <xsd:complexType>
+        <xsd:choice maxOccurs="unbounded">
+          <xsd:element name="metadata">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0"/>
+              </xsd:sequence>
+              <xsd:attribute name="name" use="required" type="xsd:string"/>
+              <xsd:attribute name="type" type="xsd:string"/>
+              <xsd:attribute name="mimetype" type="xsd:string"/>
+              <xsd:attribute ref="xml:space"/>
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="assembly">
+            <xsd:complexType>
+              <xsd:attribute name="alias" type="xsd:string"/>
+              <xsd:attribute name="name" type="xsd:string"/>
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="data">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1"/>
+                <xsd:element name="comment" type="xsd:string" minOccurs="0" msdata:Ordinal="2"/>
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required" msdata:Ordinal="1"/>
+              <xsd:attribute name="type" type="xsd:string" msdata:Ordinal="3"/>
+              <xsd:attribute name="mimetype" type="xsd:string" msdata:Ordinal="4"/>
+              <xsd:attribute ref="xml:space"/>
+            </xsd:complexType>
+          </xsd:element>
+          <xsd:element name="resheader">
+            <xsd:complexType>
+              <xsd:sequence>
+                <xsd:element name="value" type="xsd:string" minOccurs="0" msdata:Ordinal="1"/>
+              </xsd:sequence>
+              <xsd:attribute name="name" type="xsd:string" use="required"/>
+            </xsd:complexType>
+          </xsd:element>
+        </xsd:choice>
+      </xsd:complexType>
+    </xsd:element>
+  </xsd:schema>
+  <resheader name="resmimetype">
+    <value>text/microsoft-resx</value>
+  </resheader>
+  <resheader name="version">
+    <value>2.0</value>
+  </resheader>
+  <resheader name="reader">
+    <value>System.Resources.ResXResourceReader, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <resheader name="writer">
+    <value>System.Resources.ResXResourceWriter, System.Windows.Forms, Version=4.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089</value>
+  </resheader>
+  <data name="Title" xml:space="preserve">
+    <value>Trimble Connect PropertySets</value>
+  </data>
+  <data name="ReleasesTrue" xml:space="preserve">
+    <value>Alleen releases laden</value>
+    <comment></comment>
+  </data>
+  <data name="ReleasesFalse" xml:space="preserve">
+    <value>Alle modellen laden</value>
+    <comment></comment>
+  </data>
+  <data name="ReleasesError" xml:space="preserve">
+    <value>Er is een fout opgetreden bij het ophalen van releases.</value>
+  </data>
+  <data name="ReleasesDescription" xml:space="preserve">
+    <value>Specificeer de releaseID voor data ophalen.</value>
+    <comment></comment>
+  </data>
+  <data name="ReleasesCaption" xml:space="preserve">
+    <value>Release ID</value>
+    <comment></comment>
+  </data>
+  <data name="ReleaseFilesError" xml:space="preserve">
+    <value>Er is een fout opgetreden bij het ophalen van release bestanden.</value>
+  </data>
+  <data name="RegionNorthAmerica" xml:space="preserve">
+    <value>Noord-Amerika</value>
+    <comment></comment>
+  </data>
+  <data name="RegionEurope" xml:space="preserve">
+    <value>Europa</value>
+    <comment></comment>
+  </data>
+  <data name="RegionErrorFeedback" xml:space="preserve">
+    <value>Geldige regio's zijn:</value>
+  </data>
+  <data name="RegionError" xml:space="preserve">
+    <value>Geen data voor regio:</value>
+  </data>
+  <data name="RegionDescription" xml:space="preserve">
+    <value>Kies de regio waar uw Trimble Connect-modellen zijn opgeslagen.</value>
+    <comment></comment>
+  </data>
+  <data name="RegionAustralia" xml:space="preserve">
+    <value>Australië</value>
+    <comment></comment>
+  </data>
+  <data name="RegionAsia" xml:space="preserve">
+    <value>Azië</value>
+    <comment></comment>
+  </data>
+  <data name="QueryFilterDescription" xml:space="preserve">
+    <value>Kies welke entiteiten u wilt ophalen.</value>
+    <comment></comment>
+  </data>
+  <data name="PropertySetDescription" xml:space="preserve">
+    <value>Voer uw aangepaste propertyset in voor parsing.</value>
+    <comment></comment>
+  </data>
+  <data name="PropertySetCaption" xml:space="preserve">
+    <value>Aangepaste propertyset</value>
+    <comment></comment>
+  </data>
+  <data name="Projects" xml:space="preserve">
+    <value>Projecten</value>
+    <comment></comment>
+  </data>
+  <data name="ProjectRefDescription" xml:space="preserve">
+    <value>Voer een projectnummer of naam in. Moet een unieke identifier zijn; de bijbehorende projectId wordt gevonden op basis van naam of beschrijving.</value>
+    <comment></comment>
+  </data>
+  <data name="ProjectRefCaption" xml:space="preserve">
+    <value>Uw eigen unieke referentie:</value>
+    <comment></comment>
+  </data>
+  <data name="NoStructuresFound" xml:space="preserve">
+    <value>Geen organisatie structuren gevonden. Geen boom in het bos.</value>
+  </data>
+  <data name="NoLibrariesFound" xml:space="preserve">
+    <value>Er zijn geen eigenschappen bibliotheken gevonden voor het project.</value>
+  </data>
+  <data name="ModelOptions" xml:space="preserve">
+    <value>Modelopties</value>
+    <comment></comment>
+  </data>
+  <data name="LoginUI" xml:space="preserve">
+    <value>Login met je Trimble Identiteit</value>
+  </data>
+  <data name="LoadFunctionName" xml:space="preserve">
+    <value>Laad functie</value>
+  </data>
+  <data name="LoadFunctionLongDescription" xml:space="preserve">
+    <value>De functie kan helper bestand inlezen, ze interperen als tekst en die evalueren voor enige functies.
+Kan niet gebruikt worden op een bestand dat een sectie verklaart.</value>
+  </data>
+  <data name="LoadFunctionDescription" xml:space="preserve">
+    <value>Deze functie kan helper functies van andere bestanden inlezen.</value>
+  </data>
+  <data name="InfoboxTrue" xml:space="preserve">
+    <value>Laad enkel infoboxen</value>
+  </data>
+  <data name="InfoboxFalse" xml:space="preserve">
+    <value>Laad alle modellen</value>
+  </data>
+  <data name="GetProjectsError" xml:space="preserve">
+    <value>Er is een fout opgetreden bij het ophalen van projecten</value>
+  </data>
+  <data name="FolderOverrideTrue" xml:space="preserve">
+    <value>Laad alle mappen</value>
+  </data>
+  <data name="FolderOverrideFalse" xml:space="preserve">
+    <value>Laad enkel bedrijfsmappen</value>
+  </data>
+  <data name="FolderItemsError" xml:space="preserve">
+    <value>Er is een fout opgetreden bij het ophalen van bestanden in een map.</value>
+  </data>
+  <data name="FilterValueSample" xml:space="preserve">
+    <value>AN,PR|GL|HP</value>
+    <comment></comment>
+  </data>
+  <data name="FilterValueDescription" xml:space="preserve">
+    <value>Splits met komma voor 'of' en splits met pipe voor volgende functie.</value>
+    <comment></comment>
+  </data>
+  <data name="FilterValueCaption" xml:space="preserve">
+    <value>EN Filterwaarden</value>
+    <comment></comment>
+  </data>
+  <data name="FilterPropertiesSample" xml:space="preserve">
+    <value>product/name,objecttype,propertysetname</value>
+    <comment></comment>
+  </data>
+  <data name="FilterPropertiesDescription" xml:space="preserve">
+    <value>Dit zijn de eigenschappen die worden gebruikt om te filteren.</value>
+    <comment></comment>
+  </data>
+  <data name="FilterPropertiesCaption" xml:space="preserve">
+    <value>EN Filter eigenschappen</value>
+    <comment></comment>
+  </data>
+  <data name="FilterOptions" xml:space="preserve">
+    <value>Filteropties</value>
+    <comment></comment>
+  </data>
+  <data name="FilterFunctionsSample" xml:space="preserve">
+    <value>startswith,endswith,contains,equals</value>
+    <comment></comment>
+  </data>
+  <data name="FilterFunctionsDescription" xml:space="preserve">
+    <value>Functies om te filteren; stem het aantal filters af op het aantal groepen.</value>
+    <comment></comment>
+  </data>
+  <data name="FilterFunctionsCaption" xml:space="preserve">
+    <value>Definieer: Filterfuncties</value>
+    <comment></comment>
+  </data>
+  <data name="FilterFreeformSample" xml:space="preserve">
+    <value>Tekla_x0020_Common/Class eq Class 1' en Tekla_x0020_Common/Volume ge 1.0</value>
+    <comment></comment>
+  </data>
+  <data name="FilterFreeformDescription" xml:space="preserve">
+    <value>Hier kunt u uw eigen OData-filterexpressie schrijven. "$filter=" wordt automatisch toegevoegd.</value>
+    <comment></comment>
+  </data>
+  <data name="FilterFreeformCaption" xml:space="preserve">
+    <value>OF OData filter</value>
+    <comment></comment>
+  </data>
+  <data name="FileVersionsError" xml:space="preserve">
+    <value>Er is een fout opgetreden bij het ophalen van bestandsversies</value>
+  </data>
+  <data name="FiletypeUnsupportedII" xml:space="preserve">
+    <value> wordt niet ondersteuend. Deze connector is ontworpen voor IFC/IFCZIP en TRB bestanden.</value>
+  </data>
+  <data name="FiletypeUnsupportedI" xml:space="preserve">
+    <value>Het bestands format .</value>
+    <comment>.</comment>
+  </data>
+  <data name="FieldsSample" xml:space="preserve">
+    <value>boundingBox,type</value>
+    <comment></comment>
+  </data>
+  <data name="FieldsDescription" xml:space="preserve">
+    <value>Aanvullende propertysets om op te halen uit Trimble Connect data.</value>
+    <comment></comment>
+  </data>
+  <data name="FieldsCaption" xml:space="preserve">
+    <value>Velden uit IFC</value>
+    <comment></comment>
+  </data>
+  <data name="FieldsAllowedValues" xml:space="preserve">
+    <value>boundingBox,hierarchyInfo,layerIds,product,type,psets,psets.name</value>
+    <comment></comment>
+  </data>
+  <data name="ErrorFetchingPropertySetData" xml:space="preserve">
+    <value>Er is een fout opgetreden bij het ophalen van eigenschappen uit Trimble</value>
+  </data>
+  <data name="ConnectorLongDescription" xml:space="preserve">
+    <value>Deze connector maakt het mogelijk om data op te halen uit Trimble Connect. IFC embedded propertysets worden standaard geladen, optioneel zijn type, product, boundingBox, hierarchyInfo en layerIds. Alle eigenschappen die in Trimble worden toegevoegd, worden opgehaald indien aanwezig. U kunt uw resultaten ook filteren via de ODATA-filter van de Model API.</value>
+    <comment></comment>
+  </data>
+  <data name="ConnectorDescription" xml:space="preserve">
+    <value>Laadt standaard entiteitseigenschappen op van Trimble Connect, optioneel zijn type, product, boundingBox, hierarchyInfo en layerIds. Alle eigenschappen die in Trimble worden toegevoegd, worden opgehaald indien aanwezig. U kunt uw resultaten ook filteren via de ODATA-filter van de Model API.</value>
+    <comment></comment>
+  </data>
+  <data name="CompanyOptions" xml:space="preserve">
+    <value>Bedrijfsopties</value>
+    <comment></comment>
+  </data>
+  <data name="CompanyFolderOverrideDescription" xml:space="preserve">
+    <value>Standaard zal de connector op het eerste niveau in een project enkel de bedrijfsmap ophalen</value>
+  </data>
+  <data name="CompanyFolderOverrideCaption" xml:space="preserve">
+    <value>Negeer de bedrijfsmap modus</value>
+  </data>
+  <data name="ButtonTitle" xml:space="preserve">
+    <value>Trimble Connect PropertySets</value>
+  </data>
+  <data name="ButtonHelp" xml:space="preserve">
+    <value>Verbinden met Trimble Connect Propertysets</value>
+    <comment></comment>
+  </data>
+</root>

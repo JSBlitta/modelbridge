@@ -1,0 +1,36 @@
+// let
+//     GetProjects = (endpoints as record) as table =>
+//         let
+//             baseUrl = endpoints[Topic],
+//             url = baseUrl & "/bcf/3.0/projects/",
+//             response = Web.Contents(url),
+//             jsonData = Json.Document(response),
+//             tableData = Table.FromRecords(jsonData)
+//         in
+//             tableData,
+
+//      GetTopics = (endpoints as record, projectId as text) as table =>
+//         let
+//             baseUrl = endpoints[Topic],
+//             url = baseUrl & "/bcf/3.0/projects/" & projectId & "/topics/",
+//             response = Web.Contents(url),
+//             jsonData = Json.Document(response),
+//             tableData = Table.FromRecords(jsonData)
+//         in
+//             tableData,
+            
+//     GetViewpoints = (endpoints as record, projectId as text, topicId as text) as table =>
+//         let
+//             baseUrl = endpoints[Topic],
+//             url = baseUrl & "/bcf/3.0/projects/" & projectId & "/topics/" & topicId & "/viewpoints",
+//             response = Web.Contents(url),
+//             jsonData = Json.Document(response),
+//             tableData = Table.FromRecords(jsonData)
+//         in
+//             tableData
+// in
+//     [
+//         GetProjects = GetProjects,
+//         GetViewpoints = GetViewpoints,
+//         GetTopics = GetTopics
+//     ]

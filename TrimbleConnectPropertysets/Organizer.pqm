@@ -1,0 +1,155 @@
+let
+FetchPages      = Extension.LoadFunction("Pagination.pqm")[FetchPages],
+
+Helpers       = Extension.LoadFunction("Helpers.pqm"),
+DecodeUrl       = Helpers[DecodeUrl],
+RemoveFrnPrefix = Helpers[RemoveFrnPrefix],
+
+    GetProjectLibraryIds = (endpoints as record, projectId as text) as nullable list =>
+    let
+        
+        url         = endpoints[Organizer] & "/forests/project:" & projectId & ":data/trees/ProjectContext/nodes/PSetLibs",
+        request     = Web.Contents(url, [ManualStatusHandling = {404}]),
+        GetMetadata = Value.Metadata(request),
+        StatusCode  = GetMetadata[Response.Status],
+        Response    = if StatusCode <> 404 then
+    let
+            jsonResponse = Json.Document(request),
+            Libraries    = jsonResponse[links],
+            LibIds       = List.Transform(Libraries, each RemoveFrnPrefix(_))
+        in
+                LibIds
+                else
+                    {}
+        in
+            Response,
+
+TreeFlow = (endpoints as record, projectId as text, trees as table) 
+=>
+let
+nodes = Table.AddColumn(trees, "nodes", each GetProjectNodes(endpoints, projectId, [treeId])), expandNodes = Table.ExpandTableColumn(nodes, "nodes", {"nodeId", "nodeV", "nodeName", "entitiesCount"}, {"nodeId", "nodeV", "nodeName",  "entitiesCount"}),
+links = Table.AddColumn(expandNodes, "links", each List.Transform(GetProjectNodeLinks(endpoints, projectId, [treeId], [nodeId]), each RemoveFrnPrefix(_)), type list )
+in
+links,
+
+GetProjectTrees = (endpoints as record, projectId as text) => 
+    try
+        let        
+            url         = endpoints[Organizer] & "/forests/" & projectId & "/trees",
+            request     = Web.Contents(url, [ManualStatusHandling = {404}]),
+            json        = Json.Document(request),
+            GetMetadata = Value.Metadata(request),
+            StatusCode  = GetMetadata[Response.Status],
+            Response    = 
+                if StatusCode <> 404 then 
+                    let 
+                        itemList = json[items],  
+                        keepFields = List.Transform(itemList, each Record.SelectFields(_, {"forestId", "id", "v", "name"})),
+                        renameFields = List.Transform(keepFields, each Record.RenameFields(_, {{"id", "treeId"}, {"v", "treeV"}, {"name","treeName"}})),
+                        urlDecode = List.Transform(renameFields, each Record.TransformFields(_, {"treeName", DecodeUrl}))
+                     in
+    Table.FromRecords(urlDecode)
+                else 
+                    [rows = {}]
+        in
+            Response
+    otherwise 
+        error Record.Combine({[Message = "Failed in GetProjectTrees", Func = "GetProjectTrees"], Error.Record}),
+
+GetProjectNodes = (endpoints as record, projectId as text, treeId as text) => 
+    try
+        let        
+            url          = endpoints[Organizer] & "/forests/" & projectId & "/trees/" & treeId & "/nodes",
+            request      = FetchPages(url, 250, "&nolinks=true"),
+            listItems    = Table.Column(request, "Column1"),
+            keepFields   = List.Transform(listItems, each Record.SelectFields(_, {"forestId", "treeId", "count",  "id", "v", "name"})),
+            renameFields = List.Transform(keepFields, each Record.RenameFields(_, {{"id", "nodeId"}, {"count", "entitiesCount"}, {"v", "nodeV"}, {"name", "nodeName"}})),
+            urlDecode    = List.Transform(renameFields, each Record.TransformFields(_, {"nodeName", DecodeUrl}))
+                        in
+    Table.FromRecords(urlDecode)
+      
+    otherwise 
+        error Record.Combine({[Message = "Failed in GetProjectNodes", Func = "GetProjectNodes"], Error.Record}),
+
+GetProjectNodeLinks = (endpoints as record, projectId as text, treeId as text, nodeId as text) => 
+    try
+        let        
+            url     = endpoints[Organizer] & "/forests/" & projectId & "/trees/" & treeId & "/nodes/" & nodeId & "/links",
+            request = Web.Contents(url),
+            decode  = Json.Document(request)
+        in
+            decode
+    otherwise 
+        error Record.Combine({[Message = "Failed in GetProjectNodeLinks", Func = "GetProjectNodeLinks"], Error.Record}),
+
+    // Function: Check if discovery tree exists
+    GetDiscoveryTree = (Endpoints as record, projectId as text) =>
+    let
+        forestId = "project:" & projectId & ":data",
+        url = Endpoints[Organizer] & "forests/" & forestId & "/trees/ProjectContext",
+        response = Web.Contents(url, [
+            Headers = [#"Content-Type" = "application/json", #"Accept" = "application/json"]
+        ]),
+        json = Json.Document(response)
+    in
+        json,
+
+    // Function: Create discovery tree
+    CreateDiscoveryTree = (Endpoints as record, projectId as text) =>
+    let
+        forestId = "project:" & projectId & ":data",
+        url = Endpoints[Organizer] & "forests/" & forestId & "/trees",
+        body = Json.FromValue([id = "ProjectContext", type = "context"]),
+        response = Web.Contents(url, [
+            Headers = [#"Content-Type" = "application/json", #"Accept" = "application/json"],
+            Content = body
+        ]),
+        json = Json.Document(response)
+    in
+        json,
+
+    GetPSetLibsNode = (Endpoints as record, projectId as text) =>
+    let
+        forestId = "project:" & projectId & ":data",
+        url = Endpoints[Organizer] & "forests/" & forestId & "/trees/ProjectContext/nodes/PSetLibs",
+        response = Web.Contents(url, [
+            Headers = [#"Content-Type" = "application/json", #"Accept" = "application/json"]
+        ]),
+        json = Json.Document(response)
+    in
+        json,
+
+    // Function: Create PSetLibs node
+    CreatePSetLibsNode = (Endpoints as record, projectId as text) =>
+    let
+        forestId = "project:" & projectId & ":data",
+        url = Endpoints[Organizer] & "forests/" & forestId & "/trees/ProjectContext/nodes/",
+        body = Json.FromValue([id = "PSetLibs"]),
+        response = Web.Contents(url, [
+            Headers = [#"Content-Type" = "application/json", #"Accept" = "application/json"],
+            Content = body
+        ]),
+        json = Json.Document(response)
+    in
+        json,
+
+Discovery = (Endpoints as record, projectId as text) =>
+    let
+        // Check if discovery tree exists
+        discoveryTree = GetDiscoveryTree(Endpoints, projectId),
+        // If not, create it
+        treeExists = discoveryTree <> null and discoveryTree[id] = "ProjectContext",
+        createdTree = if not treeExists then CreateDiscoveryTree(Endpoints, projectId) else discoveryTree,
+        // Get or create PSetLibs node
+        psetLibsNode = GetPSetLibsNode(Endpoints, projectId),
+        psetLibsExists = psetLibsNode <> null and psetLibsNode[id] = "PSetLibs",
+        createdPSetLibsNode = if not psetLibsExists then CreatePSetLibsNode(Endpoints, projectId) else psetLibsNode
+    in
+        [DiscoveryTree = createdTree, PSetLibsNode = createdPSetLibsNode]
+
+in
+    [
+        GetProjectLibraryIds = GetProjectLibraryIds,
+        GetProjectTrees      = GetProjectTrees,
+        TreeFlow             = TreeFlow
+    ]

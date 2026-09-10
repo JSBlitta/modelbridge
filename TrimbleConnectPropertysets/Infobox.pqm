@@ -1,0 +1,172 @@
+let
+// Import GetModelData from Model.pqm
+Model = Expression.Evaluate(Text.FromBinary(Extension.Contents("Model.pqm")), #shared),
+GetModelData = Model[GetModelData],
+
+
+GetInfoItems = (endpoints as record, folderId as text) =>
+    let
+        base_url = endpoints[Core],
+        url = base_url & "folders/" & folderId & "/items",
+        foldersAsJson = Json.Document(Web.Contents(url)),
+        folderTable = Table.FromRecords(
+        List.Transform(foldersAsJson, each Record.SelectFields(_, {"id", "projectId", "name", "type"})))
+    in
+        folderTable,
+
+GetInfoContent = (endpoints as record, folderId as text, fields as nullable text, optional goal as list) as list =>
+    let
+        base_url = endpoints[Core],
+        folderItems = GetInfoItems(endpoints, folderId),
+        goals = if goal = null then {} else goal,
+       
+        selectedFiles = Table.SelectRows(folderItems, each
+            Text.Contains([type], "File", Comparer.OrdinalIgnoreCase)
+            and Text.EndsWith([name], ".ifc", Comparer.OrdinalIgnoreCase)
+            and Text.Contains([name], "info", Comparer.OrdinalIgnoreCase)
+        ),
+
+        fileResults = List.Transform(
+            Table.ToRecords(Table.SelectColumns(selectedFiles, {"id", "projectId", "name", "type"})),
+            each GetModelData(endpoints, _, fields)
+        ),
+
+        subfolderResults = List.Combine(
+            List.Transform(
+                Table.SelectRows(folderItems, each Text.Contains([type], "Folder", Comparer.OrdinalIgnoreCase))[id],
+                each @GetInfoContent(endpoints, _, fields, null)
+            )
+        ),
+
+        combined = List.Combine({fileResults, subfolderResults})
+    in
+        combined
+
+
+    // GetInfoContent = (
+    //     endpoints as record,
+    //     folderId as text,
+    //     goal as table
+    // ) =>
+    //     let
+    //         base_url = endpoints[Core],
+    //         folderItems = GetFolderItems(endpoints, folderId),
+    //         endGoal = if goal = null then {} else goal,
+    //         withDataColumn1 = Table.AddColumn(
+    //             folderItems,
+    //             "Data",
+    //             each
+    //                 if Text.Contains([type], "Folder", Comparer.OrdinalIgnoreCase) then
+    //                     @GetInfoContent(endpoints, [id], goal)
+    //                 else if
+    //                     Text.Contains([type], "File", Comparer.OrdinalIgnoreCase)
+    //                     and (
+    //                         Text.EndsWith([name], ".ifc", Comparer.OrdinalIgnoreCase)
+    //                         and Text.Contains([name], "info", Comparer.OrdinalIgnoreCase)
+    //                     )
+    //                 then
+    //                     GetModelData(endpoints, [id], [projectId], null, null, "")
+    //                 else
+    //                    null,
+    //             type table
+    //         )
+    //     in
+    //     withDataColumn1
+    
+    in
+    [
+GetInfoContent = GetInfoContent
+    ]
+
+
+// RecursiveFolderScan = (endpoints as record, rootFolders as list) as table =>
+//     let
+//         AllResults = List.Combine(
+//             List.Transform(rootFolders, each @RecursiveFolderScanSingle(endpoints, _))
+//         )
+//     in
+//         Table.FromList(AllResults, Splitter.SplitByNothing(),
+//     {"infoboxen"}
+// ),
+
+// RecursiveFolderScan = (endpoints as record, folderId as list) as table =>
+//     let
+//         base_url = endpoints[Core],
+//         AllResults = List.Combine(
+//             List.Transform(folderId, each
+//             let
+//          url = base_url & "folders/" & _ & "/items",
+        
+//         // Pull and convert JSON to table
+//         jsonList = try Json.Document(Web.Contents(url)) otherwise {},
+//         folderTable = 
+//             if List.Count(jsonList) > 0 then
+//                 Table.FromRecords(jsonList)
+//             else
+//                 #table({}, {}), // Empty fallback
+
+//         // Filter files of interest
+//         Files = Table.SelectRows(folderTable, each 
+//             Text.Lower([type]) = "file" and 
+//             Text.EndsWith(Text.Lower([name]), ".ifc") and 
+//             Text.Contains(Text.Lower([name]), "info")
+//         ),
+
+//         // Apply GetModelData to those files
+//         FileDetails = List.Transform(Files[id], each 
+//             GetModelData(endpoints, _, folderTable{0}[projectId])
+//         ),
+
+//         // Find folders and recurse
+//         Folders = Table.SelectRows(folderTable, each Text.Lower([type]) = "folder"),
+//         SubfolderResults = List.Combine(List.Transform(Folders[id], each @RecursiveFolderScan(endpoints, {_})))
+        
+//     in
+//         Table.FromList(List.Combine({FileDetails, SubfolderResults}), Splitter.SplitByNothing(),
+//     {"infoboxen"}
+// )))
+// in
+// AllResults,
+
+// RecursiveFolderScanSingle = (endpoints as record, rootFolder as text) as list =>
+//     let
+//         base_url = endpoints[Core],
+//         url = base_url & "folders/" & rootFolder & "/items",
+//         response = try Json.Document(Web.Contents(url)) otherwise [],
+//         FolderItems = List.Buffer(
+//             try response[items] otherwise {}
+//         ),
+
+//         Files = List.Buffer(
+//             List.Select(FolderItems, each 
+//                 Record.FieldOrDefault(_, "type", "") = "file" and 
+//                 Text.EndsWith(Text.Lower(Record.FieldOrDefault(_, "name", "")), ".ifc") and
+//                 Text.Contains(Text.Lower(Record.FieldOrDefault(_, "name", "")), "info")
+//             )
+//         ),
+
+//         Folders = List.Buffer(
+//             List.Select(FolderItems, each Record.FieldOrDefault(_, "type", "") = "folder")
+//         ),
+
+//         FileDetails = List.Transform(Files, each 
+//             GetModelData(
+//                 endpoints,
+//                 Record.Field(_, "id"),
+//                 Record.Field(_, "projectId")
+//             )
+//         ),
+
+//         SubfolderFiles = List.Combine(
+//             List.Transform(Folders, each 
+//                 @RecursiveFolderScanSingle(endpoints, Record.Field(_, "id"))
+//             )
+//         )
+//     in
+//         List.Combine({FileDetails, SubfolderFiles})
+
+//         in
+//          [
+//             RecursiveFolderScan = RecursiveFolderScan,
+//             RecursiveFolderScanSingle = RecursiveFolderScanSingle
+//          ]

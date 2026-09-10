@@ -1,0 +1,301 @@
+let
+ConnectorSettings = Json.Document(Extension.Contents("Configuration.json"))[connectorSettings],
+CompanyConstants  = Json.Document(Extension.Contents("Configuration.json"))[companyConstants] as record,
+Pagination        = Extension.LoadFunction("Pagination.pqm"),
+FetchPages        = Pagination[FetchPages],
+BatchPages        = Pagination[BatchPages],
+
+Helpers                      = Extension.LoadFunction("Helpers.pqm"),
+MergeEntitiesWithIFCPSetDefs = Helpers[MergeEntitiesWithIFCPSetDefs],
+NormalizeName                = Helpers[NormalizeName],
+GenerateSchema               = Helpers[GenerateSchema],
+SchemaTransformTable         = Helpers[SchemaTransformTable],
+IsNullOrEmpty                = Helpers[IsNullOrEmpty],
+IsNotNullOrEmpty             = Helpers[IsNotNullOrEmpty],
+
+    // Main function to fetch IFC entities and their property sets
+ifcCollection = 
+(endpoints as record, row as record, fields as text, optional filterString as text ) =>
+let
+    // Get model data - handle list output correctly
+    modelData = GetModelData(endpoints, row, fields, filterString),
+    
+    // Get property set definitions
+    ifcDefs = GetIFCPSetDefs(endpoints, row[id], row[versionId]),
+    
+    // Extract schema and definitions list - ensure ifcDefs is a record
+    defsSchema = if ifcDefs is record and Record.HasFields(ifcDefs, "parsedDefs") then
+                    ifcDefs[parsedDefs]
+                 else
+                    {},
+    defsList = if ifcDefs is record and Record.HasFields(ifcDefs, "defsList") then
+                  ifcDefs[defsList]
+               else
+                  {},
+    
+    // Merge entities with property set definitions
+    result = MergeEntitiesWithIFCPSetDefs(modelData, defsList),
+    
+    // Normalize column names
+    normalize = if result is table then
+                   Table.RenameColumns(
+                       result,
+                       List.Transform(
+                           List.Skip(Table.ColumnNames(result), 1),
+                           each {_, NormalizeName(_)}
+                       )
+                   )
+                else
+                   error Extension.LoadString("FailedToMergeEntities"),
+    
+    // Apply schema transformation
+    TypedTable = SchemaTransformTable(
+        normalize,
+        #table({"Name", "Type"}, defsSchema),
+        3,
+        "nl-NL"
+    )
+in
+    TypedTable,
+
+    GetModelData = (
+        endpoints as record,
+        row as record,
+        fields as text,
+        optional filterString as text
+    ) =>
+        let
+            // Cache key for memoization - handle null values properly
+            cacheKey = Text.Combine({
+                row[id],
+                row[projectId],
+                fields,
+                row[versionId],
+                if filterString = null then "null" else filterString
+            }, "|"),
+            
+            // Function to actually fetch the data
+            FetchModelData = () =>
+                let
+                    queryString = fields & "&versionId=" & row[versionId] &
+                                  (if IsNotNullOrEmpty(filterString) then "&" & filterString else ""),
+                    request =
+                        if filterString <> "" then
+                            // Use filter string approach
+                            FetchPages(endpoints[Model]
+                                & "models/"
+                                & row[id]
+                                & "/entities",
+                                1000, queryString)
+                        else
+                            // Use batch approach for better performance
+                            let
+                                // Get identifiers - handle list output correctly
+                                identifiers = GetIdentifiers(endpoints, row[id], row[versionId]),
+                                
+                                // Optimize batch size based on payload size
+                                optimizedChunkSize = 1000,
+                                
+                                // Get batch results with optimized chunk size
+                                batchResult = BatchGet(
+                                    endpoints,
+                                    row[id],
+                                    identifiers,
+                                    row[versionId],
+                                    fields,
+                                    optimizedChunkSize
+                                ),
+                                
+                                // Combine all entities from batch responses
+                                allEntities = List.Buffer(List.Combine(
+                                    List.Transform(batchResult, each _[responses][entities])
+                                )),
+                                
+                                // Convert to table
+                                batchEntities = Table.FromList(allEntities, Splitter.SplitByNothing(), {"Column1"})
+                            in
+                                batchEntities,
+                                
+                    // Process the content
+                    content = Table.Buffer(request),
+                    
+                    // Expand the record column
+                    expand = Table.ExpandRecordColumn(content, "Column1", Record.FieldNames(Table.Column(content, "Column1"){0})),
+                    
+                    // Transform and index entities
+                    indexedEntities = try
+                        List.Buffer(List.Transform(content[Column1], each Record.TransformFields(_, {
+                            "psets", each List.Transform(_, each Record.RenameFields(Record.TransformFields(_, {
+                                "values", (vals) => List.Transform(List.Zip({vals, List.Positions(vals)}), each [
+                                    prop_value = _{0},
+                                    value_index = _{1}
+                                ])}),
+                                {"name", "pset_name"}
+                            ))
+                        })))
+                    otherwise
+                        error Extension.LoadString("ErrorProcessingModelData")
+                in
+                    indexedEntities,
+                    
+            // Use memoization to avoid redundant API calls - fix null issue
+            result = FetchModelData()
+        in
+            result,
+
+GetIFCPSetDefs = 
+(endpoints as record, modelId as text, optional versionId as text) =>
+let
+    url = endpoints[Model] & "models/" & modelId & "/psetdefs",
+    requestRaw = FetchPages(url, 30000, (if versionId <> null then "&versionId=" & versionId else null)),
+    request = List.Buffer(requestRaw[Column1]),
+
+    // Normalize & flatten for conflict detection
+    flatProps = List.Combine(
+        List.Transform(request, (pset) =>
+            let
+                psetName = pset[name],
+                props = pset[props]
+            in
+                List.Transform(props, (prop) => [
+                    pset_name = psetName,
+                    nameNormalized = NormalizeName(prop[name])
+                ])
+        )
+    ),
+
+    grouped = Table.Group(Table.FromRecords(flatProps), {"nameNormalized"}, {
+        {"distinctPsets", each List.Distinct([pset_name]), type list},
+        {"count", each Table.RowCount(_), Int64.Type}
+    }),
+
+    conflictedPropNames = List.Buffer(
+        Table.SelectRows(grouped, each List.Count([distinctPsets]) > 1)[nameNormalized]
+    ),
+
+    indexedDefs = List.Buffer(
+        List.Transform(request, each 
+            let
+                rawPsetName = _[name],
+                psetName = NormalizeName(rawPsetName),
+                indexedProps = List.Transform(List.Zip({_[props], List.Positions(_[props])}), each
+                    let
+                        prop = _{0},
+                        idx = _{1},
+                        nameNorm = NormalizeName(prop[name]),
+                        finalName = if List.Contains(conflictedPropNames, nameNorm, Comparer.OrdinalIgnoreCase)
+                                    then nameNorm & "_" & psetName
+                                    else nameNorm,
+                        renamed = Record.TransformFields(
+                            Record.RenameFields(prop, {
+                                {"name", "prop_name"},
+                                {"type", "prop_type"}
+                            }),
+                            {"prop_name", each finalName}
+                        ),
+                        tagged = Record.AddField(renamed, "def_index", idx)
+                    in
+                        tagged
+                ),
+                outRecord = Record.RemoveFields(_, {"props"}),
+                final = Record.AddField(Record.AddField(outRecord, "pset_name", rawPsetName), "props", indexedProps)
+            in
+                final
+        )
+    ),
+
+    // Expand all into one big schema table
+    ifcPsetDefs = Table.Buffer(
+        Table.ExpandTableColumn(
+            Table.FromRecords(
+                List.Transform(indexedDefs, each [
+                    idx = [idx],
+                    pset_table = Table.FromRecords(
+                        List.Transform([props], each [
+                            prop_name = NormalizeName(_[prop_name]),
+                            prop_type = _[prop_type]
+                        ])
+                    )
+                ])
+            ),
+            "pset_table", {"prop_name", "prop_type"}, {"prop_name", "prop_type"}
+        )
+    ),
+
+    parsedDefs = List.Buffer(GenerateSchema(ifcPsetDefs))
+
+in
+    [
+        defsList = indexedDefs,
+        parsedDefs = parsedDefs
+    ],
+
+    GetIdentifiers = (endpoints as record, modelId as text, optional versionId as text) =>
+        let
+            url = endpoints[Model]
+                & "models/"
+                & modelId
+                & "/entities/",                
+            fieldId = "&fields=id" & (if versionId <> null then "&versionId=" & versionId else ""),
+            response = FetchPages(url, 100000, fieldId),           
+idList = Table.Column(response, "Column1")
+            in
+        idList,
+        
+
+    BatchGet = (
+    endpoints as record,
+    modelId as text,
+    entities as list,
+    optional versionId as text,
+    optional fields as text,
+    optional chunkSize as number
+) =>
+    let
+        // Build URL with all parameters
+        url = endpoints[Model]
+            & "models/"
+            & modelId
+            & "/batch-get?"
+            & fields
+            & (if versionId <> null then "&versionId=" & versionId else ""),
+            
+        // Use provided chunk size or default to 1000
+        actualChunkSize = if chunkSize = null then 1000 else chunkSize,
+        
+        // Split entities into chunks for batch processing
+        chunks = List.Buffer(List.Generate(
+            () => [start = 0],
+            each [start] < List.Count(entities),
+            each [start = [start] + actualChunkSize],
+            each List.FirstN(List.Skip(entities, [start]), actualChunkSize)
+        )),
+        
+        // Process each chunk with parallel hint for better performance
+        responses = List.Buffer(List.Transform(
+            chunks,
+            each
+                let
+                    headers = [
+                        #"Content-Type" = "application/json",
+                        #"Accept" = "application/json"
+                    ],
+                    body = [entities = _],
+                    jsonBody = Json.FromValue(body),
+                    response = try
+                        BatchPages(url, headers, jsonBody, 3) // 3 retries max
+                    otherwise
+                        error Extension.LoadString("BatchGetError")
+                in
+                    response
+        ) meta [List.TransformMany.ParallelHint = true])
+    in
+        responses
+in
+    [
+        GetModelData = GetModelData,
+        GetIFCPSetDefs = GetIFCPSetDefs,
+        GetIdentifiers = GetIdentifiers,
+        BatchGet = BatchGet,
+        ifcCollection = ifcCollection
+    ]
