@@ -10,7 +10,7 @@
     "start": "tsx src/index.ts",
     "reporting": "tsx src/reporting-cli.ts",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/**/*.test.ts"
+    "test": "tsx --test \"src/**/*.test.ts\""
   },
   "dependencies": {
     "@hono/node-server": "^1.13.0",

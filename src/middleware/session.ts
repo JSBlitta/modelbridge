@@ -13,6 +13,7 @@ import type { Context, MiddlewareHandler } from "hono";
 import { getCookie } from "hono/cookie";
 import * as db from "../db.js";
 import { isAdmin } from "../settings.js";
+import { env } from "../env.js";
 
 export const SESSION_COOKIE = "session_id";
 
@@ -64,7 +65,7 @@ export const requireAdmin: MiddlewareHandler = async (c, next) => {
 // authoritative signal. COOKIE_SECURE=true forces it on for deployments where
 // the header is stripped.
 export function isSecureRequest(c: Context): boolean {
-  if ((process.env.COOKIE_SECURE ?? "").toLowerCase() === "true") return true;
+  if (env.COOKIE_SECURE) return true;
   const proto = c.req.header("x-forwarded-proto");
   if (proto) return proto.split(",")[0].trim().toLowerCase() === "https";
   return new URL(c.req.url).protocol === "https:";

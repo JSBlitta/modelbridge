@@ -13,10 +13,17 @@ if errorlevel 1 (
     echo ERROR: Node.js not found. Install from https://nodejs.org
     exit /b 1
 )
-echo [1/5] Node.js: OK
+set NODEMAJOR=0
+for /f "tokens=1 delims=." %%v in ('node -p "process.versions.node"') do set NODEMAJOR=%%v
+if %NODEMAJOR% LSS 20 (
+    echo ERROR: Node 20 or newer is required. Found:
+    node -v
+    exit /b 1
+)
+echo [1/6] Node.js: OK
 
 :: Install backend deps
-echo [2/5] Installing backend dependencies...
+echo [2/6] Installing backend dependencies...
 echo      First run downloads a prebuilt native module (better-sqlite3).
 echo      This can take a few minutes and needs access to registry.npmjs.org and github.com.
 call npm install --no-audit --no-fund
@@ -31,19 +38,30 @@ if errorlevel 1 (
 )
 
 :: Install frontend deps
-echo [3/5] Installing frontend dependencies...
+echo [3/6] Installing frontend dependencies...
 cd frontend
 call npm install --no-audit --no-fund
 if errorlevel 1 ( echo ERROR: frontend npm install failed. & cd .. & exit /b 1 )
 
 :: Build frontend
-echo [4/5] Building frontend...
+echo [4/6] Building frontend...
 call npm run build
 if errorlevel 1 ( echo ERROR: frontend build failed. & cd .. & exit /b 1 )
 cd ..
+if not exist frontend-dist\index.html (
+    echo ERROR: build reported success but frontend-dist\index.html is missing.
+    echo        The server serves that folder, so the app would load blank.
+    exit /b 1
+)
+
+echo [5/6] Typecheck ^& tests...
+call npx tsc --noEmit
+if errorlevel 1 ( echo ERROR: typecheck failed. & exit /b 1 )
+call npm test
+if errorlevel 1 ( echo ERROR: tests failed. & exit /b 1 )
 
 :: Check .env exists
-echo [5/5] Checking .env...
+echo [6/6] Checking .env...
 if not exist .env (
     echo.
     echo NOTICE: .env not found - copying .env.example to .env
@@ -53,9 +71,15 @@ if not exist .env (
     echo   PRODUUZIT_REFRESH_TOKEN  -or-  PRODUUZIT_ADMIN_USERNAME + PRODUUZIT_ADMIN_PASSWORD
     echo   TRIMBLE_CLIENT_ID
     echo   TRIMBLE_CLIENT_SECRET
+    echo   ADMIN_USERNAMES          who may open the admin page - leave it empty
+    echo                            and nobody can, including you
     echo   REPORTING_REFRESH_TOKEN  (optional - only for the reporting scheduler)
     echo.
     echo   Reporting scheduler also needs:  data\produuzit_api_frequentie.csv
+    echo.
+    echo   Every /api route now requires a login. Users sign in with their own
+    echo   Produuzit account; the app itself talks to Produuzit with the single
+    echo   service token above.
     echo.
     echo Then run:  node_modules\.bin\tsx src\index.ts
 ) else (
@@ -64,6 +88,8 @@ if not exist .env (
     echo ============================================
     echo  Setup complete. Start the app with:
     echo    npm start
+    echo  Re-run checks any time with:
+    echo    tests.bat
     echo  Or install as a service:
     echo    See HOSTING.md
     echo ============================================
