@@ -365,6 +365,7 @@ export default {
     skippedNoBatch: 'skipped (no batch)',
   },
   trimble: {
+    psetsNotMatched: 'Trimble properties not matched',
     confirmChecked: 'I confirm \u2014 I have reviewed this check and it is correct',
     title: 'Trimble Connect',
     subtitle: 'Browse IFC models, pick properties, map to Produuzit, and push with explicit approval.',

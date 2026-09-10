@@ -30,6 +30,7 @@ import {
 } from "../lib/production-counts.js";
 import { logger } from "../logger.js";
 import { GATE, issuePreviewToken, requirePreviewToken } from "../lib/push-gate.js";
+import { applyTrimblePropertySets, getProjectLibraryIds, getPsetDefinitions } from "../trimble-propertysets.js";
 
 const app = new Hono();
 
@@ -206,7 +207,31 @@ app.get("/models/:modelId/psetdefs", async (c) => {
   const result = items.map((item) => ({
     name: item.name ?? "",
     properties: item.props ?? item.properties ?? [],
+    source: "ifc" as const,
   }));
+
+  // Property sets defined inside Trimble never reach the IFC, so they are
+  // absent from the list above. Append them in the same shape — the picker,
+  // the auto-mapper and extractProp then treat them identically.
+  const trimbleProjectId = c.req.query("trimble_project_id");
+  if (trimbleProjectId) {
+    try {
+      const libIds = await getProjectLibraryIds(trimbleProjectId);
+      const defs = await getPsetDefinitions(libIds);
+      const byPset = new Map<string, string[]>();
+      for (const d of defs) {
+        if (!byPset.has(d.psetName)) byPset.set(d.psetName, []);
+        byPset.get(d.psetName)!.push(d.propName);
+      }
+      for (const [name, properties] of byPset) {
+        result.push({ name, properties, source: "trimble" as unknown as "ifc" });
+      }
+    } catch (e) {
+      // Never let this break the IFC path — the model's own psets still load.
+      logger.warn(`[trimble] could not load Trimble-defined psetdefs: ${String(e)}`);
+    }
+  }
+
   return c.json({ psetdefs: result, total: result.length });
 });
 
@@ -291,6 +316,8 @@ app.post("/models/:modelId/entities", async (c) => {
     unique_key_prop?: string;
     include_assemblies?: boolean;
     column_mapping?: ColumnMapping;
+    /** Trimble project id — required to reach Trimble-defined property sets. */
+    trimble_project_id?: string;
   }>();
 
   if (!body.versionId) return c.json({ error: "Missing versionId" }, 400);
@@ -353,7 +380,23 @@ app.post("/models/:modelId/entities", async (c) => {
     entities = deduped;
   }
 
-  return c.json({ entities, total: entities.length });
+  // Fold in property sets defined inside Trimble. They land in the same
+  // `psets` object transformEntityPsets just produced, so from here on nothing
+  // downstream can tell a Trimble-defined property from an IFC-native one.
+  let psetDiagnostics = null;
+  if (body.trimble_project_id) {
+    try {
+      const merged = await applyTrimblePropertySets(body.trimble_project_id, entities);
+      entities = merged.entities;
+      psetDiagnostics = merged.diagnostics;
+    } catch (e) {
+      // The IFC data is still valid without them; surface it, do not fail.
+      logger.warn(`[trimble] Trimble property sets unavailable: ${String(e)}`);
+      psetDiagnostics = { notes: [`Trimble property sets could not be loaded: ${String(e)}`] };
+    }
+  }
+
+  return c.json({ entities, total: entities.length, pset_diagnostics: psetDiagnostics });
 });
 
 // --- Trimble → Produuzit import (preview + execute) ---

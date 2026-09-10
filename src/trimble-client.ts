@@ -73,6 +73,10 @@ const REGION_ENDPOINTS = {
   Core: "https://app21.connect.trimble.com/tc/api/2.0/",
   Model: "https://model-api21.connect.trimble.com/",
   Organizer: "https://org-api.eu-west-1.connect.trimble.com/v1/",
+  // Trimble-defined property sets (see src/trimble-propertysets.ts). Same
+  // europe region as the rest; the OAuth scope we already request
+  // ("openid Datatable_extractor") covers it, so no re-consent is needed.
+  Propertyset: "https://pset-api.eu-west-1.connect.trimble.com/v1/",
 };
 
 export function getRegionEndpoints() {

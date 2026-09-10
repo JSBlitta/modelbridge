@@ -365,6 +365,7 @@ export default {
     skippedNoBatch: 'overgeslagen (geen batch)',
   },
   trimble: {
+    psetsNotMatched: 'Trimble-eigenschappen niet gekoppeld',
     confirmChecked: 'Ik bevestig \u2014 ik heb deze controle bekeken en die is correct',
     title: 'Trimble Connect',
     subtitle: 'Blader door IFC-modellen, kies eigenschappen, koppel aan Produuzit en push met expliciete goedkeuring.',

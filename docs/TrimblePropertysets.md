@@ -138,22 +138,46 @@ the entity id, before the result is returned — then `extractProp`, the column
 mapper, and every import path downstream work unchanged, with no notion that a
 property came from anywhere unusual.
 
-## Open questions to settle against the live API
+## The FRN handling, and why it is not a straight port
 
-These are inferred from the M source, not observed, and want a real call before
-being trusted:
+An FRN is URN-shaped and its resource tail is percent-encoded. The connector
+handles this in exactly one place — `RemoveFrnPrefix` (`Helpers.pqm:220`):
+split on `:`, drop two segments, rejoin with `:`. **It never decodes.**
+`DecodeUrl` exists in the same file but is applied only to `treeName` and
+`nodeName` (`Organizer.pqm:49,67`); it never touches a link. So a link carrying
+any encoded character keeps it, and the join compares `%3A` against a raw id.
 
-1. **The exact `frn:` shape of `link`.** `RemoveFrnPrefix` drops exactly two
-   segments, so `frn:a:b:c` → `b:c`, not `c`. If the real value is
-   `frn:tc:model:<modelId>:<entityId>` the stripped result is
-   `model:<modelId>:<entityId>`, which would *not* equal the model entity id and
-   the connector's join would silently produce all-nulls. Either the real prefix
-   is two segments, or this connector has a latent bug. Must be checked.
-2. **Trailing slashes.** `RegionStatic` bases end in `/`, and `Organizer.pqm:11`
+That leaves two things genuinely unresolved from source alone:
+
+- **Arity.** `RemoveFrnPrefix` rejoins the tail with colons, implying its author
+  expected a multi-segment tail. Yet `Organizer.pqm:19` feeds a stripped library
+  link straight into `/libs/{libId}/defs`, a URL that evidently works — which
+  only holds if *that* tail is a bare id. Library and entity FRNs may simply
+  differ in arity.
+- **Encoding.** Whether entity ids in practice contain characters that get
+  percent-encoded. IFC GlobalIds (base64: `0-9A-Za-z_$`) would not; other
+  Trimble id forms might.
+
+Rather than pick a reading, `src/trimble-frn.ts` parses an FRN into every
+plausible key — the bare trailing segment, the full decoded tail, and the
+undecoded forms — and the merge tries them in order. Both readings are covered
+by tests, and `safeDecode` is applied throughout.
+
+**The important part is the diagnostic.** A wrong guess here does not fail; as a
+left outer join it looks exactly like "this project has no Trimble properties".
+So `mergeTrimblePsets` counts matches and, when values exist but nothing matched,
+returns a note plus sample keys from both sides. That surfaces in the UI as a
+warning toast instead of a column of nulls.
+
+## Open questions still to settle against the live API
+
+1. **Trailing slashes.** `RegionStatic` bases end in `/`, and `Organizer.pqm:11`
    concatenates `"/forests/…"` producing `//forests/`, while `:89` concatenates
-   `"forests/"` without. Inconsistent in the same file; harmless if the gateway
-   collapses double slashes, a 404 if not.
-3. **Whether the pset API honours `top`/`offset` or only `next`.**
-4. **Whether one entity can carry the same `defId` twice** (repeatable property
-   sets). The connector assumes one row per entity per def and would silently
-   drop the rest on the join.
+   `"forests/"` without. Inconsistent in the same file. Our `joinUrl` normalises
+   to a single slash either way.
+2. **Whether the pset API honours `top`/`offset` or only `next`.** We reuse
+   `fetchAllTrimblePages`, which sends `top`/`offset` and stops on a short page.
+3. **Whether one entity can carry the same `defId` twice** (repeatable property
+   sets). The connector assumes one row per entity per def; our merge accumulates
+   instead, so a second row adds properties rather than being dropped — but if
+   the same property appears twice, last write wins.

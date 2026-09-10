@@ -728,6 +728,9 @@ async function loadPsetDefs() {
   try {
     const params = {}
     if (selectedFileVersionId.value) params.versionId = selectedFileVersionId.value
+    // Lets the backend also return property sets defined inside Trimble, which
+    // never reach the IFC and so are absent from the model's own psetdefs.
+    if (selectedProject.value) params.trimble_project_id = selectedProject.value
     const r = await api.get(`/api/trimble/models/${selectedFile.value}/psetdefs`, { params })
     const data = r.data
     let raw = []
@@ -853,10 +856,15 @@ async function fetchEntities() {
   fetchingEntities.value = true; _rawEntities.value = []; totalEntities.value = 0; selectedEntityIndices.value = new Set()
   try {
     // Always fetch with assemblies — client-side toggle filters instantly
-    const body = { versionId: selectedFileVersionId.value || selectedFile.value, fields: allSelectedProps.value, unique_only: uniqueOnly.value, unique_key_prop: uniqueKeyProp.value || undefined, include_assemblies: true, column_mapping: columnMapping.value }
+    const body = { versionId: selectedFileVersionId.value || selectedFile.value, fields: allSelectedProps.value, unique_only: uniqueOnly.value, unique_key_prop: uniqueKeyProp.value || undefined, include_assemblies: true, column_mapping: columnMapping.value, trimble_project_id: selectedProject.value }
     const r = await api.post(`/api/trimble/models/${selectedFile.value}/entities`, body)
     _rawEntities.value = r.data.entities || []
     totalEntities.value = r.data.total || _rawEntities.value.length
+    // Surface a property-set mismatch instead of letting the columns be
+    // silently empty (see docs/TrimblePropertysets.md).
+    for (const note of r.data.pset_diagnostics?.notes ?? []) {
+      notify({ severity: 'warn', summary: t('trimble.psetsNotMatched'), detail: note, life: 12000 })
+    }
     if (previewEntities.value.length) console.log('[trimble] sample entity structure:', JSON.stringify(previewEntities.value[0], null, 2))
   } finally { fetchingEntities.value = false }
 }
