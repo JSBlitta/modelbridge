@@ -1,7 +1,7 @@
 # Reporting Scheduler
 
 TypeScript replacement for the **ProduuzitAPI 1.0.0.6** Power Automate solution
-(export kept for reference in `ProduuzitAPI_1_0_0_6/`). It performs the same
+(export kept for reference in `_attic/power-automate/ProduuzitAPI_1_0_0_6/`). It performs the same
 job: once a day it GETs a configured list of Produuzit endpoints and writes the
 JSON responses to a folder structure.
 

@@ -17,3 +17,7 @@ data/reporting/
 data/reporting_tokens.json
 data/reporting_last_run.json
 constructibles*.json
+
+# Reference material and leftovers kept on disk but out of the repo.
+# See _attic/README.md for what is in here and why.
+_attic/
