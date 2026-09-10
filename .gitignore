@@ -2,6 +2,9 @@ node_modules/
 dist/
 .env
 *.db
+# SQLite sidecars — these were tracked, so a local WAL kept landing in commits
+*.db-wal
+*.db-shm
 logs/
 frontend-dist/
 /old**/
