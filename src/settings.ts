@@ -24,6 +24,9 @@ export interface AppSettings {
 // key -> env-seeded default. Values stored in DB override these once saved.
 const SETTING_DEFAULTS: Record<string, unknown> = {
   admin_usernames: env.ADMIN_USERNAMES.split(",").map((s) => s.trim()).filter(Boolean),
+  // Written back whenever Produuzit rotates the service refresh token, so the
+  // rotation survives a restart instead of falling back to the stale .env value.
+  produuzit_refresh_token: env.PRODUUZIT_REFRESH_TOKEN,
   reporting_enabled: env.REPORTING_ENABLED,
   reporting_refresh_token: env.REPORTING_REFRESH_TOKEN,
   reporting_base_url: env.REPORTING_BASE_URL,
@@ -61,6 +64,8 @@ export function saveSettings(partial: Record<string, unknown>): void {
   const toStore: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(partial)) {
     if (!known.has(k)) continue; // ignore unknown keys
+    // The admin page is shown a redacted secret; echoing it back means "unchanged".
+    if (SECRET_SETTINGS.has(k) && isRedactedValue(v)) continue;
     toStore[k] = v;
   }
   db.setSettings(toStore);
@@ -79,6 +84,41 @@ export function getReportingSettings(): ReportingSettings {
     maxPages: Number(s.reporting_max_pages ?? 60),
     outputDir: String(s.reporting_output_dir ?? "data/reporting"),
   };
+}
+
+// Setting keys whose value is a credential. These are stored and used, but never
+// returned to a client — not even an admin one.
+const SECRET_SETTINGS = new Set(["reporting_refresh_token", "produuzit_refresh_token"]);
+
+// A client-safe view: secrets collapse to a boolean "is it configured" plus a
+// short suffix for eyeball confirmation, never the value.
+export function getRedactedSettings(): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(getSettings())) {
+    if (!SECRET_SETTINGS.has(k)) {
+      out[k] = v;
+      continue;
+    }
+    const str = String(v ?? "");
+    out[k] = str ? `configured (***${str.slice(-4)})` : "";
+    out[`${k}_configured`] = Boolean(str);
+  }
+  return out;
+}
+
+// Saving a secret as the literal redaction string would wipe it — the admin page
+// round-trips whatever it was shown. Treat those values as "leave unchanged".
+export function isRedactedValue(value: unknown): boolean {
+  return typeof value === "string" && /^configured \(\*\*\*/.test(value);
+}
+
+export function getStoredRefreshToken(): string {
+  return String(getSettings().produuzit_refresh_token ?? "");
+}
+
+export function storeRefreshToken(token: string): void {
+  db.setSettings({ produuzit_refresh_token: token });
+  _cache = null;
 }
 
 export function getAdminUsernames(): string[] {

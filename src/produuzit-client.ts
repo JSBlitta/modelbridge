@@ -1,21 +1,19 @@
 import { env } from "./env.js";
 import { recordEvent } from "./db.js";
 import { logger } from "./logger.js";
+import { getStoredRefreshToken, storeRefreshToken } from "./settings.js";
 
-// Service account token state — shared across all requests, not per-user
-let serviceRefreshToken: string | null = env.PRODUUZIT_REFRESH_TOKEN || null;
+// Service account token state — shared across all requests, not per-user.
+// The refresh token seeds from the DB (a previous rotation) and falls back to
+// the .env value; a rotation is written back so it survives a restart.
+let serviceRefreshToken: string | null = getStoredRefreshToken() || env.PRODUUZIT_REFRESH_TOKEN || null;
 let serviceAccessToken: string | null = null;
-let bootstrapped = false;
+let bootstrapPromise: Promise<void> | null = null; // mutex for concurrent bootstrap
 let refreshPromise: Promise<void> | null = null; // mutex for concurrent refreshes
-
-async function rawFetch(url: string, init: RequestInit): Promise<Response> {
-  const res = await fetch(url, init);
-  return res;
-}
 
 async function obtainAccessToken(refreshToken: string): Promise<string> {
   logger.info("[produuzit] Refreshing access token...");
-  const res = await rawFetch(`${env.PRODUUZIT_BASE_URL}/my_user/token/refresh/`, {
+  const res = await fetch(`${env.PRODUUZIT_BASE_URL}/my_user/token/refresh/`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ refresh: refreshToken }),
@@ -30,6 +28,9 @@ async function obtainAccessToken(refreshToken: string): Promise<string> {
   // Handle refresh token rotation — Produuzit may issue a new refresh token
   if (data.refresh && data.refresh !== refreshToken) {
     serviceRefreshToken = data.refresh;
+    // Persist it. Without this the rotated token lived only in memory and the
+    // next restart went back to the (possibly now-invalid) .env value.
+    storeRefreshToken(data.refresh);
     logger.info("[produuzit] New refresh token received (rotation)");
     recordEvent({ category: "produuzit", level: "info", summary: "Refresh token rotated" });
   }
@@ -49,7 +50,7 @@ async function bootstrapFromAdmin(): Promise<void> {
   logger.info("[produuzit] Bootstrapping service token from admin credentials...");
 
   // 1. Login as admin to get their access token
-  const loginRes = await rawFetch(`${env.PRODUUZIT_BASE_URL}/my_user/token/`, {
+  const loginRes = await fetch(`${env.PRODUUZIT_BASE_URL}/my_user/token/`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username: env.PRODUUZIT_ADMIN_USERNAME, password: env.PRODUUZIT_ADMIN_PASSWORD }),
@@ -62,7 +63,7 @@ async function bootstrapFromAdmin(): Promise<void> {
   // 2. Resolve account ID — use configured ID or list and pick first
   let accountId = env.PRODUUZIT_API_ACCOUNT_ID;
   if (!accountId) {
-    const listRes = await rawFetch(`${env.PRODUUZIT_BASE_URL}/company/api_accounts/`, { headers: adminHeaders });
+    const listRes = await fetch(`${env.PRODUUZIT_BASE_URL}/company/api_accounts/`, { headers: adminHeaders });
     if (!listRes.ok) throw new Error(`Failed to list API accounts: ${listRes.status}`);
     const list = await listRes.json() as { results?: { id: number; username: string }[] };
     const accounts = list.results ?? (Array.isArray(list) ? list as { id: number; username: string }[] : []);
@@ -74,7 +75,7 @@ async function bootstrapFromAdmin(): Promise<void> {
   }
 
   // 3. Get token for the service account
-  const tokenRes = await rawFetch(`${env.PRODUUZIT_BASE_URL}/company/api_accounts/${accountId}/get_token/`, {
+  const tokenRes = await fetch(`${env.PRODUUZIT_BASE_URL}/company/api_accounts/${accountId}/get_token/`, {
     method: "POST",
     headers: adminHeaders,
     body: JSON.stringify({}),
@@ -91,30 +92,39 @@ async function bootstrapFromAdmin(): Promise<void> {
   if (refresh) {
     serviceRefreshToken = refresh;
     serviceAccessToken = access ?? null;
+    // Stored, not printed. This used to log the full refresh token to the
+    // console and (when LOG_FILE was set) to disk.
+    storeRefreshToken(refresh);
     logger.info(
-      `\n[produuzit] ✓ Service token acquired for account ${accountId}.\n` +
-      `Add this to your .env to skip bootstrap on next start:\n` +
-      `PRODUUZIT_REFRESH_TOKEN=${refresh}\n`
+      `[produuzit] Service token acquired for account ${accountId} and stored. ` +
+      `Startup will reuse it; no .env edit needed.`
     );
   } else if (access) {
     // Only got an access token — use it directly (will expire, no refresh)
     serviceAccessToken = access;
     logger.warn(
-      `[produuzit] ⚠ Only got an access token (no refresh). It will expire in ~1h.\n` +
-      `Full response: ${JSON.stringify(tokenData)}\n` +
-      `Check Produuzit docs for how to get a long-lived token.`
+      `[produuzit] Only got an access token (no refresh). It will expire in ~1h. ` +
+      `Response fields: ${Object.keys(tokenData).join(", ")}`
     );
   } else {
-    logger.error(`[produuzit] get_token full response: ${JSON.stringify(tokenData)}`);
-    throw new Error("get_token returned no recognizable token field. See console for full response.");
+    logger.error(`[produuzit] get_token returned fields: ${Object.keys(tokenData).join(", ")}`);
+    throw new Error("get_token returned no recognizable token field.");
   }
 }
 
 async function ensureServiceToken(): Promise<void> {
   if (serviceAccessToken) return;
 
-  if (!bootstrapped) {
-    bootstrapped = true;
+  // Concurrent callers must WAIT for the in-flight bootstrap rather than fall
+  // through. The previous flag-based version set `bootstrapped = true` before
+  // awaiting, so a second request proceeded with a null token and sent
+  // `Authorization: Bearer null`.
+  if (bootstrapPromise) {
+    await bootstrapPromise;
+    return;
+  }
+
+  bootstrapPromise = (async () => {
     try {
       if (serviceRefreshToken) {
         serviceAccessToken = await obtainAccessToken(serviceRefreshToken);
@@ -124,11 +134,12 @@ async function ensureServiceToken(): Promise<void> {
           serviceAccessToken = await obtainAccessToken(serviceRefreshToken);
         }
       }
-    } catch (err) {
-      bootstrapped = false; // reset so the next request can retry
-      throw err;
+    } finally {
+      bootstrapPromise = null; // cleared either way so a failure can be retried
     }
-  }
+  })();
+
+  await bootstrapPromise;
 }
 
 async function refreshService(): Promise<void> {
@@ -157,7 +168,7 @@ function serviceHeaders(): Record<string, string> {
 async function request(
   method: string,
   path: string,
-  opts?: { params?: Record<string, string | number>; json?: unknown; formData?: FormData },
+  opts?: { params?: Record<string, string | number | boolean>; json?: unknown; formData?: FormData },
 ): Promise<unknown> {
   const started = Date.now();
   let failed = false;
@@ -216,7 +227,7 @@ async function request(
   }
 }
 
-export async function apiGet(path: string, params?: Record<string, string | number>): Promise<unknown> {
+export async function apiGet(path: string, params?: Record<string, string | number | boolean>): Promise<unknown> {
   return request("GET", path, { params });
 }
 
@@ -236,29 +247,41 @@ export async function apiPostFormData(path: string, formData: FormData): Promise
   return request("POST", path, { formData });
 }
 
+// Hard ceiling so a server that ignores `offset` cannot spin this forever.
+const MAX_PAGES = 500;
+
 export async function fetchAllPages(
   path: string,
-  params?: Record<string, string | number>,
+  params?: Record<string, string | number | boolean>,
   pageSize = 200,
 ): Promise<unknown[]> {
   const all: unknown[] = [];
   let offset = 0;
-  while (true) {
+  let pages = 0;
+  while (pages < MAX_PAGES) {
+    pages++;
     const res = (await apiGet(path, { ...params, limit: pageSize, offset })) as {
       results?: unknown[];
       next?: string | null;
     };
     const items = res.results ?? [];
     all.push(...items);
-    if (!res.next || items.length < pageSize) break;
+    if (!res.next || items.length < pageSize) return all;
     offset += pageSize;
   }
+  logger.warn(`[produuzit] fetchAllPages hit the ${MAX_PAGES}-page ceiling on ${path}; result is truncated`);
+  recordEvent({
+    category: "produuzit",
+    level: "warn",
+    summary: `Pagination ceiling reached on ${path}`,
+    detail: `Stopped after ${MAX_PAGES} pages (${all.length} records).`,
+  });
   return all;
 }
 
 // Used only by auth route to verify user identity — separate from service token
 export async function loginWithCredentials(username: string, password: string): Promise<{ access: string; refresh: string }> {
-  const res = await rawFetch(`${env.PRODUUZIT_BASE_URL}/my_user/token/`, {
+  const res = await fetch(`${env.PRODUUZIT_BASE_URL}/my_user/token/`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ username, password }),
@@ -271,7 +294,7 @@ export async function loginWithCredentials(username: string, password: string): 
 }
 
 export async function fetchMyUser(accessToken: string): Promise<{ username: string; email: string }> {
-  const res = await rawFetch(`${env.PRODUUZIT_BASE_URL}/my_user/`, {
+  const res = await fetch(`${env.PRODUUZIT_BASE_URL}/my_user/`, {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   if (!res.ok) throw new Error(`Failed to fetch user profile: ${res.status}`);

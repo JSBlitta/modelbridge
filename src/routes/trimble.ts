@@ -21,8 +21,14 @@ import { apiGet, apiPatch, apiPost, fetchAllPages } from "../produuzit-client.js
 import * as db from "../db.js";
 import { findSource, parseCount } from "../lib/mapping.js";
 import type { ColumnMapping } from "../lib/mapping.js";
-import { getProductionCounts, upsertProductionCounts } from "../lib/production-counts.js";
+import {
+  ConcurrentModificationError,
+  getProductionCounts,
+  getProductionCountsSignature,
+  upsertProductionCounts,
+} from "../lib/production-counts.js";
 import { logger } from "../logger.js";
+import { GATE, issuePreviewToken, requirePreviewToken } from "../lib/push-gate.js";
 
 const app = new Hono();
 
@@ -333,9 +339,13 @@ app.post("/models/:modelId/entities", async (c) => {
     const keyProp = body.unique_key_prop?.trim() || "";
     const seen = new Set<string>();
     const deduped: Record<string, unknown>[] = [];
-    for (const entity of entities) {
+    for (let i = 0; i < entities.length; i++) {
+      const entity = entities[i];
       const kv = keyProp ? extractProp(entity, keyProp) : "";
-      const key = kv || String(entity.id ?? Math.random());
+      // No key prop and no id means we cannot tell two entities apart. Fall back
+      // to positional identity so the result is at least deterministic —
+      // Math.random() here silently made unique_only a no-op.
+      const key = kv || (entity.id != null ? String(entity.id) : `#${i}`);
       if (!seen.has(key)) { seen.add(key); deduped.push(entity); }
     }
     entities = deduped;
@@ -519,6 +529,7 @@ app.post("/preview-import", async (c) => {
     unresolved_batches: [...unresolvedBatches].sort(),
     unresolved_designs: [...unresolvedDesigns].sort(),
     unresolved_phases: [...unresolvedPhases].sort(),
+    preview_token: issuePreviewToken(GATE.trimbleImport, trimbleGateInput(body)),
   });
 });
 
@@ -529,10 +540,19 @@ app.post("/import", async (c) => {
     column_mapping: ColumnMapping;
     entities: Record<string, unknown>[];
     unique_only?: boolean;
+    preview_token?: string;
   }>();
 
   if (!body.project_uuid) return c.json({ error: "Missing project_uuid" }, 400);
   if (!body.entities?.length) return c.json({ error: "Missing entities" }, 400);
+
+  // Nothing reaches Produuzit without a matching, unexpired, unused check.
+  const blocked = requirePreviewToken(c, GATE.trimbleImport, body.preview_token, trimbleGateInput(body));
+  if (blocked) return blocked;
+
+  // Snapshot the project's counts before doing any work; the write below is
+  // conditional on them being unchanged.
+  const countsSignature = await getProductionCountsSignature(body.project_uuid);
 
   const designsMap = await loadDesigns(body.project_uuid);
   const batches = await loadBatches(body.project_uuid);
@@ -637,12 +657,15 @@ app.post("/import", async (c) => {
 
   if (countMap.size) {
     try {
-      await upsertProductionCounts(body.project_uuid, [...countMap.values()]);
+      await upsertProductionCounts(body.project_uuid, [...countMap.values()], countsSignature);
       for (const e of countMap.values()) {
         const bn = (batchById.get(e.batch)?.name as string) ?? e.batch;
         results.push({ design_name: e.design_name, batch: bn, phase: e.phase, design: e.design, status: "created", count: e.count });
       }
     } catch (e) {
+      if (e instanceof ConcurrentModificationError) {
+        return c.json({ error: e.message, code: "CONCURRENT_MODIFICATION" }, 409);
+      }
       results.push({ status: "error", reason: `Failed to write production counts: ${String(e)}` });
     }
   }
@@ -751,7 +774,23 @@ app.post("/create-missing-phases", async (c) => {
 
 // --- Helpers ---
 
-function extractProp(entity: Record<string, unknown>, propPath: string): string {
+// The exact inputs that determine what an import writes. Preview and import must
+// build this identically or the fingerprints will not match.
+export function trimbleGateInput(body: {
+  project_uuid: string;
+  column_mapping: ColumnMapping;
+  entities: Record<string, unknown>[];
+  unique_only?: boolean;
+}) {
+  return {
+    project_uuid: body.project_uuid,
+    column_mapping: body.column_mapping,
+    entities: body.entities,
+    unique_only: Boolean(body.unique_only),
+  };
+}
+
+export function extractProp(entity: Record<string, unknown>, propPath: string): string {
   if (!propPath) return "";
   const parts = propPath.split(".");
   let val: unknown = entity;
@@ -800,7 +839,7 @@ function resolveProp(columnMapping: ColumnMapping, target: string): string {
 
 // Normalize only the 4th character: swap dash/underscore at position 3 (0-indexed).
 // This allows A20-EL020 to match A20_EL020, but only at position 3.
-function normalizeDesignName(name: string): string {
+export function normalizeDesignName(name: string): string {
   if (name.length < 4) return name;
   const chars = name.split('');
   if (chars[3] === '-') { chars[3] = '_'; return chars.join(''); }
@@ -839,7 +878,7 @@ async function loadProjectPhases(projectUuid: string): Promise<string[]> {
   return (Array.isArray(project.phases) ? project.phases : []).map((p) => String(p));
 }
 
-function matchBatchByNumber(batches: Record<string, unknown>[], batchRaw: string, phase = ""): Record<string, unknown> | null {
+export function matchBatchByNumber(batches: Record<string, unknown>[], batchRaw: string, phase = ""): Record<string, unknown> | null {
   // Strict exact match on batch name. When a phase is supplied, the match is
   // also scoped to that phase, tying the batch number definitively to the phase
   // it belongs to. Without a phase, name-only matching is preserved.
@@ -871,8 +910,12 @@ async function walkFolders(
   folderId: string,
   parentPath: string,
   depth = 0,
+  visited: Set<string> = new Set(),
 ): Promise<Record<string, unknown>[]> {
   if (depth > 20) return [];
+  // A depth cap alone does not stop a cycle in the folder graph fanning out.
+  if (visited.has(folderId)) return [];
+  visited.add(folderId);
   const items: Record<string, unknown>[] = [];
   let contents: unknown;
   try {
@@ -891,7 +934,7 @@ async function walkFolders(
     if (itemType === "folder") {
       const subId = (item.id as string) ?? "";
       if (subId && subId !== folderId) {
-        items.push(...(await walkFolders(endpoints, subId, currentPath, depth + 1)));
+        items.push(...(await walkFolders(endpoints, subId, currentPath, depth + 1, visited)));
       }
     } else if (itemType === "file" && isIfcFile(name)) {
       item._parent = parentPath;

@@ -3,9 +3,12 @@ import { env } from "../env.js";
 
 const app = new Hono();
 
+// The only unauthenticated endpoint in the app. Deliberately says nothing else.
 app.get("/", (c) => c.json({ status: "ok" }));
 
-// Config check — masks secrets, confirms what URLs the backend is actually using
+// Config check. Session-gated by the app-wide middleware (only the exact path
+// "/api/health" is public), because even the masked form names the bootstrap
+// admin account and the upstream URLs.
 app.get("/config", async (c) => {
   const produuzitReachable = await fetch(`${env.PRODUUZIT_BASE_URL}/my_user/`, {
     signal: AbortSignal.timeout(4000),
@@ -18,11 +21,11 @@ app.get("/config", async (c) => {
     produuzit_reachable: produuzitReachable,
     service_token:
       env.PRODUUZIT_REFRESH_TOKEN
-        ? `configured (***${env.PRODUUZIT_REFRESH_TOKEN.slice(-6)})`
+        ? "configured"
         : env.PRODUUZIT_ADMIN_USERNAME
-        ? `bootstrap mode (admin: ${env.PRODUUZIT_ADMIN_USERNAME})`
+        ? "bootstrap mode"
         : "NOT CONFIGURED",
-    trimble_client_id: env.TRIMBLE_CLIENT_ID ? `configured (***${env.TRIMBLE_CLIENT_ID.slice(-4)})` : "not configured",
+    trimble_client_id: env.TRIMBLE_CLIENT_ID ? "configured" : "not configured",
     port: env.PORT,
   });
 });

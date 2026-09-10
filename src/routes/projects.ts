@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { apiGet, apiPost, apiPatch, fetchAllPages } from "../produuzit-client.js";
 import { getConfig } from "../config.js";
-import { logger } from "../logger.js";
+import { boundedInt, isUuid } from "../lib/validate.js";
 
 const app = new Hono();
 
@@ -25,9 +25,10 @@ function buildFullName(p: ProjectDef): string {
 app.get("/", async (c) => {
   const name = c.req.query("name");
   const projectNumber = c.req.query("project_number");
-  const limit = c.req.query("limit") ?? "50";
-  const offset = c.req.query("offset") ?? "0";
-  const params: Record<string, string | number> = { limit: parseInt(limit), offset: parseInt(offset) };
+  const params: Record<string, string | number> = {
+    limit: boundedInt(c.req.query("limit"), 50, 1, 1000),
+    offset: boundedInt(c.req.query("offset"), 0, 0, Number.MAX_SAFE_INTEGER),
+  };
   if (name) params.name = name;
   if (projectNumber) params.project_number = projectNumber;
 
@@ -40,11 +41,13 @@ app.get("/", async (c) => {
 
 app.get("/:uuid", async (c) => {
   const uuid = c.req.param("uuid");
+  if (!isUuid(uuid)) return c.json({ error: "Invalid project uuid" }, 400);
   return c.json(await apiGet(`/company/projects/${uuid}/`));
 });
 
 app.get("/:uuid/stdlibs", async (c) => {
   const uuid = c.req.param("uuid");
+  if (!isUuid(uuid)) return c.json({ error: "Invalid project uuid" }, 400);
   const project = (await apiGet(`/company/projects/${uuid}/`)) as Record<string, unknown>;
   const linkedUuids = (project.linked_stdlibs ?? []) as string[];
 
@@ -62,6 +65,7 @@ app.get("/:uuid/stdlibs", async (c) => {
 
 app.post("/:uuid/phases", async (c) => {
   const uuid = c.req.param("uuid");
+  if (!isUuid(uuid)) return c.json({ error: "Invalid project uuid" }, 400);
   const body = await c.req.json<{ phase: string }>();
   const phase = (body.phase ?? "").trim();
   if (!phase) return c.json({ error: "Phase cannot be empty" }, 400);
@@ -126,10 +130,9 @@ app.post("/find-or-create", async (c) => {
     const specs = (p as any).batch_specs as { number: string | number; phase: string }[] | undefined;
     if (uuid && specs?.length && phaseExists !== false) {
       try {
-        const bResp = (await apiGet("/constructibles/batches/", { project: uuid, limit: 500 })) as {
-          results?: Record<string, unknown>[];
-        };
-        const allBatches = (bResp.results ?? []) as Record<string, unknown>[];
+        // Enumerate every page: a hard limit here reported existing batches as
+        // missing past the cap, which caused duplicate creation.
+        const allBatches = (await fetchAllPages("/constructibles/batches/", { project: uuid })) as Record<string, unknown>[];
         for (const spec of specs) {
           const phaseNorm = (spec.phase || p.phase).trim().toLowerCase();
           const exists = allBatches.some(

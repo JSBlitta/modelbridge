@@ -9,7 +9,11 @@
     "outDir": "dist",
     "rootDir": "src",
     "resolveJsonModule": true,
-    "declaration": true
+    // tsc is used only for typechecking here; the app runs through tsx and the
+    // tests through node --experimental-strip-types, both of which want .ts specifiers.
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "declaration": false
   },
   "include": ["src/**/*.ts"]
 }

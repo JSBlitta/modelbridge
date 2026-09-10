@@ -13,6 +13,14 @@ export interface ProductionCountEntry {
 // object — there is no dedicated endpoint.
 // Read the project's current production counts from meta.quantities.
 // Returns a Map keyed by `${batch}|${phase}|${design}` → count.
+// Signature of the project's counts as they are right now — pass it back to
+// upsertProductionCounts to make the write conditional on nothing having changed.
+export async function getProductionCountsSignature(projectUuid: string): Promise<string> {
+  const project = (await apiGet(`/company/projects/${projectUuid}/`)) as Record<string, any>;
+  const meta = (project.meta ?? {}) as Record<string, any>;
+  return countsSignature((meta.quantities ?? {}) as Record<string, any>);
+}
+
 export async function getProductionCounts(projectUuid: string): Promise<Map<string, number>> {
   const project = (await apiGet(`/company/projects/${projectUuid}/`)) as Record<string, any>;
   const meta = (project.meta ?? {}) as Record<string, any>;
@@ -27,15 +35,43 @@ export async function getProductionCounts(projectUuid: string): Promise<Map<stri
   return map;
 }
 
+export class ConcurrentModificationError extends Error {
+  constructor() {
+    super(
+      "The project's production counts changed while this import was being prepared. " +
+      "Nothing was written. Run the check again so you are confirming current numbers.",
+    );
+    this.name = "ConcurrentModificationError";
+  }
+}
+
+function countsSignature(quantities: Record<string, any>): string {
+  const rows = Array.isArray(quantities.assd_batch_counts) ? quantities.assd_batch_counts : [];
+  return JSON.stringify(
+    rows
+      .map((b: any) => `${b.batch}|${b.phase}|${b.design}|${Number(b.count ?? 0)}`)
+      .sort(),
+  );
+}
+
 export async function upsertProductionCounts(
   projectUuid: string,
   entries: ProductionCountEntry[],
+  // Signature captured when the caller read the counts. When supplied, the write
+  // aborts if the project changed in between. Produuzit has no ETag and this is
+  // a read-modify-write of the whole project object, so without this a
+  // concurrent import silently discarded the other one's counts.
+  expectedSignature?: string,
 ): Promise<void> {
-  logger.debug(`[production-counts] upsert project=${projectUuid} entries=${JSON.stringify(entries)}`);
+  logger.debug(`[production-counts] upsert project=${projectUuid} entries=${entries.length}`);
 
   const project = (await apiGet(`/company/projects/${projectUuid}/`)) as Record<string, any>;
   const meta = (project.meta ?? {}) as Record<string, any>;
   const quantities = (meta.quantities ?? {}) as Record<string, any>;
+
+  if (expectedSignature !== undefined && countsSignature(quantities) !== expectedSignature) {
+    throw new ConcurrentModificationError();
+  }
 
   const batchCounts: Record<string, any>[] = Array.isArray(quantities.assd_batch_counts)
     ? quantities.assd_batch_counts
@@ -69,8 +105,7 @@ export async function upsertProductionCounts(
 
   logger.debug(
     `[production-counts] PUT project=${projectUuid} ` +
-    `assd_batch_counts=${JSON.stringify(batchCounts)} ` +
-    `assd_phase_counts=${JSON.stringify(quantities.assd_phase_counts)}`,
+    `batch_rows=${batchCounts.length} phase_rows=${quantities.assd_phase_counts.length}`,
   );
 
   await apiPut(`/company/projects/${projectUuid}/`, project);

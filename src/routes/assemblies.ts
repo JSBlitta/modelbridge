@@ -5,18 +5,49 @@ import { getConfig } from "../config.js";
 import * as db from "../db.js";
 import { findSource, targetsOf, parseCount, generateOrderIds } from "../lib/mapping.js";
 import type { ColumnMapping } from "../lib/mapping.js";
-import { getProductionCounts, upsertProductionCounts } from "../lib/production-counts.js";
+import {
+  ConcurrentModificationError,
+  getProductionCounts,
+  getProductionCountsSignature,
+  upsertProductionCounts,
+} from "../lib/production-counts.js";
+import { GATE, issuePreviewToken, requirePreviewToken } from "../lib/push-gate.js";
+import { boundedInt, isUuid } from "../lib/validate.js";
 
 const app = new Hono();
 
 const NA_PATTERN = /^#?n\/?a$/i;
 const WARN_CHARS = /["\\\n\r]/;
 
-// Produuzit API does NOT support filtering assemblies by batch or project.
-// Fetch all assemblies and filter client-side.
-async function fetchAssembliesByBatch(batchUuid: string): Promise<Record<string, unknown>[]> {
-  const all = await fetchAllPages("/constructibles/assemblies/", {}) as Record<string, unknown>[];
+// Ask Produuzit to filter by project, then narrow to the batch locally.
+//
+// The previous version passed no params at all and pulled every assembly in the
+// company on each preview and create. That contradicted the rest of this file
+// (and trimble.ts), which all pass `project` and depend on it working; the
+// client-side filter below stays as a belt-and-braces narrowing in case the
+// upstream filter is ignored.
+async function fetchAssembliesByBatch(
+  batchUuid: string,
+  projectUuid?: string,
+): Promise<Record<string, unknown>[]> {
+  const params: Record<string, string> = {};
+  if (projectUuid) params.project = projectUuid;
+  const all = (await fetchAllPages("/constructibles/assemblies/", params)) as Record<string, unknown>[];
   return all.filter((a) => a.batch === batchUuid);
+}
+
+// The exact inputs that determine what an import writes. Preview and import must
+// build this identically or the fingerprints will not match.
+function assemblyGateInput(body: {
+  project_uuid: string;
+  column_mapping: ColumnMapping;
+  rows: Record<string, string>[];
+}) {
+  return {
+    project_uuid: body.project_uuid,
+    column_mapping: body.column_mapping,
+    rows: body.rows,
+  };
 }
 
 function cleanValue(val: unknown): unknown {
@@ -125,7 +156,7 @@ app.post("/parse-csv", async (c) => {
 // Load project context (designs + batches) for the column mapper
 app.get("/context", async (c) => {
   const projectUuid = c.req.query("project_uuid");
-  if (!projectUuid) return c.json({ error: "Missing project_uuid" }, 400);
+  if (!isUuid(projectUuid)) return c.json({ error: "Missing or invalid project_uuid" }, 400);
 
   const [designsMap, batches] = await Promise.all([loadDesigns(projectUuid), loadBatches(projectUuid)]);
   const dbBatches = new Map(db.getBatches(projectUuid).map((b) => [b.uuid, b]));
@@ -337,6 +368,7 @@ app.post("/preview-import", async (c) => {
     unresolved_designs: [...unresolvedDesigns].sort(),
     no_client_order_id: !orderIdCol,
     warnings: [],
+    preview_token: issuePreviewToken(GATE.assemblyImport, assemblyGateInput(body)),
   });
 });
 
@@ -346,7 +378,15 @@ app.post("/import", async (c) => {
     project_uuid: string;
     column_mapping: ColumnMapping;
     rows: Record<string, string>[];
+    preview_token?: string;
   }>();
+
+  const blocked = requirePreviewToken(c, GATE.assemblyImport, body.preview_token, assemblyGateInput(body));
+  if (blocked) return blocked;
+
+  // Snapshot the project's counts before doing any work; the write below is
+  // conditional on them being unchanged.
+  const countsSignature = await getProductionCountsSignature(body.project_uuid);
 
   const designsMap = await loadDesigns(body.project_uuid);
   const batches = await loadBatches(body.project_uuid);
@@ -464,12 +504,15 @@ app.post("/import", async (c) => {
 
   if (countMap.size) {
     try {
-      await upsertProductionCounts(body.project_uuid, [...countMap.values()]);
+      await upsertProductionCounts(body.project_uuid, [...countMap.values()], countsSignature);
       for (const e of countMap.values()) {
         const bn = (batchById.get(e.batch)?.name as string) ?? e.batch;
         results.push({ design_name: e.design_name, batch: bn, phase: e.phase, status: "created", count: e.count });
       }
     } catch (e) {
+      if (e instanceof ConcurrentModificationError) {
+        return c.json({ error: e.message, code: "CONCURRENT_MODIFICATION" }, 409);
+      }
       results.push({ status: "error", reason: `Failed to write production counts: ${String(e)}` });
     }
   }
@@ -480,8 +523,10 @@ app.post("/import", async (c) => {
 app.get("/", async (c) => {
   const batchUuid = c.req.query("batch_uuid");
   const projectUuid = c.req.query("project_uuid");
-  const limit = parseInt(c.req.query("limit") ?? "200");
-  const offset = parseInt(c.req.query("offset") ?? "0");
+  const limit = boundedInt(c.req.query("limit"), 200, 1, 1000);
+  const offset = boundedInt(c.req.query("offset"), 0, 0, Number.MAX_SAFE_INTEGER);
+  if (batchUuid && !isUuid(batchUuid)) return c.json({ error: "Invalid batch_uuid" }, 400);
+  if (projectUuid && !isUuid(projectUuid)) return c.json({ error: "Invalid project_uuid" }, 400);
 
   // Produuzit API does NOT support filtering assemblies by batch or project.
   // If a filter is requested, fetch all assemblies and filter client-side.
@@ -509,8 +554,17 @@ app.get("/", async (c) => {
 
 app.patch("/:uuid", async (c) => {
   const uuid = c.req.param("uuid");
-  const body = await c.req.json();
-  return c.json(await apiPatch(`/constructibles/assemblies/${uuid}/`, body));
+  if (!isUuid(uuid)) return c.json({ error: "Invalid assembly uuid" }, 400);
+  const body = await c.req.json<Record<string, unknown>>();
+
+  // Only the fields the update screen is allowed to change. Previously the whole
+  // request body was forwarded verbatim to Produuzit.
+  const ALLOWED = ["scheduled_prod_date", "client_order_id", "priority", "client_meta"] as const;
+  const patch: Record<string, unknown> = {};
+  for (const k of ALLOWED) if (k in body) patch[k] = body[k];
+  if (!Object.keys(patch).length) return c.json({ error: "No updatable fields supplied" }, 400);
+
+  return c.json(await apiPatch(`/constructibles/assemblies/${uuid}/`, patch));
 });
 
 // --- Count-based constructible creation ---
@@ -527,12 +581,16 @@ interface CountItem {
   client_meta?: Record<string, unknown>;
 }
 
+function countGateInput(body: { batch_uuid: string; items: CountItem[] }) {
+  return { batch_uuid: body.batch_uuid, items: body.items };
+}
+
 // Preview: shows existing count, how many will be created, and the order IDs that will be used
 app.post("/preview-by-count", async (c) => {
-  const body = await c.req.json<{ batch_uuid: string; items: CountItem[] }>();
-  if (!body.batch_uuid) return c.json({ error: "Missing batch_uuid" }, 400);
+  const body = await c.req.json<{ batch_uuid: string; project_uuid?: string; items: CountItem[] }>();
+  if (!isUuid(body.batch_uuid)) return c.json({ error: "Missing or invalid batch_uuid" }, 400);
 
-  const existing = await fetchAssembliesByBatch(body.batch_uuid);
+  const existing = await fetchAssembliesByBatch(body.batch_uuid, body.project_uuid);
 
   const previews = body.items.map((item) => {
     const existingForDesign = existing.filter((a) => a.design === item.design_uuid);
@@ -554,15 +612,27 @@ app.post("/preview-by-count", async (c) => {
     };
   });
 
-  return c.json({ batch_uuid: body.batch_uuid, previews });
+  return c.json({
+    batch_uuid: body.batch_uuid,
+    previews,
+    preview_token: issuePreviewToken(GATE.countCreate, countGateInput(body)),
+  });
 });
 
 // Execute: creates exactly count_to_create assemblies per design
 app.post("/create-by-count", async (c) => {
-  const body = await c.req.json<{ batch_uuid: string; project_uuid: string; items: CountItem[] }>();
+  const body = await c.req.json<{
+    batch_uuid: string;
+    project_uuid: string;
+    items: CountItem[];
+    preview_token?: string;
+  }>();
   if (!body.batch_uuid || !body.project_uuid) return c.json({ error: "Missing batch_uuid or project_uuid" }, 400);
 
-  const existing = await fetchAssembliesByBatch(body.batch_uuid);
+  const blocked = requirePreviewToken(c, GATE.countCreate, body.preview_token, countGateInput(body));
+  if (blocked) return blocked;
+
+  const existing = await fetchAssembliesByBatch(body.batch_uuid, body.project_uuid);
 
   const results: Record<string, unknown>[] = [];
 

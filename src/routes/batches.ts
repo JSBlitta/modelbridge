@@ -1,5 +1,7 @@
 import { Hono } from "hono";
-import { apiGet, apiPatch, apiPost } from "../produuzit-client.js";
+import { apiGet, apiPatch, apiPost, fetchAllPages } from "../produuzit-client.js";
+import { boundedInt, isUuid } from "../lib/validate.js";
+import { GATE, issuePreviewToken, requirePreviewToken } from "../lib/push-gate.js";
 import { compareBatches } from "../lib/idempotency.js";
 import * as db from "../db.js";
 import { logger } from "../logger.js";
@@ -15,10 +17,14 @@ interface BatchDef {
 
 app.get("/", async (c) => {
   const projectUuid = c.req.query("project_uuid");
-  const limit = c.req.query("limit") ?? "100";
-  const offset = c.req.query("offset") ?? "0";
-  const params: Record<string, string | number> = { limit: parseInt(limit), offset: parseInt(offset) };
-  if (projectUuid) params.project = projectUuid;
+  const params: Record<string, string | number> = {
+    limit: boundedInt(c.req.query("limit"), 100, 1, 1000),
+    offset: boundedInt(c.req.query("offset"), 0, 0, Number.MAX_SAFE_INTEGER),
+  };
+  if (projectUuid) {
+    if (!isUuid(projectUuid)) return c.json({ error: "Invalid project_uuid" }, 400);
+    params.project = projectUuid;
+  }
   return c.json(await apiGet("/constructibles/batches/", params));
 });
 
@@ -30,21 +36,32 @@ app.get("/db", async (c) => {
 // Preview: show diff between proposed and existing batches
 app.post("/preview", async (c) => {
   const body = await c.req.json<{ project_uuid: string; batches: BatchDef[] }>();
-  const existingResp = (await apiGet("/constructibles/batches/", { project: body.project_uuid, limit: 200 })) as {
-    results: Record<string, unknown>[];
-  };
+  if (!isUuid(body.project_uuid)) return c.json({ error: "Invalid project_uuid" }, 400);
+  // All pages: the old `limit: 200` reported existing batches as new past the
+  // cap, so confirming the preview created duplicates.
+  const existing = (await fetchAllPages("/constructibles/batches/", { project: body.project_uuid })) as Record<string, unknown>[];
   const proposed = body.batches.map((b) => ({ name: b.name, phase: b.phase }));
-  const diff = compareBatches(existingResp.results ?? [], proposed, "name");
-  return c.json(diff);
+  const diff = compareBatches(existing, proposed, "name");
+  return c.json({
+    diff,
+    preview_token: issuePreviewToken(GATE.batchCreate, batchGateInput(body)),
+  });
 });
+
+function batchGateInput(body: { project_uuid: string; batches: BatchDef[] }) {
+  return { project_uuid: body.project_uuid, batches: body.batches };
+}
 
 // Create only after user reviewed preview
 app.post("/create", async (c) => {
-  const body = await c.req.json<{ project_uuid: string; batches: BatchDef[] }>();
-  const existingResp = (await apiGet("/constructibles/batches/", { project: body.project_uuid, limit: 200 })) as {
-    results: Record<string, unknown>[];
-  };
-  const existingNames = new Set((existingResp.results ?? []).map((b) => b.name as string));
+  const body = await c.req.json<{ project_uuid: string; batches: BatchDef[]; preview_token?: string }>();
+  if (!isUuid(body.project_uuid)) return c.json({ error: "Invalid project_uuid" }, 400);
+
+  const blocked = requirePreviewToken(c, GATE.batchCreate, body.preview_token, batchGateInput(body));
+  if (blocked) return blocked;
+
+  const existingBatches = (await fetchAllPages("/constructibles/batches/", { project: body.project_uuid })) as Record<string, unknown>[];
+  const existingNames = new Set(existingBatches.map((b) => b.name as string));
 
   // Resolve stdlib names -> UUIDs once for this request
   const allNames = new Set<string>();
@@ -54,8 +71,8 @@ app.post("/create", async (c) => {
   const stdlibNameToUuid = new Map<string, string>();
   if (allNames.size) {
     try {
-      const resp = (await apiGet("/company/projects/", { standard_library: true, limit: 200 })) as { results: Record<string, unknown>[] };
-      for (const p of resp.results ?? []) {
+      const stdlibProjects = (await fetchAllPages("/company/projects/", { standard_library: true })) as Record<string, unknown>[];
+      for (const p of stdlibProjects) {
         const uuid = p.uuid as string;
         if (!uuid) continue;
         const name = (p.name as string ?? "").toLowerCase();
@@ -81,7 +98,7 @@ app.post("/create", async (c) => {
         .filter((u): u is string => !!u);
     }
     if (existingNames.has(b.name)) {
-      const match = (existingResp.results ?? []).find((e) => e.name === b.name) as Record<string, unknown> | undefined;
+      const match = existingBatches.find((e) => e.name === b.name) as Record<string, unknown> | undefined;
       if (match) {
         db.upsertBatch(match.uuid as string, match.name as string, body.project_uuid, b.phase, resolvedStdlibs);
         // Patch stdlibs via API if they changed
@@ -135,9 +152,9 @@ app.post("/add-for-projects", async (c) => {
   }>();
 
   // Resolve project_key -> uuid by name
-  const allProjects = (await apiGet("/company/projects/", { limit: 500 })) as { results: Record<string, unknown>[] };
+  const allProjects = (await fetchAllPages("/company/projects/")) as Record<string, unknown>[];
   const nameToUuid = new Map<string, string>();
-  for (const p of allProjects.results ?? []) {
+  for (const p of allProjects) {
     const n = (p.name as string ?? "").trim();
     if (n) nameToUuid.set(n, p.uuid as string);
     // Also index by project_number
@@ -153,8 +170,8 @@ app.post("/add-for-projects", async (c) => {
   const stdlibNameToUuid = new Map<string, string>();
   if (allStdlibNames.size) {
     try {
-      const resp = (await apiGet("/company/projects/", { standard_library: true, limit: 200 })) as { results: Record<string, unknown>[] };
-      for (const p of resp.results ?? []) {
+      const stdlibProjects = (await fetchAllPages("/company/projects/", { standard_library: true })) as Record<string, unknown>[];
+      for (const p of stdlibProjects) {
         const uuid = p.uuid as string; if (!uuid) continue;
         const name = (p.name as string ?? "").toLowerCase();
         const pnum = (p.project_number as string ?? "").toLowerCase();
@@ -166,6 +183,13 @@ app.post("/add-for-projects", async (c) => {
     }
   }
 
+  // Per-project caches. Without these the loop refetched the project and every
+  // one of its batches once per batch_def — 50 defs on one project meant 100
+  // redundant API calls.
+  const projectCache = new Map<string, Record<string, unknown>>();
+  const batchCache = new Map<string, Record<string, unknown>[]>();
+  const phasesEnsured = new Set<string>();
+
   const results: Record<string, unknown>[] = [];
   for (const b of body.batch_defs) {
     const projectUuid = nameToUuid.get(b.project_key);
@@ -174,24 +198,43 @@ app.post("/add-for-projects", async (c) => {
       continue;
     }
 
-    // Ensure phase exists on the project
-    try {
-      const project = (await apiGet(`/company/projects/${projectUuid}/`)) as Record<string, unknown>;
-      const existingPhases = (project.phases ?? []) as string[];
-      const phaseNormalized = b.phase.trim().toLowerCase();
-      if (!existingPhases.some((ep) => String(ep).trim().toLowerCase() === phaseNormalized)) {
-        const updatedPhases = [...existingPhases, b.phase];
-        await apiPatch(`/company/projects/${projectUuid}/`, { phases: updatedPhases });
+    // Ensure phase exists on the project (once per project+phase pair)
+    const phaseKey = `${projectUuid}|${b.phase.trim().toLowerCase()}`;
+    if (!phasesEnsured.has(phaseKey)) {
+      phasesEnsured.add(phaseKey);
+      try {
+        let project = projectCache.get(projectUuid);
+        if (!project) {
+          project = (await apiGet(`/company/projects/${projectUuid}/`)) as Record<string, unknown>;
+          projectCache.set(projectUuid, project);
+        }
+        const existingPhases = (project.phases ?? []) as string[];
+        const phaseNormalized = b.phase.trim().toLowerCase();
+        if (!existingPhases.some((ep) => String(ep).trim().toLowerCase() === phaseNormalized)) {
+          const updatedPhases = [...existingPhases, b.phase];
+          await apiPatch(`/company/projects/${projectUuid}/`, { phases: updatedPhases });
+          project.phases = updatedPhases;
+          results.push({ project_key: b.project_key, phase: b.phase, status: "phase_created" });
+        }
+      } catch (e) {
+        logger.warn(`[batches/add-for-projects] phase check failed for ${b.project_key}:`, e);
+        results.push({
+          project_key: b.project_key,
+          phase: b.phase,
+          status: "error",
+          error: `Could not ensure phase "${b.phase}": ${e instanceof Error ? e.message : String(e)}`,
+        });
       }
-    } catch (e) {
-      logger.warn(`[batches/add-for-projects] phase check failed for ${b.project_key}:`, e);
     }
 
     // Check if batch already exists for THIS phase (not just any phase)
     const batchName = String(b.batch_number);
-    const existingResp = (await apiGet("/constructibles/batches/", { project: projectUuid, limit: 200 })) as { results: Record<string, unknown>[] };
-    logger.debug(`[add-for-projects] checking batch "${batchName}" phase="${b.phase}" against`, (existingResp.results ?? []).map(x => ({ name: x.name, phase: x.phase })));
-    const existsForPhase = (existingResp.results ?? []).some(
+    let projectBatches = batchCache.get(projectUuid);
+    if (!projectBatches) {
+      projectBatches = (await fetchAllPages("/constructibles/batches/", { project: projectUuid })) as Record<string, unknown>[];
+      batchCache.set(projectUuid, projectBatches);
+    }
+    const existsForPhase = projectBatches.some(
       (x) => String(x.name ?? "").trim() === batchName && String(x.phase ?? "").trim().toLowerCase() === b.phase.trim().toLowerCase()
     );
 
@@ -215,6 +258,8 @@ app.post("/add-for-projects", async (c) => {
     try {
       const created = (await apiPost("/constructibles/batches/", apiBody)) as Record<string, unknown>;
       db.upsertBatch(created.uuid as string, created.name as string, projectUuid, b.phase, resolvedStdlibs);
+      // Keep the cache honest so a later def for the same project sees it.
+      projectBatches.push(created);
       results.push({ project_key: b.project_key, batch_number: batchName, status: "created", data: created });
     } catch (e) {
       results.push({ project_key: b.project_key, batch_number: batchName, status: "error", error: String(e) });

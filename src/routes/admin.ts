@@ -1,7 +1,7 @@
 import { Hono } from "hono";
-import { getCookie } from "hono/cookie";
 import * as db from "../db.js";
-import { getSettings, isAdmin, saveSettings } from "../settings.js";
+import { getRedactedSettings, saveSettings } from "../settings.js";
+import { requireAdmin } from "../middleware/session.js";
 
 // Admin-only API. The session cookie identifies the user; an admin is a session
 // whose username is in the `admin_usernames` setting. Everything else in the
@@ -9,23 +9,18 @@ import { getSettings, isAdmin, saveSettings } from "../settings.js";
 
 const app = new Hono();
 
-app.use("*", async (c, next) => {
-  const sessionId = getCookie(c, "session_id");
-  const session = sessionId ? db.getSession(sessionId) : null;
-  if (!session || !isAdmin(session.username)) {
-    return c.json({ error: "Admin access required" }, 403);
-  }
-  await next();
-});
+// requireSession has already run app-wide; this only adds the admin check.
+app.use("*", requireAdmin);
 
 // --- Settings ---
 
-app.get("/settings", (c) => c.json(getSettings()));
+// Secrets come back redacted — the reporting refresh token used to be returned in full.
+app.get("/settings", (c) => c.json(getRedactedSettings()));
 
 app.put("/settings", async (c) => {
   const body = await c.req.json<Record<string, unknown>>();
   saveSettings(body);
-  return c.json({ ok: true, settings: getSettings() });
+  return c.json({ ok: true, settings: getRedactedSettings() });
 });
 
 // --- Reporting schedule (replaces the SharePoint list CSV) ---

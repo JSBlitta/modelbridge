@@ -190,36 +190,76 @@ export function parseAssemblyCsv(
 }
 
 function parseRows(lines: string[], headers: string[], delim: "," | ";"): Record<string, string>[] {
-  const rows: Record<string, string>[] = [];
-  for (let i = 1; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (!line) continue;
-    const values = splitCsvLine(line, delim);
+  // lines[0] is the header; re-join the remainder so splitCsvDocument can see
+  // record boundaries that fall inside quoted fields.
+  const body = lines.slice(1).join("\n");
+  return splitCsvDocument(body, delim).map((values) => {
     const row: Record<string, string> = {};
-    for (let j = 0; j < headers.length; j++) {
-      row[headers[j]] = values[j] ?? "";
+    for (let j = 0; j < headers.length; j++) row[headers[j]] = values[j] ?? "";
+    return row;
+  });
+}
+
+// Split a whole CSV body into records. Splitting on newlines first (the previous
+// approach) corrupted any row containing a quoted newline — common in
+// description columns — because half the field became a phantom record.
+export function splitCsvDocument(text: string, delim: "," | ";"): string[][] {
+  const records: string[][] = [];
+  let record: string[] = [];
+  let current = "";
+  let inQuotes = false;
+  // Whether the field being built was quoted. Quoted content is taken verbatim;
+  // unquoted content is trimmed. The old parser trimmed unconditionally, so a
+  // deliberately quoted "  padded  " silently lost its padding.
+  let fieldQuoted = false;
+  // Where the quoted run ended, so whitespace typed after the closing quote
+  // ("value" , next) is discarded rather than becoming part of the value.
+  let quotedEnd = -1;
+  let sawContent = false;
+
+  const endField = () => {
+    const value = fieldQuoted
+      ? current.slice(0, quotedEnd < 0 ? current.length : quotedEnd)
+      : current.trim();
+    record.push(value);
+    current = "";
+    fieldQuoted = false;
+    quotedEnd = -1;
+  };
+  const endRecord = () => {
+    endField();
+    if (sawContent) records.push(record);
+    record = [];
+    sawContent = false;
+  };
+
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '"') {
+      if (inQuotes && text[i + 1] === '"') { current += '"'; i++; }
+      else if (inQuotes) { inQuotes = false; quotedEnd = current.length; }
+      else {
+        inQuotes = true;
+        fieldQuoted = true;
+        // Whitespace before the opening quote is not part of the value.
+        if (!current.trim()) current = "";
+      }
+      sawContent = true;
+    } else if (ch === delim && !inQuotes) {
+      endField();
+      sawContent = true;
+    } else if ((ch === "\n" || ch === "\r") && !inQuotes) {
+      if (ch === "\r" && text[i + 1] === "\n") i++;
+      endRecord();
+    } else {
+      current += ch;
+      if (ch.trim()) sawContent = true;
     }
-    rows.push(row);
   }
-  return rows;
+  if (current.length || record.length) endRecord();
+  return records;
 }
 
 export function splitCsvLine(line: string, delim: "," | ";"): string[] {
-  const result: string[] = [];
-  let current = "";
-  let inQuotes = false;
-  for (let i = 0; i < line.length; i++) {
-    const ch = line[i];
-    if (ch === '"') {
-      if (inQuotes && line[i + 1] === '"') { current += '"'; i++; }
-      else inQuotes = !inQuotes;
-    } else if (ch === delim && !inQuotes) {
-      result.push(current.trim());
-      current = "";
-    } else {
-      current += ch;
-    }
-  }
-  result.push(current.trim());
-  return result;
+  return splitCsvDocument(line, delim)[0] ?? [];
 }

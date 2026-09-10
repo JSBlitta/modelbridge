@@ -6,7 +6,8 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { env } from "./env.js";
 import { loadConfig } from "./config.js";
 import { initLogger, logger } from "./logger.js";
-import { initDb, pruneExpiredSessions } from "./db.js";
+import { initDb, pruneExpiredSessions, pruneExpiredPreviewTokens } from "./db.js";
+import { requireSession } from "./middleware/session.js";
 
 import health from "./routes/health.js";
 import auth from "./routes/auth.js";
@@ -25,7 +26,10 @@ import { isSharePointConfigured } from "./sharepoint-client.js";
 
 const app = new Hono();
 
-// Public routes — no session gate; Produuzit API calls use the company service token
+// Every /api route is session-gated. The middleware exempts only the handful of
+// paths that must work before a session exists (see middleware/session.ts).
+app.use("/api/*", requireSession);
+
 app.route("/api/health", health);
 app.route("/api/auth", auth);
 app.route("/api/projects", projects);
@@ -56,6 +60,8 @@ initLogger(env.LOG_LEVEL, env.LOG_FILE);
 initDb();
 pruneExpiredSessions();
 setInterval(pruneExpiredSessions, 60 * 60 * 1000);
+pruneExpiredPreviewTokens();
+setInterval(pruneExpiredPreviewTokens, 15 * 60 * 1000);
 
 logger.info(`ModelBridge starting on port ${env.PORT}`);
 logger.info(`  Produuzit: ${env.PRODUUZIT_BASE_URL}`);

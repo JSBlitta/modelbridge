@@ -1,5 +1,7 @@
 import { Hono } from "hono";
 import { apiGet, apiPostFormData } from "../produuzit-client.js";
+import { boundedInt, isUuid } from "../lib/validate.js";
+import { MAX_UPLOAD_BYTES, tooLarge } from "../lib/upload-limits.js";
 
 const app = new Hono();
 
@@ -8,9 +10,14 @@ app.post("/upload", async (c) => {
   const file = formData.get("file");
   if (!file || !(file instanceof File)) return c.json({ error: "No file" }, 400);
 
+  if (file.size > MAX_UPLOAD_BYTES) return tooLarge(c, file.size);
+
   const batchUuid = formData.get("batch_uuid") as string | null;
   const projectUuid = formData.get("project_uuid") as string | null;
   const assemblyUuid = formData.get("assembly_uuid") as string | null;
+  for (const [name, val] of [["batch_uuid", batchUuid], ["project_uuid", projectUuid], ["assembly_uuid", assemblyUuid]] as const) {
+    if (val && !isUuid(val)) return c.json({ error: `Invalid ${name}` }, 400);
+  }
 
   const fd = new FormData();
   fd.append("file", file, file.name);
@@ -24,9 +31,10 @@ app.post("/upload", async (c) => {
 app.get("/files", async (c) => {
   const batchUuid = c.req.query("batch_uuid");
   const projectUuid = c.req.query("project_uuid");
-  const limit = c.req.query("limit") ?? "100";
-  const offset = c.req.query("offset") ?? "0";
-  const params: Record<string, string | number> = { limit: parseInt(limit), offset: parseInt(offset) };
+  const params: Record<string, string | number> = {
+    limit: boundedInt(c.req.query("limit"), 100, 1, 1000),
+    offset: boundedInt(c.req.query("offset"), 0, 0, Number.MAX_SAFE_INTEGER),
+  };
   if (batchUuid) params.batch = batchUuid;
   if (projectUuid) params.project = projectUuid;
   return c.json(await apiGet("/cloudstorage/files/", params));

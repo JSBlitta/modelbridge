@@ -1,12 +1,13 @@
 import { Hono } from "hono";
 import * as db from "../db.js";
+import { boundedInt } from "../lib/validate.js";
 
 // Read-only access to the persistent action log (events table).
 // The frontend notification bell hydrates from this on load.
 const app = new Hono();
 
 app.get("/", (c) => {
-  const limit = Math.min(parseInt(c.req.query("limit") ?? "100", 10) || 100, 1000);
+  const limit = boundedInt(c.req.query("limit"), 100, 1, 1000);
   const category = c.req.query("category") || undefined;
   const level = c.req.query("level") || undefined;
   return c.json({ events: db.listEvents({ limit, category, level }) });

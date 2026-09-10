@@ -76,7 +76,23 @@ export function initDb(): void {
       position INTEGER NOT NULL DEFAULT 0
     )
   `);
+  d.exec(`
+    CREATE TABLE IF NOT EXISTS preview_tokens (
+      token TEXT PRIMARY KEY,
+      fingerprint TEXT NOT NULL,
+      scope TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL
+    )
+  `);
   ensureEventsTable();
+  d.exec(`
+    CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
+    CREATE INDEX IF NOT EXISTS idx_batches_project ON batches(project_uuid);
+    CREATE INDEX IF NOT EXISTS idx_events_category ON events(category);
+    CREATE INDEX IF NOT EXISTS idx_events_level ON events(level);
+    CREATE INDEX IF NOT EXISTS idx_preview_tokens_expires ON preview_tokens(expires_at);
+  `);
 }
 
 let _eventsReady = false;
@@ -348,4 +364,58 @@ export function upsertReportingSchedule(entry: {
 
 export function deleteReportingSchedule(id: number): void {
   db().prepare("DELETE FROM reporting_schedule WHERE id = ?").run(id);
+}
+
+// --- Preview tokens (preview -> import gate) ---
+//
+// A token is issued by a /preview* endpoint, bound to the fingerprint of the
+// payload it previewed, and consumed exactly once by the matching execute
+// endpoint. Single-use is why these live in the DB rather than being a signed
+// HMAC: revocation-on-use needs server state regardless.
+
+const PREVIEW_TOKEN_TTL_MS = 30 * 60 * 1000; // 30 minutes
+
+export function createPreviewToken(token: string, fingerprintHex: string, scope: string): void {
+  const now = new Date();
+  db()
+    .prepare(
+      "INSERT INTO preview_tokens (token, fingerprint, scope, created_at, expires_at) VALUES (?, ?, ?, ?, ?)",
+    )
+    .run(
+      token,
+      fingerprintHex,
+      scope,
+      now.toISOString(),
+      new Date(now.getTime() + PREVIEW_TOKEN_TTL_MS).toISOString(),
+    );
+}
+
+export type PreviewTokenFailure = "missing" | "unknown" | "expired" | "scope" | "mismatch";
+
+// Atomically consume a token. Returns null on success, or the reason it failed.
+// The DELETE is what makes it single-use; doing it in the same transaction as
+// the read closes the replay window between two concurrent imports.
+export function consumePreviewToken(
+  token: string | undefined,
+  fingerprintHex: string,
+  scope: string,
+): PreviewTokenFailure | null {
+  if (!token) return "missing";
+  const d = db();
+  const run = d.transaction((): PreviewTokenFailure | null => {
+    const row = d
+      .prepare("SELECT fingerprint, scope, expires_at FROM preview_tokens WHERE token = ?")
+      .get(token) as { fingerprint: string; scope: string; expires_at: string } | undefined;
+    if (!row) return "unknown";
+    d.prepare("DELETE FROM preview_tokens WHERE token = ?").run(token);
+    if (new Date(row.expires_at) < new Date()) return "expired";
+    if (row.scope !== scope) return "scope";
+    if (row.fingerprint !== fingerprintHex) return "mismatch";
+    return null;
+  });
+  return run();
+}
+
+export function pruneExpiredPreviewTokens(): void {
+  db().prepare("DELETE FROM preview_tokens WHERE expires_at < ?").run(new Date().toISOString());
 }

@@ -5,16 +5,23 @@ import { loginWithCredentials, fetchMyUser } from "../produuzit-client.js";
 import * as db from "../db.js";
 import { isAdmin, getAdminUsernames } from "../settings.js";
 import { logger } from "../logger.js";
+import { SESSION_COOKIE, isSecureRequest } from "../middleware/session.js";
 
 const app = new Hono();
 
-const COOKIE_NAME = "session_id";
-const COOKIE_OPTS = {
-  httpOnly: true,
-  sameSite: "Strict" as const,
-  path: "/",
-  maxAge: 8 * 60 * 60,
-};
+const COOKIE_NAME = SESSION_COOKIE;
+
+// Secure is decided per-request: behind IIS the Node process sees plain HTTP,
+// so the forwarded proto header is what tells us the browser used TLS.
+function cookieOpts(secure: boolean) {
+  return {
+    httpOnly: true,
+    secure,
+    sameSite: "Strict" as const,
+    path: "/",
+    maxAge: 8 * 60 * 60,
+  };
+}
 
 app.post("/login", async (c) => {
   const body = await c.req.json<{ username: string; password: string }>();
@@ -41,7 +48,7 @@ app.post("/login", async (c) => {
   const sessionId = randomUUID();
   db.createSession(sessionId, profile.username, profile.email);
 
-  setCookie(c, COOKIE_NAME, sessionId, COOKIE_OPTS);
+  setCookie(c, COOKIE_NAME, sessionId, cookieOpts(isSecureRequest(c)));
   return c.json({ ok: true, username: profile.username, email: profile.email });
 });
 
