@@ -29,6 +29,7 @@ import InputNumber from 'primevue/inputnumber'
 import Checkbox from 'primevue/checkbox'
 import ToggleButton from 'primevue/togglebutton'
 import Message from 'primevue/message'
+import Divider from 'primevue/divider'
 
 const app = createApp(App)
 
@@ -64,5 +65,6 @@ app.component('InputNumber', InputNumber)
 app.component('Checkbox', Checkbox)
 app.component('ToggleButton', ToggleButton)
 app.component('Message', Message)
+app.component('Divider', Divider)
 
 app.mount('#app')

@@ -67,6 +67,7 @@
             icon="pi pi-plus"
             :confirm-label="$t('unified.confirmCreateProjects', { count: newProjectCount })"
             btn-class="btn-create"
+            :reset-key="newProjectCount + '|' + (phaseSuggestions?.length ?? 0)"
             :loading="creatingProjects"
             @action="createProjects"
             style="margin-top:0.5rem;" />
@@ -93,6 +94,7 @@
             icon="pi pi-plus-circle"
             :confirm-label="$t('unified.confirmCreateItems', { items: createItemsLabel })"
             btn-class="btn-create"
+            :reset-key="createItemsLabel"
             :loading="addingPhasesBatches"
             @action="addPhasesAndBatches"
             style="margin-top:0.5rem;" />
@@ -246,13 +248,12 @@
           </template>
 
           <div v-if="canExecute" class="mt-sm">
-            <ConfirmedButton
-              :label="$t('unified.executeBtn')"
-              icon="pi pi-bolt"
+            <PushGate
+              :gate="importGate"
+              :show-check="false"
               :confirm-label="$t('unified.confirmImport', { totalNew, totalChanged })"
-              btn-class="btn-create"
-              :loading="importing"
-              @action="doImport" />
+              :push-label="$t('unified.executeBtn')"
+              push-icon="pi pi-bolt" />
           </div>
         </div>
 
@@ -293,7 +294,8 @@ import { useNotifications } from '../composables/useNotifications.js'
 const { notify } = useNotifications()
 import PhaseTable from '../components/PhaseTable.vue'
 import ConfirmationTable from '../components/ConfirmationTable.vue'
-import ConfirmedButton from '../components/ConfirmedButton.vue'
+import PushGate from '../components/PushGate.vue'
+import { usePushGate } from '../composables/usePushGate.js'
 import ColumnMapper from '../components/ColumnMapper.vue'
 
 // Project
@@ -317,9 +319,8 @@ const columnMapping = ref({})
 const presetName = ref('')
 const presets = ref([])
 const selectedPreset = ref(null)
-const previewing = ref(false)
+// previewing / importing come from importGate (declared below).
 const previewData = ref(null)
-const importing = ref(false)
 const importResults = ref([])
 
 const newProjectCount = computed(() => phaseSuggestions.value.filter(r => r.status === 'new').length)
@@ -486,7 +487,7 @@ async function addPhasesAndBatches() {
     if (created) notify({ severity: 'success', summary: t('unified.created'), detail: t('unified.createdDetail', { created, existed }), life: 5000 })
     if (errors) notify({ severity: 'error', summary: t('unified.error'), detail: t('unified.errorsDetail', { errors }), life: 8000 })
     // Re-check so the UI updates to show phases/batches as existing
-    await checkProjects()
+    await checkProjects(phaseSuggestions)
   } catch (err) {
     superParseError.value = err.response?.data?.detail || err.message
   } finally {
@@ -514,37 +515,46 @@ function statusLabel(status) {
   return status
 }
 
-async function doPreview() {
-  previewing.value = true; previewData.value = null
-  try {
-    const res = await api.post('/api/assemblies/preview-import', {
-      project_uuid: project.value,
-      column_mapping: columnMapping.value,
-      rows: parseResult.value.rows,
-    })
-    previewData.value = res.data
-  } finally { previewing.value = false }
+function importBody() {
+  return {
+    project_uuid: project.value,
+    column_mapping: columnMapping.value,
+    rows: parseResult.value?.rows ?? [],
+  }
 }
 
-async function doImport() {
-  importing.value = true
-  try {
-    const res = await api.post('/api/assemblies/import', {
-      project_uuid: project.value,
-      column_mapping: columnMapping.value,
-      rows: parseResult.value.rows,
-    })
-    importResults.value = res.data; previewData.value = null
-  } finally { importing.value = false }
-}
+const importGate = usePushGate({
+  // Cheap identity over every input the check depends on.
+  identity: () => [
+    project.value || '',
+    JSON.stringify(columnMapping.value),
+    parseResult.value?.rows?.length ?? -1,
+    parseResult.value?.headers?.join('|') ?? '',
+  ].join('::'),
+  check: async () => {
+    const res = await api.post('/api/assemblies/preview-import', importBody())
+    previewData.value = res.data
+    return res.data
+  },
+  push: async (previewToken) => {
+    const res = await api.post('/api/assemblies/import', { ...importBody(), preview_token: previewToken })
+    importResults.value = res.data
+    previewData.value = null
+    return res.data
+  },
+})
+
+const previewing = computed(() => importGate.checking)
+const importing = computed(() => importGate.pushing)
+const doPreview = () => importGate.runCheck()
 
 async function savePreset() {
   if (!presetName.value.trim() || !parseResult.value) return
-  await api.post('/api/config/save-preset', {
+  await api.post('/api/config/presets', {
     name: presetName.value.trim(),
     mapping: columnMapping.value,
   })
-  presets.value = (await api.get('/api/config/presets')).data.presets || []
+  presets.value = (await api.get('/api/config/presets')).data || []
 }
 
 async function loadPreset() {

@@ -10,7 +10,18 @@
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { ref, watch } from 'vue'
+
+// Legacy confirm control. Prefer <PushGate> + usePushGate for anything that
+// writes to Produuzit — that pair also requires a completed check and carries a
+// server-verified token. This component survives only for the two creation
+// flows whose endpoints do not issue tokens yet.
+//
+// `resetKey` fixes the defect this component shipped with: `confirmed` was
+// private state that was never cleared, so a tick made for one preview stayed
+// ticked for the next, different one. Pass anything that changes when the thing
+// being confirmed changes.
+let confirmSeq = 0
 
 const props = defineProps({
   label: { type: String, required: true },
@@ -18,10 +29,13 @@ const props = defineProps({
   confirmLabel: { type: String, default: '' },
   loading: { type: Boolean, default: false },
   btnClass: { type: String, default: 'btn-create' },
+  resetKey: { type: [String, Number, Boolean], default: '' },
 })
 
 defineEmits(['action'])
 
-const confirmId = `confirm-${Math.random().toString(36).slice(2, 8)}`
+const confirmId = `confirm-${++confirmSeq}`
 const confirmed = ref(false)
+
+watch(() => props.resetKey, () => { confirmed.value = false })
 </script>

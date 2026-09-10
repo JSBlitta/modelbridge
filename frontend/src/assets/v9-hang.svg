@@ -5,13 +5,17 @@
       <stop offset="0.62" stop-color="#8d2952"/>
       <stop offset="1" stop-color="#e40520"/>
     </linearGradient>
+    <mask id="cut-above-m">
+      <rect x="-22" y="-20" width="500" height="240" fill="#fff"/>
+      <path d="M-40 -40 L-40 58 L0 58 L24 58 L94 128 L110 128 L160 78 L200 78 L200 -40 Z" fill="#000"/>
+    </mask>
   </defs>
-  <path fill-rule="evenodd" fill="#0063a3" d="M0 0h52v195h-52Z M16 16h20v163h-20Z"/>
-  <path fill-rule="evenodd" fill="#0063a3" d="M143 0h52v195h-52Z M159 16h20v163h-20Z"/>
-  <path d="M-40 -40 L-40 58 L0 58 L24 58 L94 128 L110 128 L160 78 L200 78 L200 -40 Z" fill="#ffffff"/>
+  <g mask="url(#cut-above-m)">
+    <path fill-rule="evenodd" fill="#0063a3" d="M0 0h52v195h-52Z M16 16h20v163h-20Z"/>
+    <path fill-rule="evenodd" fill="#0063a3" d="M143 0h52v195h-52Z M159 16h20v163h-20Z"/>
+  </g>
   <path fill-rule="evenodd" fill="#e40520" d="M241 0h90v195h-90Z M257 16h58v163h-58Z"/>
   <path fill-rule="evenodd" fill="#e40520" d="M346 0h90v90h-90Z M362 16h58v58h-58Z"/>
   <path fill-rule="evenodd" fill="#e40520" d="M346 105h90v90h-90Z M362 121h58v58h-58Z"/>
-  <path d="M0 58 L24 58 L94 128 L110 128 L160 78 L331 78" fill="none" stroke="#ffffff" stroke-width="25" stroke-linejoin="miter" stroke-linecap="butt"/>
   <path d="M0 58 L24 58 L94 128 L110 128 L160 78 L331 78" fill="none" stroke="url(#span)" stroke-width="13" stroke-linejoin="miter" stroke-linecap="butt"/>
 </svg>

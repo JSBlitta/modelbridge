@@ -1,47 +1,28 @@
-import { createServer, type Server } from "node:net";
+import { randomUUID } from "node:crypto";
 import { env } from "./env.js";
-import { recordEvent } from "./db.js";
+import { recordEvent, createPreviewToken, consumePreviewToken } from "./db.js";
+import { logger } from "./logger.js";
 
 let accessToken: string | null = null;
 let refreshTokenVal: string | null = null;
 
 // --- Temporary OAuth callback server (port 80) ---
 
-interface OAuthServerState {
-  server: Server | null;
-  port: number;
+interface OAuthProgress {
   completed: boolean;
   error: string | null;
   completedAt: string | null;
 }
 
-const oauthState: OAuthServerState = {
-  server: null,
-  port: 0,
-  completed: false,
-  error: null,
-  completedAt: null,
-};
-
-export const OAUTH_CALLBACK_PORT = 80;
+const oauthState: OAuthProgress = { completed: false, error: null, completedAt: null };
 
 export function getOAuthState() {
   return {
-    server_running: oauthState.server?.listening ?? false,
-    port: oauthState.port,
     completed: oauthState.completed,
     error: oauthState.error,
     completed_at: oauthState.completedAt,
     authenticated: isAuthenticated(),
   };
-}
-
-export function stopOAuthServer(): void {
-  if (oauthState.server) {
-    oauthState.server.close();
-    oauthState.server = null;
-    oauthState.port = 0;
-  }
 }
 
 export function markOAuthCompleted(error?: string | null): void {
@@ -50,69 +31,42 @@ export function markOAuthCompleted(error?: string | null): void {
   oauthState.completedAt = new Date().toISOString();
 }
 
-export async function startOAuthServer(): Promise<number> {
-  stopOAuthServer();
-  oauthState.completed = false;
-  oauthState.error = null;
-  oauthState.completedAt = null;
+// --- OAuth state parameter -------------------------------------------------
+//
+// The authorize URL previously carried no `state`, and the callback took its
+// `redirect_uri` straight from the query string. Together those let anyone who
+// could get an operator to open a crafted link complete the flow with their own
+// authorization code, binding this app's shared Trimble connection to an account
+// they controlled.
+//
+// Now a single-use state value is minted server-side and stored against the
+// callback URL it was issued for. The callback rejects an absent or unknown
+// state and takes the redirect_uri from that stored record, never from the
+// request. Reuses the single-use token store rather than adding a second one.
 
-  return new Promise((resolve, reject) => {
-    const server = createServer(async (socket) => {
-      let raw = "";
-      socket.on("data", (chunk) => { raw += chunk.toString(); });
-      socket.on("end", async () => {
-        const requestLine = raw.split("\r\n")[0] ?? "";
-        const parts = requestLine.split(" ");
-        const path = parts[1] ?? "/";
-        const url = new URL(`http://localhost${path}`);
-        const code = url.searchParams.get("code");
+const OAUTH_SCOPE = "oauth:trimble-state";
 
-        if (code) {
-          let responseBody: string;
-          try {
-            await exchangeCode(code, "http://localhost");
-            oauthState.completed = true;
-            oauthState.error = null;
-            oauthState.completedAt = new Date().toISOString();
-            responseBody = `<html><body style="font-family:sans-serif;text-align:center;padding-top:3rem">
-              <h2 style="color:#166534">&#10003; Authentication successful</h2>
-              <p>You may close this window and return to the application.</p>
-              <script>setTimeout(()=>window.close(),2000)</script>
-            </body></html>`;
-          } catch (e) {
-            oauthState.error = String(e);
-            oauthState.completed = true;
-            oauthState.completedAt = new Date().toISOString();
-            responseBody = `<html><body style="font-family:sans-serif;text-align:center;padding-top:3rem">
-              <h2 style="color:#b91c1c">&#10007; Authentication failed</h2>
-              <p>${String(e)}</p>
-            </body></html>`;
-          }
-          const response = [
-            `HTTP/1.1 200 OK`,
-            `Content-Type: text/html; charset=utf-8`,
-            `Content-Length: ${Buffer.byteLength(responseBody)}`,
-            `Connection: close`,
-            ``,
-            responseBody,
-          ].join("\r\n");
-          socket.write(response);
-          socket.end();
-          stopOAuthServer();
-        } else {
-          socket.write("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\nMissing code");
-          socket.end();
-        }
-      });
-    });
+export function beginOAuth(callbackUrl: string): { state: string; url: string } {
+  const state = randomUUID();
+  createPreviewToken(state, callbackKey(callbackUrl), OAUTH_SCOPE);
+  return { state, url: buildAuthorizeUrl(callbackUrl, state) };
+}
 
-    server.on("error", (e) => reject(e));
-    server.listen(OAUTH_CALLBACK_PORT, "localhost", () => {
-      oauthState.server = server;
-      oauthState.port = OAUTH_CALLBACK_PORT;
-      resolve(OAUTH_CALLBACK_PORT);
-    });
-  });
+// Consumes the state and returns the callback URL it was issued for, or null
+// when it is missing, unknown, expired or already spent. The store deletes on
+// first read, so the configured URLs are tried in turn until one matches.
+export function redeemOAuthState(state: string | undefined): string | null {
+  if (!state) return null;
+  for (const candidate of getCallbackUrls()) {
+    if (consumePreviewToken(state, callbackKey(candidate), OAUTH_SCOPE) === null) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+function callbackKey(callbackUrl: string): string {
+  return `cb:${callbackUrl.trim().toLowerCase()}`;
 }
 
 const REGION_ENDPOINTS = {
@@ -152,7 +106,7 @@ export function getCallbackUrls(): string[] {
   return env.TRIMBLE_CALLBACK_URLS;
 }
 
-export function buildAuthorizeUrl(callbackUrl?: string): string {
+export function buildAuthorizeUrl(callbackUrl?: string, state?: string): string {
   const redirectUri = callbackUrl ?? env.TRIMBLE_CALLBACK_URLS[0];
   const params = new URLSearchParams({
     scope: env.TRIMBLE_SCOPE,
@@ -160,7 +114,15 @@ export function buildAuthorizeUrl(callbackUrl?: string): string {
     redirect_uri: redirectUri,
     client_id: env.TRIMBLE_CLIENT_ID,
   });
+  if (state) params.set("state", state);
   return `${env.TRIMBLE_AUTHORIZE_URI}?${params}`;
+}
+
+// A callback URL is usable only if it is one we were configured with.
+export function isConfiguredCallback(url: string | undefined): url is string {
+  if (!url) return false;
+  const want = url.trim().toLowerCase();
+  return getCallbackUrls().some((u) => u.trim().toLowerCase() === want);
 }
 
 async function tokenExchange(payload: Record<string, string>): Promise<Record<string, unknown>> {
@@ -238,9 +200,12 @@ export async function fetchAllTrimblePages(
   pageSize = 1000,
   extraParams?: Record<string, string>,
 ): Promise<unknown[]> {
+  const MAX_PAGES = 500;
   const all: unknown[] = [];
   let offset = 0;
-  while (true) {
+  let pages = 0;
+  while (pages < MAX_PAGES) {
+    pages++;
     const params: Record<string, string> = {
       ...extraParams,
       top: String(pageSize),
@@ -255,8 +220,9 @@ export async function fetchAllTrimblePages(
       items = (p.results ?? p.items ?? p.entities ?? []) as unknown[];
     }
     all.push(...items);
-    if (items.length < pageSize) break;
+    if (items.length < pageSize) return all;
     offset += pageSize;
   }
+  logger.warn(`[trimble] fetchAllTrimblePages hit the ${MAX_PAGES}-page ceiling on ${url}; result is truncated`);
   return all;
 }

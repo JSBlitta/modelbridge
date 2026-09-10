@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import {
+  beginOAuth,
   buildAuthorizeUrl,
   clearTokens,
   exchangeCode,
@@ -10,11 +11,11 @@ import {
   getRefreshToken,
   getRegionEndpoints,
   isAuthenticated,
+  isConfiguredCallback,
   markOAuthCompleted,
+  redeemOAuthState,
   restoreRefreshToken,
   setManualToken,
-  startOAuthServer,
-  stopOAuthServer,
   trimbleGet,
 } from "../trimble-client.js";
 import { apiGet, apiPatch, apiPost, fetchAllPages } from "../produuzit-client.js";
@@ -57,30 +58,23 @@ app.get("/auth/status", (c) => c.json({ authenticated: isAuthenticated() }));
 
 app.get("/auth/urls", (c) => {
   const urls = getCallbackUrls();
+  // Each URL gets its own single-use state, so any of them can be started.
   return c.json({
     callback_urls: urls,
-    authorize_urls: urls.map((u) => ({ callback: u, url: buildAuthorizeUrl(u) })),
+    authorize_urls: urls.map((u) => ({ callback: u, url: beginOAuth(u).url })),
   });
 });
 
-app.get("/auth/start", async (c) => {
-  const configuredUrl = c.req.query("callback_url") ?? getCallbackUrls()[0];
-  // If a non-localhost callback is configured, use it directly — the /auth/callback route handles it
-  if (configuredUrl && !configuredUrl.startsWith("http://localhost")) {
-    const url = buildAuthorizeUrl(configuredUrl);
-    return c.json({ url, callback_url: configuredUrl });
+app.get("/auth/start", (c) => {
+  // The callback must be one we were configured with; an arbitrary value from
+  // the query string is not accepted.
+  const requested = c.req.query("callback_url");
+  const callbackUrl = isConfiguredCallback(requested) ? requested : getCallbackUrls()[0];
+  if (!callbackUrl) {
+    return c.json({ error: "No Trimble callback URL is configured (TRIMBLE_CALLBACK_URLS)" }, 500);
   }
-  // Local dev: start temp TCP server on port 80 and use http://localhost as redirect_uri
-  try {
-    const port = await startOAuthServer();
-    const callbackUrl = `http://localhost`;
-    const url = buildAuthorizeUrl(callbackUrl);
-    return c.json({ url, callback_port: port, callback_url: callbackUrl });
-  } catch (e) {
-    // Port 80 blocked (needs admin on Windows) — fall back to manual flow
-    const url = buildAuthorizeUrl(configuredUrl);
-    return c.json({ url, callback_url: configuredUrl, server_error: String(e) });
-  }
+  const { url } = beginOAuth(callbackUrl);
+  return c.json({ url, callback_url: callbackUrl });
 });
 
 app.get("/auth/callback-status", (c) => {
@@ -93,11 +87,6 @@ app.get("/auth/callback-status", (c) => {
   return c.json(state);
 });
 
-app.post("/auth/stop-server", (c) => {
-  stopOAuthServer();
-  return c.json({ ok: true });
-});
-
 // Clear tokens + delete cookie — call when refresh token is invalid so the user can re-authenticate
 app.post("/auth/disconnect", (c) => {
   clearTokens();
@@ -108,7 +97,15 @@ app.post("/auth/disconnect", (c) => {
 app.get("/auth/callback", async (c) => {
   const code = c.req.query("code");
   if (!code) return c.json({ error: "Missing code parameter" }, 400);
-  const redirectUri = c.req.query("redirect_uri") ?? undefined;
+
+  // The state proves this callback belongs to a flow we started, and carries the
+  // redirect_uri we started it with. Both used to be attacker-controlled.
+  const redirectUri = redeemOAuthState(c.req.query("state"));
+  if (!redirectUri) {
+    markOAuthCompleted("Invalid or expired OAuth state");
+    return c.json({ error: "Invalid or expired authentication attempt. Start the connection again." }, 400);
+  }
+
   try {
     const tokenData = await exchangeCode(code, redirectUri);
     markOAuthCompleted();
@@ -125,8 +122,13 @@ app.post("/auth/exchange-code", async (c) => {
   const body = await c.req.json<{ code: string; redirect_uri?: string }>();
   const code = (body.code ?? "").trim();
   if (!code) return c.json({ error: "Missing code" }, 400);
+  // Manual paste-the-code fallback. Session-gated like every other route, and
+  // the redirect_uri still has to be one we know about.
+  const redirectUri = isConfiguredCallback(body.redirect_uri)
+    ? body.redirect_uri
+    : getCallbackUrls()[0];
   try {
-    const tokenData = await exchangeCode(code, body.redirect_uri);
+    const tokenData = await exchangeCode(code, redirectUri);
     const rt = tokenData.refresh_token as string | undefined;
     if (rt) saveTrimbleCookie(c, rt);
   } catch (e) {

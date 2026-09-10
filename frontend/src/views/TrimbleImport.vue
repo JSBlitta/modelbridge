@@ -320,11 +320,12 @@
         <Message severity="warn" :closable="false" style="margin-bottom:1rem;">
           <strong>{{ $t('trimble.explicitConfirm') }}</strong>
         </Message>
-        <div v-if="selectedCount" class="mb-sm" style="margin-bottom:0.75rem">
-          <Button :label="$t('trimble.pushSelected')" icon="pi pi-cloud-upload" severity="warning" @click="doImport" :loading="importing" />
-        </div>
-        <div v-else class="mb-sm" style="margin-bottom:0.75rem">
-          <Button :label="$t('trimble.pushToProduuzit')" icon="pi pi-cloud-upload" severity="warning" @click="doImport" :loading="importing" />
+        <div class="mb-sm" style="margin-bottom:0.75rem">
+          <PushGate
+            :gate="importGate"
+            :show-check="false"
+            :confirm-label="$t('trimble.confirmChecked')"
+            :push-label="selectedCount ? $t('trimble.pushSelected') : $t('trimble.pushToProduuzit')" />
         </div>
       </template>
     </Card>
@@ -366,7 +367,8 @@ const { t } = useI18n()
 const route = useRoute()
 import { api } from '../api.js'
 import ColumnMapper from '../components/ColumnMapper.vue'
-import ConfirmedButton from '../components/ConfirmedButton.vue'
+import PushGate from '../components/PushGate.vue'
+import { usePushGate } from '../composables/usePushGate.js'
 import { useProduuzitProjects } from '../composables/useProduuzitProjects.js'
 import { useNotifications } from '../composables/useNotifications.js'
 
@@ -488,10 +490,8 @@ watch(includeAssemblies, () => { selectedEntityIndices.value = new Set() })
 const rawSampleEntity = ref(null)
 const fetchingRawSample = ref(false)
 
-const importing = ref(false)
-const previewing = ref(false)
+// importing / previewing / previewError now come from importGate (declared below).
 const previewData = ref(null)
-const previewError = ref('')
 const importResults = ref([])
 const importSummary = ref({ designs_created: 0, constructibles_created: 0, updated: 0, skipped: 0, blocked: 0, error: 0 })
 const uniqueOnlyImport = ref(true)
@@ -861,27 +861,41 @@ async function fetchEntities() {
   } finally { fetchingEntities.value = false }
 }
 
-async function doPreview() {
-  previewing.value = true; previewData.value = null; previewError.value = ''
-  try {
-    const ents = selectedEntities.value.length ? selectedEntities.value : previewEntities.value
-    const projectUuid = [...selectedProjectUuids.value][0]
-    const body = { project_uuid: projectUuid, column_mapping: columnMapping.value, entities: ents, unique_only: uniqueOnlyImport.value }
-    const r = await api.post('/api/trimble/preview-import', body)
-    previewData.value = r.data
-  } catch (e) {
-    previewError.value = e?.response?.data?.detail || e?.response?.data?.error || e?.message || String(e)
-    console.error('[trimble] preview failed:', previewError.value)
-  } finally { previewing.value = false }
+// Everything the check depends on. Kept cheap — entity payloads run to
+// thousands of objects, so the identity is a summary, not a serialisation.
+function importInputs() {
+  const ents = selectedEntities.value.length ? selectedEntities.value : previewEntities.value
+  return [
+    [...selectedProjectUuids.value][0] || '',
+    selectedFile.value || '',
+    selectedFileVersionId.value || '',
+    JSON.stringify(columnMapping.value),
+    uniqueOnlyImport.value ? '1' : '0',
+    ents.length,
+    // Guard against a same-length but different selection.
+    ents.length ? String(ents[0]?.id ?? '') + '|' + String(ents[ents.length - 1]?.id ?? '') : '',
+  ].join('::')
 }
 
-async function doImport() {
-  importing.value = true; importResults.value = []
-  try {
-    const ents = selectedEntities.value.length ? selectedEntities.value : previewEntities.value
-    const projectUuid = [...selectedProjectUuids.value][0]
-    const body = { project_uuid: projectUuid, column_mapping: columnMapping.value, entities: ents, unique_only: uniqueOnlyImport.value }
-    const r = await api.post('/api/trimble/import', body)
+function importBody() {
+  const ents = selectedEntities.value.length ? selectedEntities.value : previewEntities.value
+  return {
+    project_uuid: [...selectedProjectUuids.value][0],
+    column_mapping: columnMapping.value,
+    entities: ents,
+    unique_only: uniqueOnlyImport.value,
+  }
+}
+
+const importGate = usePushGate({
+  identity: importInputs,
+  check: async () => {
+    const r = await api.post('/api/trimble/preview-import', importBody())
+    previewData.value = r.data
+    return r.data
+  },
+  push: async (previewToken) => {
+    const r = await api.post('/api/trimble/import', { ...importBody(), preview_token: previewToken })
     importResults.value = r.data.results || []
     importSummary.value = r.data.summary || { designs_created: 0, constructibles_created: 0, updated: 0, skipped: 0, blocked: 0, error: 0 }
     previewData.value = null
@@ -894,8 +908,15 @@ async function doImport() {
     } else if (importSummary.value.designs_created || importSummary.value.constructibles_created || importSummary.value.updated) {
       notify({ severity: 'success', summary: t('trimble.pushToProduuzitTitle'), detail: t('trimble.importSuccessDetail', { designs: importSummary.value.designs_created, constructibles: importSummary.value.constructibles_created }), life: 5000 })
     }
-  } finally { importing.value = false }
-}
+    return r.data
+  },
+})
+
+// The template and the create-missing flows still speak in these terms.
+const previewing = computed(() => importGate.checking)
+const importing = computed(() => importGate.pushing)
+const previewError = computed(() => importGate.error)
+const doPreview = () => importGate.runCheck()
 
 async function createMissingDesignsAction() {
   const missing = previewData.value?.unresolved_designs || []
