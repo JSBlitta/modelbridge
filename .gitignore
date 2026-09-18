@@ -21,3 +21,6 @@ constructibles*.json
 # Reference material and leftovers kept on disk but out of the repo.
 # See _attic/README.md for what is in here and why.
 _attic/
+
+# Power BI connector source — not used in the repo
+TrimbleConnectPropertysets/
