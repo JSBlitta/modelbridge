@@ -3,6 +3,7 @@ import "./env.js";
 import { serve } from "@hono/node-server";
 import { Hono } from "hono";
 import { serveStatic } from "@hono/node-server/serve-static";
+import { logger as honoLogger } from "hono/logger";
 import { env } from "./env.ts";
 import { loadConfig } from "./config.ts";
 import { initLogger, logger } from "./logger.ts";
@@ -25,6 +26,10 @@ import { getReportingSettings } from "./settings.ts";
 import { isSharePointConfigured } from "./sharepoint-client.ts";
 
 const app = new Hono();
+
+// One line per request and response, at debug. Before this nothing about
+// traffic was logged at any level.
+app.use("*", honoLogger((line) => logger.debug(line.replace(/\x1b\[\d+m/g, ""))));
 
 // Every /api route is session-gated. The middleware exempts only the handful of
 // paths that must work before a session exists (see middleware/session.ts).

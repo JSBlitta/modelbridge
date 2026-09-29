@@ -14,6 +14,7 @@ import { getCookie } from "hono/cookie";
 import * as db from "../db.ts";
 import { isAdmin } from "../settings.ts";
 import { env } from "../env.ts";
+import { logger } from "../logger.ts";
 
 export const SESSION_COOKIE = "session_id";
 
@@ -43,8 +44,10 @@ export const requireSession: MiddlewareHandler = async (c, next) => {
   const sessionId = getCookie(c, SESSION_COOKIE);
   const session = sessionId ? db.getSession(sessionId) : null;
   if (!session) {
+    logger.debug(`[session] ${c.req.method} ${c.req.path} rejected: ${sessionId ? `session ${sessionId.slice(0, 8)} unknown or expired` : "no session cookie"}`);
     return c.json({ error: "Not authenticated", code: "UNAUTHENTICATED" }, 401);
   }
+  logger.debug(`[session] ${c.req.method} ${c.req.path} user="${session.username}" session=${session.id.slice(0, 8)}`);
 
   c.set("session", session);
   await next();

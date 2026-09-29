@@ -34,7 +34,9 @@ app.post("/login", async (c) => {
   try {
     const tokens = await loginWithCredentials(username, password);
     accessToken = tokens.access;
-  } catch {
+  } catch (e) {
+    // Bad password and "Produuzit unreachable" both land here; the log says which.
+    logger.warn(`[auth] login failed for "${username}": ${e instanceof Error ? e.message : String(e)}`);
     return c.json({ error: "Invalid credentials" }, 401);
   }
 
@@ -47,6 +49,7 @@ app.post("/login", async (c) => {
 
   const sessionId = randomUUID();
   db.createSession(sessionId, profile.username, profile.email);
+  logger.info(`[auth] login user="${profile.username}" session=${sessionId.slice(0, 8)}`);
 
   setCookie(c, COOKIE_NAME, sessionId, cookieOpts(isSecureRequest(c)));
   return c.json({ ok: true, username: profile.username, email: profile.email });

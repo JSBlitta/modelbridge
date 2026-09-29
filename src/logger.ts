@@ -13,8 +13,13 @@ let _stream: WriteStream | null = null;
 // optional log file. When LOG_FILE is set, every message is also appended to
 // that file (timestamped) in addition to the console.
 export function initLogger(level?: string, logFile?: string): void {
-  const lvl = (level || process.env.LOG_LEVEL || "info").toLowerCase();
+  const lvl = (level || process.env.LOG_LEVEL || "info").trim().toLowerCase();
+  // An unrecognised value used to leave the level at info without a word, so
+  // LOG_LEVEL="debug" (quoted) or a typo looked like "debug logs nothing".
   if (lvl in LEVELS) _level = LEVELS[lvl as Level];
+  else console.warn(`[logger] LOG_LEVEL "${lvl}" is not one of ${Object.keys(LEVELS).join("|")}; using info`);
+  const name = (Object.keys(LEVELS) as Level[]).find((k) => LEVELS[k] === _level);
+  console.info(`[logger] level=${name}${logFile || process.env.LOG_FILE ? ` file=${logFile || process.env.LOG_FILE}` : ""}`);
 
   _logFile = logFile || process.env.LOG_FILE || "";
   if (_stream) { _stream.end(); _stream = null; }
@@ -47,7 +52,9 @@ function write(level: Level, args: unknown[]): void {
     : level === "warn" ? console.warn
     : level === "info" ? console.info
     : console.debug;
-  consoleFn(...args);
+  // The formatted line, not the raw args: otherwise the console showed no
+  // timestamp and no level, and a debug line was indistinguishable from info.
+  consoleFn(line);
 
   // File output (not gated — the level check above already applies). A buffered
   // stream avoids blocking the event loop on every logged request.
