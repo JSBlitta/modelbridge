@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { parseFrn, safeDecode, indexByFrnCandidates } from "./trimble-frn.ts";
+import { parseFrn, safeDecode, indexByFrnCandidates, psetLinkPrefixesForModel } from "./trimble-frn.ts";
 
 // The two readings of the FRN grammar that the connector source leaves open.
 // parseFrn must serve both, because we cannot tell from the M code which is
@@ -80,4 +80,43 @@ test("indexByFrnCandidates does not let a fallback key shadow a primary one", ()
   ];
   const index = indexByFrnCandidates(psets, (p) => p.link);
   assert.equal(index.get("E1")?.tag, "primary");
+});
+
+// The three entity-link forms Trimble documents verbatim in its public Postman
+// collection ("Pointing to 3D elements"), for element id 0PntyzmZHFWh4O3ogKil7e.
+const ENTITY = "0PntyzmZHFWh4O3ogKil7e";
+
+test("the documented entity FRN forms all yield the same entity id", () => {
+  for (const link of [
+    `frn:entity:${ENTITY}`,
+    `frn:tcfile:q-XKNAhg3Rk/entity:${ENTITY}`,
+    `frn:tcfile:q-XKNAhg3Rk:woC32em2Fb0/entity:${ENTITY}`,
+  ]) {
+    const parsed = parseFrn(link);
+    assert.equal(parsed.entityId, ENTITY, link);
+    assert.equal(parsed.candidates[0], ENTITY, `${link} joins on the entity id first`);
+  }
+});
+
+test("the file id is read from the tcfile part, version stripped", () => {
+  assert.equal(parseFrn(`frn:tcfile:q-XKNAhg3Rk/entity:${ENTITY}`).fileId, "q-XKNAhg3Rk");
+  assert.equal(parseFrn(`frn:tcfile:q-XKNAhg3Rk:woC32em2Fb0/entity:${ENTITY}`).fileId, "q-XKNAhg3Rk");
+  assert.equal(parseFrn(`frn:entity:${ENTITY}`).fileId, "");
+});
+
+test("an organizer node link yields no entity id, so it cannot join a model row", () => {
+  const node = "frn:forest:BAA01Z424_8/tree:087b105342c244608bbc65c2f0f4c765/node:9e91a83b";
+  assert.equal(parseFrn(node).entityId, "");
+});
+
+test("model scoping asks for both the file-prefixed and the bare entity form", () => {
+  // Dropping either prefix silently loses psets: the bare form carries no file
+  // id at all, and the versioned form is only reachable via the file prefix.
+  assert.deepEqual(psetLinkPrefixesForModel("q-XKNAhg3Rk"), [
+    "frn:tcfile:q-XKNAhg3Rk",
+    "frn:entity:",
+  ]);
+  const prefix = psetLinkPrefixesForModel("q-XKNAhg3Rk")[0];
+  assert.ok(`frn:tcfile:q-XKNAhg3Rk/entity:${ENTITY}`.startsWith(prefix));
+  assert.ok(`frn:tcfile:q-XKNAhg3Rk:woC32em2Fb0/entity:${ENTITY}`.startsWith(prefix));
 });

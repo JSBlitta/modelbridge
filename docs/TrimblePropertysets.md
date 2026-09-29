@@ -109,17 +109,52 @@ Type coercion (`GenerateSchema`, `Helpers.pqm:323`) maps the declared type
 loosely: anything containing `integer` → int; `number|mass|leng|area|volume|angl`
 → float; `bool` → boolean; `string` → text; otherwise untyped.
 
-## Pagination
+## Pagination — the Property Set API does not use offsets
 
-`Pagination.pqm:3` `FetchPages`: `?top={pageSize}&offset={offset}`, and the
-response may carry `offsetNext`, `total`, and/or `next` (an absolute URL). The
-loop prefers `next` when present, else re-derives offset; it stops when a page
-returns fewer than `pageSize` rows or offset reaches total.
+**This is where our first implementation was wrong.** The connector's
+`Pagination.pqm` sends `?top=&offset=` and inspects `offsetNext`/`total`/`next`,
+and `fetchAllTrimblePages` was written to the same shape. That dialect belongs to
+the **Model** API. The **Property Set** API is different, per its OpenAPI spec
+(`https://api.swaggerhub.com/apis/Trimble-Connect/pset-prod/v1`, read 2026-09-11):
 
-Note this is a **different pagination dialect** from the Produuzit
-`limit`/`offset`/`results`/`next` shape in `produuzit-client.ts`, and different
-again from what `fetchAllTrimblePages` currently assumes (`top`/`offset`, stop on
-short page, no `next` handling).
+| | Model API | Property Set API |
+|---|---|---|
+| page size | `top` | `top` (max **500**, default 100) |
+| cursor | `offset` (integer) | `skiptoken` (opaque), echoed as `next` |
+| response | `items`, `offsetNext`, `total` | `items`, `next` only |
+| end of data | short page / offset = total | **`next` absent** |
+
+Two consequences, both of which bit us:
+
+1. `offset` is *ignored* by the pset service, so an offset loop re-reads page 1
+   forever. With `MAX_PAGES = 500` and `top = 200` that produced exactly the
+   `values=100000` in the bug report — roughly two hundred real psets, each
+   repeated five hundred times.
+2. Stopping on a short page is also wrong here: the spec says a list operation
+   "can return an empty result set and a `next` if all the items read for the page
+   of results are filtered out. Client have to iterate until `next` property in the
+   response is not present."
+
+`fetchAllPsetPages` in `src/trimble-client.ts` implements that. `fetchAllTrimblePages`
+stays as it was — the Model API really is offset-paged.
+
+## Scoping to one model
+
+Property-set libraries bind to a **project**, never to a model: the Organizer node
+is `ProjectContext` → `PSetLibs` and has no model dimension. So there is no
+library-to-model filter to apply. The lever the API does give is the `link` query
+parameter on the psets listings, which is a plain string **prefix** filter —
+Trimble's own example uses `link=frn:lib:<accountLibId>` to find every project
+library derived from an account library.
+
+`getPsetValues(defs, modelId)` uses it with two prefixes:
+
+- `frn:tcfile:<modelId>` — covers `frn:tcfile:<fileId>/entity:<id>` and
+  `frn:tcfile:<fileId>:<versionId>/entity:<id>` in one query;
+- `frn:entity:` — the bare form carries no file id, so a file prefix would drop it.
+
+`modelId` is the Model API's model id, which "equals the fileId" per the Model API
+overview.
 
 ## What this means for ModelBridge
 
@@ -138,46 +173,56 @@ the entity id, before the result is returned — then `extractProp`, the column
 mapper, and every import path downstream work unchanged, with no notion that a
 property came from anywhere unusual.
 
-## The FRN handling, and why it is not a straight port
+## The FRN grammar (documented, not inferred)
 
-An FRN is URN-shaped and its resource tail is percent-encoded. The connector
-handles this in exactly one place — `RemoveFrnPrefix` (`Helpers.pqm:220`):
-split on `:`, drop two segments, rejoin with `:`. **It never decodes.**
-`DecodeUrl` exists in the same file but is applied only to `treeName` and
-`nodeName` (`Organizer.pqm:49,67`); it never touches a link. So a link carrying
-any encoded character keeps it, and the join compares `%3A` against a raw id.
+Trimble's public Postman workspace — collection *Documentation for Workflow
+Extentions Integrators*, request **Property sets → Instantiating property sets →
+Pointing to 3D elements** — gives the entity link forms verbatim, for an element
+whose id is `0PntyzmZHFWh4O3ogKil7e`:
 
-That leaves two things genuinely unresolved from source alone:
+```
+frn:entity:0PntyzmZHFWh4O3ogKil7e
+frn:tcfile:q-XKNAhg3Rk/entity:0PntyzmZHFWh4O3ogKil7e
+frn:tcfile:q-XKNAhg3Rk:woC32em2Fb0/entity:0PntyzmZHFWh4O3ogKil7e
+```
 
-- **Arity.** `RemoveFrnPrefix` rejoins the tail with colons, implying its author
-  expected a multi-segment tail. Yet `Organizer.pqm:19` feeds a stripped library
-  link straight into `/libs/{libId}/defs`, a URL that evidently works — which
-  only holds if *that* tail is a bare id. Library and entity FRNs may simply
-  differ in arity.
-- **Encoding.** Whether entity ids in practice contain characters that get
-  percent-encoded. IFC GlobalIds (base64: `0-9A-Za-z_$`) would not; other
-  Trimble id forms might.
+and, for an Organizer node:
 
-Rather than pick a reading, `src/trimble-frn.ts` parses an FRN into every
-plausible key — the bare trailing segment, the full decoded tail, and the
-undecoded forms — and the merge tries them in order. Both readings are covered
-by tests, and `safeDecode` is applied throughout.
+```
+frn:forest:BAA01Z424_8/tree:087b105342c244608bbc65c2f0f4c765
+frn:forest:BAA01Z424_8/tree:087b1053…/node:9e91a83ba1854f76aa0cede175ab8346
+```
 
-**The important part is the diagnostic.** A wrong guess here does not fail; as a
-left outer join it looks exactly like "this project has no Trimble properties".
-So `mergeTrimblePsets` counts matches and, when values exist but nothing matched,
-returns a note plus sample keys from both sides. That surfaces in the UI as a
-warning toast instead of a column of nulls.
+So after `frn:` the reference is a **`/`-separated** list of `type:value` parts.
+The connector's `RemoveFrnPrefix` only ever split on `:`, which is why the arity
+looked ambiguous from the M code alone — the `/` separator was invisible to it.
 
-## Open questions still to settle against the live API
+`parseFrn` now reads `entityId` (the value of the `entity` part) and `fileId`
+(the `tcfile` part, version stripped) directly, and puts `entityId` first in
+`candidates`. The older heuristic readings stay behind it so an undocumented link
+shape still has a chance of joining. A node link yields no `entityId`, which is
+correct: a pset attached to an Organizer node is not attached to a model row.
 
-1. **Trailing slashes.** `RegionStatic` bases end in `/`, and `Organizer.pqm:11`
-   concatenates `"/forests/…"` producing `//forests/`, while `:89` concatenates
-   `"forests/"` without. Inconsistent in the same file. Our `joinUrl` normalises
-   to a single slash either way.
-2. **Whether the pset API honours `top`/`offset` or only `next`.** We reuse
-   `fetchAllTrimblePages`, which sends `top`/`offset` and stops on a short page.
-3. **Whether one entity can carry the same `defId` twice** (repeatable property
+Library ids are their own case. A project library derived from an account-level
+template has the composite id `[accountLibId]:[projectId]:[guid]`, which arrives
+percent-encoded inside the FRN — `frn:lib:93bfd…%3ABAA01Z424_8%3A88eea…`. That is
+why the library id must be decoded once and re-encoded into the URL path, and why
+the log shows a `libs/…%3A…%3A…/defs` URL that looks wrong but is not.
+
+**The diagnostic still matters.** A wrong join here is a left outer join and looks
+exactly like "this project has no Trimble properties", so `mergeTrimblePsets`
+counts matches and, when values exist but nothing matched, returns a note plus
+sample keys from both sides.
+
+## Still open against the live API
+
+1. **Trailing slashes.** `RegionStatic` bases end in `/` and the connector
+   concatenates inconsistently; our `joinUrl` normalises to a single slash.
+2. **Whether one entity can carry the same `defId` twice** (repeatable property
    sets). The connector assumes one row per entity per def; our merge accumulates
-   instead, so a second row adds properties rather than being dropped — but if
-   the same property appears twice, last write wins.
+   instead, so a second row adds properties rather than being dropped — but if the
+   same property appears twice, last write wins.
+3. **Whether the entity id Trimble writes into a link is the IFC GlobalId** (the
+   Model API "external/source id") in every authoring tool, or sometimes the
+   generated "connect" id. The candidate list and the mismatch diagnostic cover
+   this; a live project with a known-good pset would settle it.

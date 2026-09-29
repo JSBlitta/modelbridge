@@ -15,8 +15,8 @@
 // `entity.psets` object that transformEntityPsets already produces, so the
 // column mapper, extractProp and every import path work unchanged.
 
-import { fetchAllTrimblePages, getRegionEndpoints, trimbleGet } from "./trimble-client.js";
-import { indexByFrnCandidates, parseFrn } from "./trimble-frn.js";
+import { fetchAllPsetPages, getRegionEndpoints, trimbleGet } from "./trimble-client.js";
+import { parseFrn, psetLinkPrefixesForModel } from "./trimble-frn.js";
 import { logger } from "./logger.js";
 
 // --- Shapes returned by the Property Set API -------------------------------
@@ -24,6 +24,7 @@ import { logger } from "./logger.js";
 interface PsetDefResponse {
   id: string;
   libId: string;
+  name?: string;
   v?: number;
   i18n?: Record<string, { name?: string; props?: Record<string, string> }>;
   schema?: { props?: Record<string, { type?: string; description?: string; enum?: unknown }> };
@@ -119,15 +120,19 @@ export async function getPsetDefinitions(libIds: string[]): Promise<PsetProperty
     const url = joinUrl(endpoints.Propertyset, `libs/${encodeURIComponent(libId)}/defs`);
     let items: PsetDefResponse[] = [];
     try {
-      items = (await fetchAllTrimblePages(url, 200)) as PsetDefResponse[];
+      items = (await fetchAllPsetPages(url)) as PsetDefResponse[];
     } catch (e) {
       logger.warn(`[trimble-psets] could not read definitions for library ${libId}: ${String(e)}`);
       continue;
     }
 
     for (const item of items) {
-      const en = item.i18n?.["en-US"] ?? {};
-      const psetName = en.name ?? item.id;
+      const en = pickLocale(item.i18n);
+      // `id` is opaque ("publish", a guid); it is the last resort, not the
+      // first. Trimble's own examples put the readable name in i18n, but the
+      // spec's example locale key is "en" while the connector assumed "en-US",
+      // and `name` on the definition itself is populated in both.
+      const psetName = en.name || item.name || item.id;
       const schemaProps = item.schema?.props ?? {};
       const nameByPropId = en.props ?? {};
 
@@ -145,6 +150,21 @@ export async function getPsetDefinitions(libIds: string[]): Promise<PsetProperty
   }
 
   return disambiguate(defs);
+}
+
+/**
+ * The translation block to read names from. Trimble's API spec uses "en" in
+ * its example, its Postman collection uses "en-US", and a library authored in
+ * another language may have neither — in which case any locale beats none.
+ */
+export function pickLocale(
+  i18n: Record<string, { name?: string; props?: Record<string, string> }> | undefined,
+): { name?: string; props?: Record<string, string> } {
+  if (!i18n) return {};
+  for (const key of ["en-US", "en"]) if (i18n[key]) return i18n[key];
+  // "__prop-order__" is a control block Trimble stores alongside the locales.
+  const real = Object.keys(i18n).find((k) => !k.startsWith("__"));
+  return real ? i18n[real] : {};
 }
 
 /**
@@ -173,7 +193,22 @@ interface PsetValueRow {
   values: Record<string, unknown>;
 }
 
-export async function getPsetValues(defs: PsetPropertyDef[]): Promise<PsetValueRow[]> {
+/**
+ * Fetch the property-set values for the given definitions.
+ *
+ * `modelId` scopes the read to one model. Libraries are bound to a *project*,
+ * never to a model (the Organizer node is `ProjectContext/PSetLibs`), so there
+ * is no library-level filter to apply — the scoping lever the API does give is
+ * the `link` **prefix** filter on the psets listing. Passing the model's file
+ * id turns "every pset in every project library" into "the psets attached to
+ * this model", which on a real project is three orders of magnitude less data.
+ *
+ * Omit `modelId` to read a whole library unfiltered (the psetdefs picker does).
+ */
+export async function getPsetValues(
+  defs: PsetPropertyDef[],
+  modelId?: string,
+): Promise<PsetValueRow[]> {
   const endpoints = getRegionEndpoints();
 
   // One call per (libId, defId); a definition contributes many properties.
@@ -185,18 +220,23 @@ export async function getPsetValues(defs: PsetPropertyDef[]): Promise<PsetValueR
   const nameByDefAndProp = new Map<string, string>();
   for (const d of defs) nameByDefAndProp.set(`${d.defId}|${d.propId}`, d.propName);
 
+  const linkPrefixes = modelId ? psetLinkPrefixesForModel(modelId) : [undefined];
+
   const rows: PsetValueRow[] = [];
   for (const { libId, defId, psetName } of pairs.values()) {
     const url = joinUrl(
       endpoints.Propertyset,
       `libs/${encodeURIComponent(libId)}/defs/${encodeURIComponent(defId)}/psets`,
     );
-    let items: PsetValueResponse[] = [];
-    try {
-      items = (await fetchAllTrimblePages(url, 200)) as PsetValueResponse[];
-    } catch (e) {
-      logger.warn(`[trimble-psets] could not read values for def ${defId}: ${String(e)}`);
-      continue;
+    const items: PsetValueResponse[] = [];
+    for (const link of linkPrefixes) {
+      try {
+        items.push(
+          ...((await fetchAllPsetPages(url, link ? { link } : undefined)) as PsetValueResponse[]),
+        );
+      } catch (e) {
+        logger.warn(`[trimble-psets] could not read values for def ${defId}: ${String(e)}`);
+      }
     }
 
     for (const item of items) {
@@ -229,8 +269,6 @@ export function mergeTrimblePsets(
   values: PsetValueRow[],
   diagnosticsSeed: Partial<TrimblePsetDiagnostics> = {},
 ): TrimblePsetMergeResult {
-  const byCandidate = indexByFrnCandidates(values, (v) => v.link);
-
   // Group by entity so one entity can carry several property sets.
   const rowsForEntity = new Map<string, PsetValueRow[]>();
   for (const row of values) {
@@ -285,7 +323,9 @@ export function mergeTrimblePsets(
     sampleEntityKeys:
       matchedEntities === 0 ? entities.slice(0, 3).map((e) => String(e.id ?? "")) : [],
     sampleLinkKeys:
-      matchedEntities === 0 ? values.slice(0, 3).map((v) => `${v.link} -> ${parseFrn(v.link).id}`) : [],
+      matchedEntities === 0
+        ? values.slice(0, 3).map((v) => `${v.link} -> ${parseFrn(v.link).entityId || parseFrn(v.link).id}`)
+        : [],
     notes,
   };
 
@@ -297,10 +337,16 @@ export function mergeTrimblePsets(
 /**
  * The whole pipeline for one project. Returns the entities unchanged when the
  * project has no property-set libraries, which is the common case.
+ *
+ * `modelId` is the file id of the model being imported. Passing it scopes the
+ * value read to that model's own psets instead of every pset in every library
+ * the project is bound to; see getPsetValues for why that is the only scoping
+ * lever the API offers.
  */
 export async function applyTrimblePropertySets(
   projectId: string,
   entities: Record<string, unknown>[],
+  modelId?: string,
 ): Promise<TrimblePsetMergeResult> {
   const empty: TrimblePsetDiagnostics = {
     libraryCount: 0, definitionCount: 0, propertyCount: 0, psetValueCount: 0,
@@ -315,7 +361,7 @@ export async function applyTrimblePropertySets(
     return { entities, diagnostics: { ...empty, libraryCount: libIds.length } };
   }
 
-  const values = await getPsetValues(defs);
+  const values = await getPsetValues(defs, modelId);
   const distinctDefs = new Set(defs.map((d) => d.defId)).size;
 
   const result = mergeTrimblePsets(entities, values, {
@@ -325,8 +371,9 @@ export async function applyTrimblePropertySets(
   });
 
   logger.info(
-    `[trimble-psets] project=${projectId} libraries=${libIds.length} defs=${distinctDefs} ` +
-    `properties=${defs.length} values=${values.length} matched=${result.diagnostics.matchedEntities}`,
+    `[trimble-psets] project=${projectId} model=${modelId ?? "(all)"} libraries=${libIds.length} ` +
+    `defs=${distinctDefs} properties=${defs.length} values=${values.length} ` +
+    `matched=${result.diagnostics.matchedEntities}`,
   );
   for (const note of result.diagnostics.notes) logger.warn(`[trimble-psets] ${note}`);
 

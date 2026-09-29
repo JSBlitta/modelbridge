@@ -386,7 +386,7 @@ app.post("/models/:modelId/entities", async (c) => {
   let psetDiagnostics = null;
   if (body.trimble_project_id) {
     try {
-      const merged = await applyTrimblePropertySets(body.trimble_project_id, entities);
+      const merged = await applyTrimblePropertySets(body.trimble_project_id, entities, modelId);
       entities = merged.entities;
       psetDiagnostics = merged.diagnostics;
     } catch (e) {

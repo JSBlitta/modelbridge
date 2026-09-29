@@ -1,26 +1,38 @@
-// Trimble FRN (Federated Resource Name) parsing.
+// Trimble FRN (Fulcrum Resource Notation) parsing.
 //
-// An FRN is a URN-shaped reference, ARN-style: `frn:<namespace>:<resource>`,
-// where the resource tail may itself contain colons and may be percent-encoded.
+// The grammar is no longer guesswork. Trimble's own Postman collection
+// "Documentation for Workflow Extentions Integrators" (public workspace
+// trimble-connect-s-public-workspace, request *Property sets → Instantiating
+// property sets → Pointing to 3D elements*) states it outright, for an element
+// whose id is `0PntyzmZHFWh4O3ogKil7e`:
 //
-// The Power BI connector this was ported from handles these with
-// `RemoveFrnPrefix` (Helpers.pqm:220): split on ":", drop the first two
-// segments, rejoin the rest with ":". It never percent-decodes. `DecodeUrl`
-// exists in the same file but is applied only to tree and node *names*
-// (Organizer.pqm:49,67) — never to a link. So any link carrying an encoded
-// character keeps it, and a join against a raw entity id silently misses.
+//   frn:entity:0PntyzmZHFWh4O3ogKil7e
+//   frn:tcfile:q-XKNAhg3Rk/entity:0PntyzmZHFWh4O3ogKil7e
+//   frn:tcfile:q-XKNAhg3Rk:woC32em2Fb0/entity:0PntyzmZHFWh4O3ogKil7e
 //
-// We also cannot be certain the tail is a single segment for every resource
-// type. The connector's own rejoin-with-colons implies its author expected a
-// multi-segment tail, yet Organizer.pqm:19 feeds the stripped value straight
-// into `/libs/{libId}/defs` — a URL that evidently works, which only holds if
-// that tail is a bare id. Library and entity FRNs may simply differ in arity.
+// and for an Organizer node:
 //
-// Rather than pick one reading and hope, parseFrn exposes every plausible key
-// and the join tries them in order. A mismatch then shows up as a reported
-// diagnostic instead of a column of nulls.
+//   frn:forest:BAA01Z424_8/tree:087b105342c244608bbc65c2f0f4c765
+//   frn:forest:BAA01Z424_8/tree:087b1053…/node:9e91a83ba1854f76aa0cede175ab8346
+//
+// So after `frn:` the reference is a **`/`-separated** list of `type:value`
+// parts — the separator the Power BI connector's `RemoveFrnPrefix`
+// (Helpers.pqm:220) never knew about, because it only ever split on ":".
+//
+// That gives an exact join key: the value of the `entity` part. `candidates`
+// keeps the older heuristic readings behind it, so a link shaped in some way
+// Trimble has not documented still has a chance of joining rather than
+// silently producing a column of nulls.
 
-export interface ParsedFrn {
+/** The parts of an entity FRN we can address a model with. */
+export interface FrnParts {
+  /** Value of the `entity:` part, percent-decoded. "" when there is none. */
+  entityId: string;
+  /** Value of the `tcfile:` part — the model/file id. "" when there is none. */
+  fileId: string;
+}
+
+export interface ParsedFrn extends FrnParts {
   /** The input, unchanged. */
   raw: string;
   /** True when the input actually looked like an FRN. */
@@ -58,6 +70,8 @@ export function parseFrn(input: string | null | undefined): ParsedFrn {
       namespace: "",
       path: decoded,
       id: decoded,
+      entityId: "",
+      fileId: "",
       candidates: dedupe([decoded, raw]),
     };
   }
@@ -68,6 +82,7 @@ export function parseFrn(input: string | null | undefined): ParsedFrn {
 
   const path = safeDecode(tailSegments.join(":"));
   const id = safeDecode(tailSegments[tailSegments.length - 1] ?? "");
+  const { entityId, fileId } = splitFrnParts(raw);
 
   return {
     raw,
@@ -75,11 +90,51 @@ export function parseFrn(input: string | null | undefined): ParsedFrn {
     namespace,
     path,
     id,
-    // Order matters: the bare trailing id is the likeliest join key, then the
-    // full tail (the connector's interpretation), then the undecoded forms in
-    // case the other side of the join is itself still encoded.
-    candidates: dedupe([id, path, tailSegments.join(":"), raw]),
+    entityId,
+    fileId,
+    // Order matters: the documented entity id first, then the bare trailing
+    // segment, the full tail (the connector's reading), and finally the
+    // undecoded forms in case the other side of the join is still encoded.
+    candidates: dedupe([entityId, id, path, tailSegments.join(":"), raw]),
   };
+}
+
+/**
+ * Split `frn:<type>:<value>[/<type>:<value>…]` into the parts we join on.
+ *
+ * `frn:entity:X` has no `/`, so the whole remainder is one part; the
+ * `frn:tcfile:<file>[:<version>]/entity:<id>` forms have two, and only the
+ * `entity` part carries the model entity id.
+ */
+function splitFrnParts(raw: string): FrnParts {
+  let entityId = "";
+  let fileId = "";
+
+  for (const part of raw.slice("frn:".length).split("/")) {
+    const colon = part.indexOf(":");
+    if (colon < 0) continue;
+    const type = part.slice(0, colon).toLowerCase();
+    const value = part.slice(colon + 1);
+    // `tcfile` alone may be `<fileId>:<versionId>`; the file id is the first.
+    if (type === "entity") entityId = safeDecode(value);
+    else if (type === "tcfile") fileId = safeDecode(value.split(":")[0] ?? "");
+  }
+
+  return { entityId, fileId };
+}
+
+/**
+ * The `link` prefixes that select every pset attached to one model.
+ *
+ * `/libs/{libId}/defs/{defId}/psets?link=` is a plain string **prefix** filter
+ * (Trimble's own example filters `frn:lib:<accountLibId>` to find the project
+ * libraries derived from it). `frn:tcfile:<modelId>` therefore covers both the
+ * versioned and unversioned file forms in one query. The bare `frn:entity:`
+ * form carries no file id at all, so it needs a second query — dropping it
+ * would silently lose every pset attached without a file prefix.
+ */
+export function psetLinkPrefixesForModel(modelId: string): string[] {
+  return [`frn:tcfile:${modelId}`, "frn:entity:"];
 }
 
 function dedupe(values: string[]): string[] {

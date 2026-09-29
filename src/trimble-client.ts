@@ -230,3 +230,52 @@ export async function fetchAllTrimblePages(
   logger.warn(`[trimble] fetchAllTrimblePages hit the ${MAX_PAGES}-page ceiling on ${url}; result is truncated`);
   return all;
 }
+
+/**
+ * Pagination for the Property Set API, which does NOT page the way the Model
+ * API does. Per its OpenAPI spec (SwaggerHub Trimble-Connect/pset-prod/v1):
+ *
+ *   - `top` caps a page at 500 items (default 100), and is only a hint;
+ *   - the cursor is an opaque `skiptoken`, echoed back in an absolute `next` url;
+ *   - there is no `offset`, no `total`, no `offsetNext`;
+ *   - "a list operation can return an empty result set and a `next` if all the
+ *     items read for the page were filtered out. Client have to iterate until
+ *     `next` property in the response is not present."
+ *
+ * Sending `offset` to this service is simply ignored, so the loop in
+ * fetchAllTrimblePages re-read page 1 until it hit its own page ceiling — which
+ * is what produced "values=100000" (500 pages x top=200) from a few hundred
+ * real psets. Stopping on a short page is wrong here for the same reason: only
+ * the absence of `next` ends the sequence.
+ */
+export async function fetchAllPsetPages(
+  url: string,
+  params?: Record<string, string>,
+  pageSize = 500,
+  // Injectable so the cursor loop can be tested without a network or a token.
+  get: (u: string, p?: Record<string, string>) => Promise<unknown> = trimbleGet,
+): Promise<unknown[]> {
+  // Only a runaway guard; normal termination is `next` going away.
+  const MAX_PAGES = 10_000;
+  const all: unknown[] = [];
+  let nextUrl: string | null = null;
+  let pages = 0;
+
+  while (pages < MAX_PAGES) {
+    pages++;
+    const page = (nextUrl
+      ? await get(nextUrl)
+      : await get(url, { ...params, top: String(pageSize) })) as Record<string, unknown>;
+
+    const items = Array.isArray(page) ? page : ((page?.items ?? []) as unknown[]);
+    all.push(...items);
+
+    const next = typeof page?.next === "string" ? page.next : null;
+    if (!next) return all;
+    // The spec calls it "the link to the next page"; resolve relative just in case.
+    nextUrl = new URL(next, url).toString();
+  }
+
+  logger.warn(`[trimble] fetchAllPsetPages hit the ${MAX_PAGES}-page guard on ${url}; result is truncated`);
+  return all;
+}
