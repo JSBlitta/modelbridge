@@ -63,6 +63,13 @@ export const env = {
   // configure ModelBridge. Everyone else who can log in is a default user.
   ADMIN_USERNAMES: optional("ADMIN_USERNAMES", ""),
 
+  // Force the Secure flag on session cookies. Normally the X-Forwarded-Proto
+  // header IIS sets is enough; set this to true when that header is stripped.
+  COOKIE_SECURE: optional("COOKIE_SECURE", "").toLowerCase() === "true",
+
+  // Ceiling for uploaded CSV and cloud-storage files, in megabytes.
+  MAX_UPLOAD_MB: parseInt(optional("MAX_UPLOAD_MB", "25"), 10) || 25,
+
   // Reporting scheduler — TypeScript replacement for the ProduuzitAPI
   // Power Automate solution. Uses a SEPARATE Produuzit API account.
   REPORTING_ENABLED: optional("REPORTING_ENABLED", "false") === "true",

@@ -4,11 +4,9 @@
 // with no bound, so a single large POST could exhaust the process heap.
 
 import type { Context } from "hono";
+import { env } from "../env.ts";
 
-const DEFAULT_MAX_MB = 25;
-
-export const MAX_UPLOAD_BYTES =
-  (Number.parseInt(process.env.MAX_UPLOAD_MB ?? "", 10) || DEFAULT_MAX_MB) * 1024 * 1024;
+export const MAX_UPLOAD_BYTES = env.MAX_UPLOAD_MB * 1024 * 1024;
 
 export function tooLarge(c: Context, actualBytes: number): Response {
   const mb = (n: number) => (n / (1024 * 1024)).toFixed(1);
