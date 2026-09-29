@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { Context } from "hono";
-import { getCookie, setCookie, deleteCookie } from "hono/cookie";
+import { getCookie, deleteCookie } from "hono/cookie";
 import { getSettings } from "../settings.ts";
 import {
   beginOAuth,
@@ -13,13 +13,12 @@ import {
   type ProjectPsetInstance,
   getCallbackUrls,
   getOAuthState,
-  getRefreshToken,
   getRegionEndpoints,
   isAuthenticated,
   isConfiguredCallback,
   markOAuthCompleted,
   redeemOAuthState,
-  restoreRefreshToken,
+  runAsUser,
   setManualToken,
   trimbleGet,
 } from "../trimble-client.ts";
@@ -40,23 +39,19 @@ import { loadDesigns, loadBatches, fuzzyDesignLookup, buildBatchMatcher } from "
 
 const app = new Hono();
 
-const TRIMBLE_COOKIE = "trimble_refresh";
-const TRIMBLE_COOKIE_OPTS = {
-  httpOnly: true,
-  sameSite: "Strict" as const,
-  path: "/api/trimble",
-  maxAge: 90 * 24 * 60 * 60, // 90 days
-};
+// The refresh token used to live in this browser cookie and was loaded into a
+// process-wide slot, which made one user's Trimble connection everyone's. Tokens
+// are now per user in state.db; an old cookie is only cleared, never trusted,
+// because on a shared PC it may belong to whoever was logged in before.
+const LEGACY_TRIMBLE_COOKIE = "trimble_refresh";
 
-function saveTrimbleCookie(c: Parameters<typeof setCookie>[0], token: string): void {
-  setCookie(c, TRIMBLE_COOKIE, token, TRIMBLE_COOKIE_OPTS);
-}
-
-// Restore refresh token from cookie on every request so the token survives server restarts
+// Every Trimble call below runs as the logged-in user. The OAuth callback is the
+// one route without a session; it switches to the flow's owner itself.
 app.use("/*", async (c, next) => {
-  const saved = getCookie(c, TRIMBLE_COOKIE);
-  if (saved) restoreRefreshToken(saved);
-  await next();
+  if (getCookie(c, LEGACY_TRIMBLE_COOKIE)) deleteCookie(c, LEGACY_TRIMBLE_COOKIE, { path: "/api/trimble" });
+  const session = c.get("session");
+  if (!session) return next();
+  return runAsUser(session.username, next);
 });
 
 // --- Auth routes ---
@@ -85,19 +80,12 @@ app.get("/auth/start", (c) => {
 });
 
 app.get("/auth/callback-status", (c) => {
-  const state = getOAuthState();
-  // When the local TCP server completed OAuth, set the cookie now (no HTTP context inside the TCP handler)
-  if (state.completed && state.authenticated) {
-    const rt = getRefreshToken();
-    if (rt) saveTrimbleCookie(c, rt);
-  }
-  return c.json(state);
+  return c.json(getOAuthState());
 });
 
-// Clear tokens + delete cookie — call when refresh token is invalid so the user can re-authenticate
+// Clears this user's tokens only — call when the refresh token is invalid so they can re-authenticate
 app.post("/auth/disconnect", (c) => {
   clearTokens();
-  deleteCookie(c, TRIMBLE_COOKIE, { path: "/api/trimble" });
   return c.json({ ok: true });
 });
 
@@ -107,22 +95,23 @@ app.get("/auth/callback", async (c) => {
 
   // The state proves this callback belongs to a flow we started, and carries the
   // redirect_uri we started it with. Both used to be attacker-controlled.
-  const redirectUri = redeemOAuthState(c.req.query("state"));
-  if (!redirectUri) {
-    markOAuthCompleted("Invalid or expired OAuth state");
+  // It also names the user who started the flow: the token lands in their slot.
+  const flow = redeemOAuthState(c.req.query("state"));
+  if (!flow) {
     return c.json({ error: "Invalid or expired authentication attempt. Start the connection again." }, 400);
   }
 
-  try {
-    const tokenData = await exchangeCode(code, redirectUri);
-    markOAuthCompleted();
-    const rt = tokenData.refresh_token as string | undefined;
-    if (rt) saveTrimbleCookie(c, rt);
-  } catch (e) {
-    markOAuthCompleted(String(e));
-    return c.json({ error: String(e) }, 400);
-  }
-  return c.redirect("/trimble?auth=success");
+  return runAsUser(flow.username, async () => {
+    try {
+      await exchangeCode(code, flow.redirectUri);
+      markOAuthCompleted();
+      logger.info(`[trimble] connected for "${flow.username}"`);
+    } catch (e) {
+      markOAuthCompleted(String(e));
+      return c.json({ error: String(e) }, 400);
+    }
+    return c.redirect("/trimble?auth=success");
+  });
 });
 
 app.post("/auth/exchange-code", async (c) => {
@@ -135,9 +124,7 @@ app.post("/auth/exchange-code", async (c) => {
     ? body.redirect_uri
     : getCallbackUrls()[0];
   try {
-    const tokenData = await exchangeCode(code, redirectUri);
-    const rt = tokenData.refresh_token as string | undefined;
-    if (rt) saveTrimbleCookie(c, rt);
+    await exchangeCode(code, redirectUri);
   } catch (e) {
     return c.json({ error: String(e) }, 400);
   }
@@ -149,7 +136,6 @@ app.post("/auth/token", async (c) => {
   const token = (body.token ?? "").trim();
   if (!token) return c.json({ error: "Missing token" }, 400);
   setManualToken(token, body.refresh_token);
-  if (body.refresh_token) saveTrimbleCookie(c, body.refresh_token);
   return c.json({ ok: true, authenticated: true });
 });
 

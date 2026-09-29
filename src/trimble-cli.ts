@@ -89,12 +89,12 @@ async function authenticate(): Promise<void> {
           throw new Error("OAuth callback missing code or state mismatch");
         }
 
-        const redirectUri = redeemOAuthState(callbackState ?? undefined);
-        if (!redirectUri) {
+        const flow = redeemOAuthState(callbackState ?? undefined);
+        if (!flow) {
           throw new Error("Invalid or expired OAuth state");
         }
 
-        await exchangeCode(code, redirectUri);
+        await exchangeCode(code, flow.redirectUri);
 
         res.writeHead(200, { "Content-Type": "text/html" });
         res.end("<html><body><h1>Authentication successful</h1><p>You can close this window.</p></body></html>");

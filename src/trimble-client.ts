@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
+import { AsyncLocalStorage } from "node:async_hooks";
 import { env } from "./env.ts";
-import { recordEvent, createPreviewToken, consumePreviewToken } from "./db.ts";
+import { recordEvent, createPreviewToken, consumePreviewToken, getTrimbleRefreshToken, setTrimbleRefreshToken } from "./db.ts";
 import { logger } from "./logger.ts";
 import { parseFrn, safeDecode } from "./trimble-frn.ts";
 
@@ -30,10 +31,16 @@ function libraryIdFromLink(link: string): string {
   return safeDecode(link).replace(/^frn:lib:/i, "");
 }
 
-let accessToken: string | null = null;
-let refreshTokenVal: string | null = null;
-
-// --- Temporary OAuth callback server (port 80) ---
+// --- Per-user Trimble tokens ------------------------------------------------
+//
+// Every ModelBridge user connects their own Trimble account. The tokens used to
+// be two module-level variables, so whoever connected last was the Trimble
+// identity for everyone, and one user's "disconnect" logged all of them out.
+//
+// Each user now has a slot. routes/trimble.ts runs every request inside
+// runAsUser(), and AsyncLocalStorage carries the slot down to trimbleGet/Post
+// without threading a parameter through every call site. The refresh token is
+// persisted per username in state.db so a connection survives a restart.
 
 interface OAuthProgress {
   completed: boolean;
@@ -41,21 +48,64 @@ interface OAuthProgress {
   completedAt: string | null;
 }
 
-const oauthState: OAuthProgress = { completed: false, error: null, completedAt: null };
+interface TrimbleTokens {
+  username: string;
+  access: string | null;
+  refresh: string | null;
+  // One refresh in flight per user: concurrent 401s share it instead of each
+  // spending the same (possibly single-use) refresh token.
+  refreshing: Promise<string | null> | null;
+  oauth: OAuthProgress;
+}
+
+function emptySlot(username: string, refresh: string | null): TrimbleTokens {
+  return { username, access: null, refresh, refreshing: null, oauth: { completed: false, error: null, completedAt: null } };
+}
+
+const tokenScope = new AsyncLocalStorage<TrimbleTokens>();
+const slots = new Map<string, TrimbleTokens>();
+// The CLI (trimble-cli.ts) is one person in one process and never calls
+// runAsUser. The server never writes here: its calls all run inside runAsUser.
+const cliSlot = emptySlot("", null);
+
+function tokensFor(username: string): TrimbleTokens {
+  let slot = slots.get(username);
+  if (!slot) {
+    slot = emptySlot(username, getTrimbleRefreshToken(username));
+    slots.set(username, slot);
+  }
+  return slot;
+}
+
+function current(): TrimbleTokens {
+  return tokenScope.getStore() ?? cliSlot;
+}
+
+export function runAsUser<T>(username: string, fn: () => T): T {
+  return tokenScope.run(tokensFor(username), fn);
+}
+
+function setTokens(slot: TrimbleTokens, access: string | null, refresh: string | null): void {
+  slot.access = access;
+  slot.refresh = refresh;
+  if (slot.username) setTrimbleRefreshToken(slot.username, refresh);
+}
 
 export function getOAuthState() {
+  const { oauth } = current();
   return {
-    completed: oauthState.completed,
-    error: oauthState.error,
-    completed_at: oauthState.completedAt,
+    completed: oauth.completed,
+    error: oauth.error,
+    completed_at: oauth.completedAt,
     authenticated: isAuthenticated(),
   };
 }
 
 export function markOAuthCompleted(error?: string | null): void {
-  oauthState.completed = true;
-  oauthState.error = error ?? null;
-  oauthState.completedAt = new Date().toISOString();
+  const { oauth } = current();
+  oauth.completed = true;
+  oauth.error = error ?? null;
+  oauth.completedAt = new Date().toISOString();
 }
 
 // --- OAuth state parameter -------------------------------------------------
@@ -73,20 +123,31 @@ export function markOAuthCompleted(error?: string | null): void {
 
 const OAUTH_SCOPE = "oauth:trimble-state";
 
+// The callback is a cross-site navigation from id.trimble.com, so it carries no
+// session cookie; the state is the only thing that says whose flow it was.
+// ponytail: in-memory, so a restart mid-consent makes that one attempt fail
+// ("start again"); move into preview_tokens if that ever matters.
+const oauthOwners = new Map<string, string>();
+
 export function beginOAuth(callbackUrl: string): { state: string; url: string } {
   const state = randomUUID();
   createPreviewToken(state, callbackKey(callbackUrl), OAUTH_SCOPE);
+  oauthOwners.set(state, current().username);
   return { state, url: buildAuthorizeUrl(callbackUrl, state) };
 }
 
-// Consumes the state and returns the callback URL it was issued for, or null
-// when it is missing, unknown, expired or already spent. The store deletes on
-// first read, so the configured URLs are tried in turn until one matches.
-export function redeemOAuthState(state: string | undefined): string | null {
+// Consumes the state and returns the callback URL it was issued for plus the
+// user who started it, or null when it is missing, unknown, expired or already
+// spent. The store deletes on first read, so the configured URLs are tried in
+// turn until one matches.
+export function redeemOAuthState(state: string | undefined): { redirectUri: string; username: string } | null {
   if (!state) return null;
+  const username = oauthOwners.get(state);
+  oauthOwners.delete(state);
   for (const candidate of getCallbackUrls()) {
     if (consumePreviewToken(state, callbackKey(candidate), OAUTH_SCOPE) === null) {
-      return candidate;
+      // The CLI owns its flows as "" (no user), so test for undefined, not falsy.
+      return username === undefined ? null : { redirectUri: candidate, username };
     }
   }
   return null;
@@ -462,26 +523,16 @@ function resolvePsetInstances(
 }
 
 export function isAuthenticated(): boolean {
-  return Boolean(accessToken || refreshTokenVal);
-}
-
-export function getRefreshToken(): string | null {
-  return refreshTokenVal;
-}
-
-/** Restore a saved refresh token without overwriting one that is already in memory. */
-export function restoreRefreshToken(token: string): void {
-  if (!refreshTokenVal) refreshTokenVal = token.trim() || null;
+  const t = current();
+  return Boolean(t.access || t.refresh);
 }
 
 export function clearTokens(): void {
-  accessToken = null;
-  refreshTokenVal = null;
+  setTokens(current(), null, null);
 }
 
 export function setManualToken(token: string, refresh?: string | null): void {
-  accessToken = token.trim() || null;
-  refreshTokenVal = refresh?.trim() || null;
+  setTokens(current(), token.trim() || null, refresh?.trim() || null);
 }
 
 export function getCallbackUrls(): string[] {
@@ -533,30 +584,38 @@ export async function exchangeCode(code: string, redirectUri?: string): Promise<
   return data;
 }
 
-async function refreshAccessToken(): Promise<string | null> {
-  if (!refreshTokenVal) return null;
-  const data = await tokenExchange({
-    grant_type: "refresh_token",
-    refresh_token: refreshTokenVal,
-    client_id: env.TRIMBLE_CLIENT_ID,
-    client_secret: env.TRIMBLE_CLIENT_SECRET,
-    redirect_uri: env.TRIMBLE_CALLBACK_URLS[0],
-  });
-  accessToken = (data.access_token as string) ?? accessToken;
-  refreshTokenVal = (data.refresh_token as string) ?? refreshTokenVal;
-  return accessToken;
+function refreshAccessToken(slot: TrimbleTokens): Promise<string | null> {
+  if (!slot.refresh) return Promise.resolve(null);
+  slot.refreshing ??= (async () => {
+    try {
+      const data = await tokenExchange({
+        grant_type: "refresh_token",
+        refresh_token: slot.refresh!,
+        client_id: env.TRIMBLE_CLIENT_ID,
+        client_secret: env.TRIMBLE_CLIENT_SECRET,
+        redirect_uri: env.TRIMBLE_CALLBACK_URLS[0],
+      });
+      setTokens(slot, (data.access_token as string) ?? slot.access, (data.refresh_token as string) ?? slot.refresh);
+      logger.debug(`[trimble] refreshed access token for "${slot.username || "cli"}"`);
+      return slot.access;
+    } finally {
+      slot.refreshing = null;
+    }
+  })();
+  return slot.refreshing;
 }
 
 export async function trimbleGet(url: string, params?: Record<string, string>): Promise<unknown> {
   const qs = params ? `?${new URLSearchParams(params)}` : "";
+  const slot = current();
   const h: Record<string, string> = {};
-  if (accessToken) h.Authorization = `Bearer ${accessToken}`;
+  if (slot.access) h.Authorization = `Bearer ${slot.access}`;
   const started = Date.now();
 
   try {
     let res = await fetch(`${url}${qs}`, { headers: h });
-    if (res.status === 401 && refreshTokenVal) {
-      const refreshed = await refreshAccessToken();
+    if (res.status === 401 && slot.refresh) {
+      const refreshed = await refreshAccessToken(slot);
       if (refreshed) {
         h.Authorization = `Bearer ${refreshed}`;
         res = await fetch(`${url}${qs}`, { headers: h });
@@ -578,15 +637,16 @@ export async function trimbleGet(url: string, params?: Record<string, string>): 
 }
 
 export async function trimblePost(url: string, body: unknown): Promise<unknown> {
+  const slot = current();
   const h: Record<string, string> = { "Content-Type": "application/json" };
-  if (accessToken) h.Authorization = `Bearer ${accessToken}`;
+  if (slot.access) h.Authorization = `Bearer ${slot.access}`;
   const started = Date.now();
 
   try {
     const init = (): RequestInit => ({ method: "POST", headers: h, body: JSON.stringify(body) });
     let res = await fetch(url, init());
-    if (res.status === 401 && refreshTokenVal) {
-      const refreshed = await refreshAccessToken();
+    if (res.status === 401 && slot.refresh) {
+      const refreshed = await refreshAccessToken(slot);
       if (refreshed) {
         h.Authorization = `Bearer ${refreshed}`;
         res = await fetch(url, init());

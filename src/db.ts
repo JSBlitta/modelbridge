@@ -151,6 +151,15 @@ function createSchema(d: Database.Database): void {
       fetched_at TEXT NOT NULL
     )
   `);
+  // Per-user Trimble refresh tokens. Not part of the rebuildable Trimble cache
+  // above, so ensureTrimbleCacheSchema never drops it.
+  d.exec(`
+    CREATE TABLE IF NOT EXISTS trimble_tokens (
+      username TEXT PRIMARY KEY,
+      refresh_token TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
   ensureEventsTable();
   d.exec(`
     CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
@@ -382,6 +391,26 @@ export function deleteSession(id: string): void {
 
 export function pruneExpiredSessions(): void {
   prep("DELETE FROM sessions WHERE expires_at < ?").run(new Date().toISOString());
+}
+
+// --- Trimble OAuth refresh tokens, one per ModelBridge user ---
+
+export function getTrimbleRefreshToken(username: string): string | null {
+  const row = prep("SELECT refresh_token FROM trimble_tokens WHERE username = ?").get(username) as
+    | { refresh_token: string }
+    | undefined;
+  return row?.refresh_token ?? null;
+}
+
+export function setTrimbleRefreshToken(username: string, token: string | null): void {
+  if (!token) {
+    prep("DELETE FROM trimble_tokens WHERE username = ?").run(username);
+    return;
+  }
+  prep(
+    `INSERT INTO trimble_tokens (username, refresh_token, updated_at) VALUES (?, ?, ?)
+     ON CONFLICT(username) DO UPDATE SET refresh_token=excluded.refresh_token, updated_at=excluded.updated_at`,
+  ).run(username, token, new Date().toISOString());
 }
 
 // --- Settings (key/value, admin-editable) ---
