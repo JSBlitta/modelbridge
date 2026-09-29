@@ -4,10 +4,16 @@ import { resolve } from "node:path";
 const DB_PATH = resolve(process.cwd(), "state.db");
 let _db: Database.Database | null = null;
 
+// The schema is created when the connection opens, not by a separate call.
+// ESM evaluates every imported module before index.ts runs its own body, and
+// some modules touch the DB at import time (produuzit-client.ts reads the
+// stored refresh token), so an explicit initDb() in index.ts ran too late:
+// on a fresh state.db that was "no such table: settings".
 function db(): Database.Database {
   if (!_db) {
     _db = new Database(DB_PATH);
     _db.pragma("journal_mode = WAL");
+    createSchema(_db);
   }
   return _db;
 }
@@ -25,8 +31,12 @@ function prep(sql: string): Database.Statement {
   return stmt;
 }
 
+// Kept for the entry points; opening the connection is what creates the schema.
 export function initDb(): void {
-  const d = db();
+  db();
+}
+
+function createSchema(d: Database.Database): void {
   d.exec(`
     CREATE TABLE IF NOT EXISTS sessions (
       id TEXT PRIMARY KEY,
