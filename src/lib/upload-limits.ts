@@ -1,6 +1,6 @@
 // Upload size ceiling.
 //
-// Both upload routes read the whole file into memory via arrayBuffer()/FormData
+// Every upload route reads the whole file into memory via arrayBuffer()/FormData
 // with no bound, so a single large POST could exhaust the process heap.
 
 import type { Context } from "hono";
@@ -19,4 +19,17 @@ export function tooLarge(c: Context, actualBytes: number): Response {
     },
     413,
   );
+}
+
+// Read a single uploaded text file: enforce the size ceiling, decode UTF-8 and
+// strip a leading BOM. Returns a ready-to-return 400/413 Response on failure.
+export async function readUploadedText(c: Context, field = "file"): Promise<{ text: string } | Response> {
+  const formData = await c.req.formData();
+  const file = formData.get(field);
+  if (!file || !(file instanceof File)) return c.json({ error: "No file uploaded" }, 400);
+  if (file.size > MAX_UPLOAD_BYTES) return tooLarge(c, file.size);
+
+  const decoder = new TextDecoder("utf-8");
+  const text = decoder.decode(await file.arrayBuffer());
+  return { text: text.charCodeAt(0) === 0xfeff ? text.slice(1) : text };
 }

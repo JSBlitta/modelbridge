@@ -1,7 +1,7 @@
 import { Hono } from "hono";
-import { apiGet, apiPost, apiPatch, fetchAllPages } from "../produuzit-client.js";
-import { getConfig } from "../config.js";
-import { boundedInt, isUuid } from "../lib/validate.js";
+import { apiGet, apiPost, apiPatch, fetchAllPages } from "../produuzit-client.ts";
+import { getConfig } from "../config.ts";
+import { boundedInt, isUuid } from "../lib/validate.ts";
 
 const app = new Hono();
 
@@ -51,15 +51,14 @@ app.get("/:uuid/stdlibs", async (c) => {
   const project = (await apiGet(`/company/projects/${uuid}/`)) as Record<string, unknown>;
   const linkedUuids = (project.linked_stdlibs ?? []) as string[];
 
-  const stdlibs = [];
-  for (const sid of linkedUuids) {
+  const stdlibs = await Promise.all(linkedUuids.map(async (sid) => {
     try {
       const slib = (await apiGet(`/company/projects/${sid}/`)) as Record<string, unknown>;
-      stdlibs.push({ uuid: sid, name: slib.name ?? sid, project_number: slib.project_number ?? "" });
+      return { uuid: sid, name: slib.name ?? sid, project_number: slib.project_number ?? "" };
     } catch {
-      stdlibs.push({ uuid: sid, name: sid, project_number: "" });
+      return { uuid: sid, name: sid, project_number: "" };
     }
-  }
+  }));
   return c.json({ stdlibs });
 });
 

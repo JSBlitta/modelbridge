@@ -42,6 +42,10 @@
           <label class="field-label">{{ $t('trimble.modelFile') }} <span style="font-weight:400;color:#6b7280;">({{ modelFiles.length }} found)</span></label>
           <Select v-model="selectedFile" :options="modelFiles" option-label="_display" option-value="id"
             :placeholder="$t('trimble.selectIfc')" class="wide" @change="onFileSelected" />
+          <div class="flex-row gap-sm mt-sm" style="align-items:center">
+            <Checkbox v-model="geometryOnly" :binary="true" input-id="geometryOnly" @change="onGeometryOnlyToggle" />
+            <label for="geometryOnly" style="font-size:0.9rem">{{ $t('trimble.geometryOnly') }}</label>
+          </div>
         </div>
         <Message v-if="selectedProject && !loadingFiles && modelFiles.length === 0" severity="info" :closable="false" class="mt-sm">
           {{ $t('trimble.noIfcFiles') }}
@@ -58,21 +62,28 @@
           <InputText v-model="psetFilter" :placeholder="$t('trimble.filterPsets')" size="small" style="width:200px;" />
         </div>
         <Message v-if="!psetDefs.length" severity="info" :closable="false">{{ $t('trimble.noPsets') }}</Message>
-        <div v-for="pset in filteredPsets" :key="pset.name" class="pset-block">
-          <div class="pset-header">
-            <Checkbox v-model="psetChecks[pset.name]" :binary="true" @change="onPsetToggle(pset)" :input-id="'pset_' + pset.name" />
-            <label :for="'pset_' + pset.name" class="pset-label">{{ pset.name }}</label>
-            <span class="pset-count">{{ propsOfPset(pset).length }} props</span>
-          </div>
-          <div v-if="psetChecks[pset.name]" class="pset-props">
-            <div v-for="prop in propsOfPset(pset)" :key="propName(prop)" class="prop-row">
-              <Checkbox v-model="propChecks[propPath(pset.name, prop)]" :binary="true"
-                :input-id="propPath(pset.name, prop)" @change="emitPropSelection" />
-              <label :for="propPath(pset.name, prop)" class="prop-label">{{ propName(prop) }}</label>
-              <span class="prop-type">{{ propType(prop) }}</span>
+        <template v-for="(group, gi) in psetGroups" :key="group.key">
+          <div v-if="gi > 0" class="pset-separator"></div>
+          <div v-for="pset in group.items" :key="pset.name" class="pset-block">
+            <div class="pset-header" :class="{ 'pset-header-open': isExpanded(pset) }" @click="toggleExpanded(pset)">
+              <span class="pset-check" @click.stop>
+                <Checkbox :model-value="psetAllChecked(pset)" :indeterminate="psetPartial(pset)" :binary="true"
+                  :input-id="'pset_' + pset.name" @change="onPsetToggle(pset)" />
+              </span>
+              <span class="pset-label">{{ pset.name }}</span>
+              <span class="pset-count">{{ psetSelectedCount(pset) }}/{{ propsOfPset(pset).length }} props</span>
+              <i class="pi" :class="isExpanded(pset) ? 'pi-chevron-up' : 'pi-chevron-down'"></i>
+            </div>
+            <div v-if="isExpanded(pset)" class="pset-props">
+              <div v-for="prop in propsOfPset(pset)" :key="propName(prop)" class="prop-row">
+                <Checkbox v-model="propChecks[propPath(pset.name, prop)]" :binary="true"
+                  :input-id="propPath(pset.name, prop)" @change="emitPropSelection" />
+                <label :for="propPath(pset.name, prop)" class="prop-label">{{ propLabel(prop) }}</label>
+                <span class="prop-type">{{ propType(prop) }}</span>
+              </div>
             </div>
           </div>
-        </div>
+        </template>
       </template>
     </Card>
 
@@ -198,6 +209,20 @@
           </div>
           <Button :label="$t('trimble.checkChanges')" icon="pi pi-search" @click="doPreview" :loading="previewing" />
         </div>
+
+        <div class="flex-row gap-md mb-sm" style="margin-bottom:0.75rem;align-items:center;flex-wrap:wrap;">
+          <div style="display:flex;align-items:center;gap:0.4rem;">
+            <Checkbox v-model="includeProductionCounts" :binary="true" input-id="include_counts_toggle" />
+            <label for="include_counts_toggle" style="font-size:0.85rem;cursor:pointer;">{{ $t('trimble.includeCounts') }}</label>
+          </div>
+          <div style="display:flex;align-items:center;gap:0.4rem;">
+            <label for="default_count_input" style="font-size:0.85rem;">{{ $t('trimble.defaultCount') }}</label>
+            <InputNumber v-model="defaultCount" input-id="default_count_input" :min="1" :step="1" :disabled="!includeProductionCounts" class="num-input-sm" />
+          </div>
+        </div>
+        <Message v-if="previewData" :severity="includeProductionCounts ? 'warn' : 'secondary'" :closable="false" size="small" style="margin-bottom:0.75rem;">
+          {{ includeProductionCounts ? $t('trimble.countsIncluded', { default: defaultCount || 1 }) : $t('trimble.countsExcluded') }}
+        </Message>
 
         <div v-if="previewing" class="text-dim mb-sm">
           <i class="pi pi-spin pi-spinner" style="margin-right:0.4rem;"></i>
@@ -365,10 +390,11 @@ import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 const { t } = useI18n()
 const route = useRoute()
-import { api } from '../api.js'
+import { api, apiErrorMessage } from '../api.js'
 import ColumnMapper from '../components/ColumnMapper.vue'
 import PushGate from '../components/PushGate.vue'
 import { usePushGate } from '../composables/usePushGate.js'
+import { useImportPreview } from '../composables/useImportPreview.js'
 import { useProduuzitProjects } from '../composables/useProduuzitProjects.js'
 import { useNotifications } from '../composables/useNotifications.js'
 
@@ -385,14 +411,20 @@ const modelFiles = ref([])
 const selectedProject = ref(null)
 const selectedFile = ref(null)
 const selectedFileVersionId = ref(null)
+// Server-side entity text filter ('CalculatedGeometryValues' = only entities
+// with geometry). Persisted in the backend settings table, not per session.
+const geometryOnly = ref(false)
 const loadingFiles = ref(false)
 
 const psetDefs = ref([])
 const psetFilter = ref('')
-const psetChecks = ref({})
+const psetExpanded = ref({})
 const propChecks = ref({})
 
-const { projects: produuzitProjects, superprojects, loading: projectsLoading, error: produuzitProjectsError, projectsForSuperproject } = useProduuzitProjects()
+// The client's own property set is pinned above all others in the UI.
+const BLITTA_PSET = 'BLITTA'
+
+const { superprojects, loading: projectsLoading, error: produuzitProjectsError, projectsForSuperproject } = useProduuzitProjects()
 const selectedSuperproject = ref('')
 const selectedProjectUuids = ref(new Set())
 const produuzitContext = ref(null)
@@ -402,7 +434,6 @@ const filteredProjects = computed(() =>
 )
 
 const hasSelectedProjects = computed(() => selectedProjectUuids.value.size > 0)
-const selectedTargetProjects = computed(() => filteredProjects.value.filter(p => selectedProjectUuids.value.has(p.uuid)))
 
 const columnMapping = ref({})
 const synonyms = ref({})
@@ -457,14 +488,6 @@ const initialIfcMapping = computed(() => {
   return m
 })
 
-const mappingWarnings = computed(() => {
-  const targets = Object.values(columnMapping.value).flatMap(v => Array.isArray(v) ? v : [v])
-  const w = []
-  if (!targets.includes('design_name')) w.push(t('trimble.noDesignName'))
-  if (!targets.includes('batch_number')) w.push(t('trimble.noBatchNumber'))
-  return w
-})
-
 const hasRequiredMapping = computed(() => {
   const targets = Object.values(columnMapping.value).flatMap(v => Array.isArray(v) ? v : [v])
   return targets.includes('design_name') && targets.includes('batch_number')
@@ -495,6 +518,10 @@ const previewData = ref(null)
 const importResults = ref([])
 const importSummary = ref({ designs_created: 0, constructibles_created: 0, updated: 0, skipped: 0, blocked: 0, error: 0 })
 const uniqueOnlyImport = ref(true)
+// Production counts are an explicit opt-in: unless the operator toggles this on,
+// the import only re-checks/matches and writes nothing to Produuzit.
+const includeProductionCounts = ref(false)
+const defaultCount = ref(1)
 
 const creatingDesigns = ref(false)
 const designCreateResults = ref([])
@@ -597,14 +624,8 @@ const canExecute = computed(() =>
   previewData.value?.batch_previews?.some(bp => !bp.blocked && (bp.summary.new > 0 || bp.summary.changed > 0))
 )
 
-const previewRows = computed(() => {
-  const rows = []
-  for (const bp of previewData.value?.batch_previews || []) {
-    for (const r of bp.rows || []) {
-      rows.push({ ...r, batch_name: bp.batch_name })
-    }
-  }
-  return rows
+const { mappingWarnings, previewRows } = useImportPreview({
+  t, ns: 'trimble', columnMapping, previewData,
 })
 
 function statusLabel(status) {
@@ -628,15 +649,25 @@ function formatChanges(row) {
 
 const totalSelectedProps = computed(() => allSelectedProps.value.length)
 
-const filteredPsets = computed(() => {
-  const q = psetFilter.value.toLowerCase()
-  if (!q) return psetDefs.value
-  return psetDefs.value.filter(p => (p.name || '').toLowerCase().includes(q))
-})
-
-const estimatedCreates = computed(() => {
-  if (uniqueOnlyImport.value && totalEntities.value > 0) return Math.min(totalEntities.value, previewEntities.value.length)
-  return totalEntities.value
+// Psets are grouped for display: BLITTA first, then Trimble-added sets from the
+// PSet API, then IFC-native sets from the model API (sorted by name).
+const psetGroups = computed(() => {
+  const q = psetFilter.value.trim().toLowerCase()
+  const matches = (pset) => !q || (pset.name || '').toLowerCase().includes(q)
+  const blitta = []
+  const psetApi = []
+  const model = []
+  for (const pset of psetDefs.value) {
+    if ((pset.name || '').toUpperCase() === BLITTA_PSET) blitta.push(pset)
+    else if (pset.source === 'pset') psetApi.push(pset)
+    else model.push(pset)
+  }
+  model.sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+  return [
+    { key: 'blitta', items: blitta.filter(matches) },
+    { key: 'pset', items: psetApi.filter(matches) },
+    { key: 'model', items: model.filter(matches) },
+  ].filter(group => group.items.length)
 })
 
 const previewRowsForMapping = computed(() => {
@@ -646,6 +677,7 @@ const previewRowsForMapping = computed(() => {
 
 onMounted(async () => {
   loadSynonyms()
+  loadGeometryFilter()
   if (route.query.auth === 'success') {
     await loadAuthStatus()
     if (authStatus.value) await loadTrimbleProjects()
@@ -653,6 +685,21 @@ onMounted(async () => {
   await Promise.all([loadAuthStatus()])
   if (authStatus.value) await loadTrimbleProjects()
 })
+
+async function loadGeometryFilter() {
+  try {
+    const r = await api.get('/api/config/trimble-entity-filter')
+    geometryOnly.value = String(r.data?.value ?? '').length > 0
+  } catch { geometryOnly.value = false }
+}
+
+async function onGeometryOnlyToggle() {
+  try {
+    await api.put('/api/config/trimble-entity-filter', { value: geometryOnly.value ? 'CalculatedGeometryValues' : '' })
+  } catch { /* keep the UI state; the next fetch still sends the override */ }
+  // Entities already loaded under the other setting are stale — refetch.
+  if (_rawEntities.value.length) fetchEntities()
+}
 
 async function loadSynonyms() {
   try { const r = await api.get('/api/config/synonyms'); synonyms.value = r.data || {} }
@@ -683,7 +730,7 @@ async function loadTrimbleProjects() {
     const r = await api.get('/api/trimble/projects')
     trimbleProjects.value = Array.isArray(r.data) ? r.data : (r.data?.results || [])
   } catch (e) {
-    const msg = e?.response?.data?.detail || e?.response?.data?.error || e?.message || String(e)
+    const msg = apiErrorMessage(e)
     const isTokenError = /invalid.*(token|refresh)|token.*invalid|401/i.test(msg)
     if (isTokenError) {
       await api.post('/api/trimble/auth/disconnect').catch(() => {})
@@ -734,10 +781,52 @@ async function loadPsetDefs() {
     if (data.psetdefs) raw = data.psetdefs
     else if (Array.isArray(data)) raw = data
     else if (data.results) raw = data.results
-    psetDefs.value = mergePsetsByName(raw)
-    psetChecks.value = {}
+    const modelPsets = mergePsetsByName(raw)
+    // Trimble-added psets live in the PSet service, not the IFC/model API.
+    const projectPsets = await loadProjectPsetDefs()
+    psetDefs.value = buildPsetDefs(modelPsets, projectPsets)
+    psetExpanded.value = {}
     propChecks.value = {}
   } catch { psetDefs.value = [] }
+}
+
+// Project-level psets added through Trimble Connect (not present in the IFC).
+async function loadProjectPsetDefs() {
+  if (!selectedProject.value) return []
+  try {
+    const r = await api.get(`/api/trimble/projects/${selectedProject.value}/pset-catalog`)
+    return (r.data?.definitions || []).map(d => ({
+      name: d.name || d.def_id,
+      properties: (d.properties || []).map(p => ({ name: p.name, type: p.type, label: p.label })),
+    }))
+  } catch { return [] }
+}
+
+// Merge model- and PSet-API definitions by name, unioning their properties
+// (first occurrence wins) and tagging each entry with its origin so the UI can
+// group them. A name also present in the PSet API is treated as Trimble-added.
+function buildPsetDefs(modelPsets, psetApiDefs) {
+  const merged = new Map()
+  const add = (pset, source) => {
+    const name = pset.name || ''
+    if (!name) return
+    let entry = merged.get(name)
+    if (!entry) {
+      entry = { name, properties: [], source }
+      merged.set(name, entry)
+    } else if (source === 'pset') {
+      entry.source = 'pset'
+    }
+    for (const prop of propsOfPset(pset)) {
+      const pname = typeof prop === 'string' ? prop : (prop?.name || '')
+      if (!entry.properties.some(ex => (typeof ex === 'string' ? ex : ex?.name) === pname)) {
+        entry.properties.push(prop)
+      }
+    }
+  }
+  for (const pset of modelPsets || []) add(pset, 'model')
+  for (const pset of psetApiDefs || []) add(pset, 'pset')
+  return [...merged.values()]
 }
 
 function mergePsetsByName(raw) {
@@ -766,23 +855,52 @@ function propsOfPset(pset) {
 }
 
 function propPath(psetName, prop) {
-  const pn = typeof prop === 'string' ? prop : (prop?.name || prop?.id || '')
-  return `psets.${psetName}.${pn}`
+  // PSet-API properties expose a resolved `label`, and the backend keys the
+  // merged values by `label ?? name`; IFC-native properties only have `name`.
+  return `psets.${psetName}.${propLabel(prop)}`
 }
 
 function propName(prop) { return typeof prop === 'string' ? prop : (prop?.name || prop?.propertyName || '') }
+function propLabel(prop) { return (typeof prop === 'object' && prop?.label) || propName(prop) }
 function propType(prop) { return typeof prop === 'object' ? (prop?.type || '') : '' }
 
 function selectAllProps() {
   for (const pset of psetDefs.value) {
-    psetChecks.value[pset.name] = true
     for (const prop of propsOfPset(pset))
       propChecks.value[propPath(pset.name, prop)] = true
   }
 }
 
-function clearAllProps() { psetChecks.value = {}; propChecks.value = {} }
-function onPsetToggle(pset) { const c = psetChecks.value[pset.name]; for (const prop of propsOfPset(pset)) propChecks.value[propPath(pset.name, prop)] = c }
+function clearAllProps() { propChecks.value = {} }
+
+function psetSelectedCount(pset) {
+  let count = 0
+  for (const prop of propsOfPset(pset))
+    if (propChecks.value[propPath(pset.name, prop)]) count++
+  return count
+}
+
+function psetAllChecked(pset) {
+  const props = propsOfPset(pset)
+  return props.length > 0 && psetSelectedCount(pset) === props.length
+}
+
+function psetPartial(pset) {
+  const count = psetSelectedCount(pset)
+  return count > 0 && count < propsOfPset(pset).length
+}
+
+// The pset checkbox is a select-all/none shortcut, kept separate from the
+// expand/collapse state so individual properties can be cherry-picked.
+function onPsetToggle(pset) {
+  const target = !psetAllChecked(pset)
+  for (const prop of propsOfPset(pset))
+    propChecks.value[propPath(pset.name, prop)] = target
+}
+
+function isExpanded(pset) { return !!psetExpanded.value[pset.name] }
+function toggleExpanded(pset) { psetExpanded.value[pset.name] = !psetExpanded.value[pset.name] }
+
 function emitPropSelection() { /* reactive */ }
 
 async function loadProduuzitContext(projectUuid) {
@@ -853,7 +971,7 @@ async function fetchEntities() {
   fetchingEntities.value = true; _rawEntities.value = []; totalEntities.value = 0; selectedEntityIndices.value = new Set()
   try {
     // Always fetch with assemblies — client-side toggle filters instantly
-    const body = { versionId: selectedFileVersionId.value || selectedFile.value, fields: allSelectedProps.value, unique_only: uniqueOnly.value, unique_key_prop: uniqueKeyProp.value || undefined, include_assemblies: true, column_mapping: columnMapping.value }
+    const body = { versionId: selectedFileVersionId.value || selectedFile.value, fields: allSelectedProps.value, unique_only: uniqueOnly.value, unique_key_prop: uniqueKeyProp.value || undefined, include_assemblies: true, column_mapping: columnMapping.value, project_id: selectedProject.value || undefined, entity_text_filter: geometryOnly.value ? 'CalculatedGeometryValues' : undefined }
     const r = await api.post(`/api/trimble/models/${selectedFile.value}/entities`, body)
     _rawEntities.value = r.data.entities || []
     totalEntities.value = r.data.total || _rawEntities.value.length
@@ -871,6 +989,8 @@ function importInputs() {
     selectedFileVersionId.value || '',
     JSON.stringify(columnMapping.value),
     uniqueOnlyImport.value ? '1' : '0',
+    includeProductionCounts.value ? '1' : '0',
+    String(Number(defaultCount.value) || 1),
     ents.length,
     // Guard against a same-length but different selection.
     ents.length ? String(ents[0]?.id ?? '') + '|' + String(ents[ents.length - 1]?.id ?? '') : '',
@@ -884,6 +1004,8 @@ function importBody() {
     column_mapping: columnMapping.value,
     entities: ents,
     unique_only: uniqueOnlyImport.value,
+    include_production_counts: includeProductionCounts.value,
+    default_count: Number(defaultCount.value) || 1,
   }
 }
 
@@ -914,7 +1036,6 @@ const importGate = usePushGate({
 
 // The template and the create-missing flows still speak in these terms.
 const previewing = computed(() => importGate.checking)
-const importing = computed(() => importGate.pushing)
 const previewError = computed(() => importGate.error)
 const doPreview = () => importGate.runCheck()
 
@@ -940,7 +1061,7 @@ async function createMissingDesignsAction() {
     // the normal import confirmation step.
     if (summary.created) await doPreview()
   } catch (e) {
-    const msg = e?.response?.data?.detail || e?.response?.data?.error || e?.message || String(e)
+    const msg = apiErrorMessage(e)
     notify({ severity: 'error', summary: t('trimble.createDesignsFailed'), detail: msg, life: 8000 })
   } finally {
     creatingDesigns.value = false
@@ -968,7 +1089,7 @@ async function createMissingPhasesAction() {
     // Refresh the preview so the newly created phases are recognized.
     if (summary.created) await doPreview()
   } catch (e) {
-    const msg = e?.response?.data?.detail || e?.response?.data?.error || e?.message || String(e)
+    const msg = apiErrorMessage(e)
     notify({ severity: 'error', summary: t('trimble.createPhasesFailed'), detail: msg, life: 8000 })
   } finally {
     creatingPhases.value = false
@@ -991,13 +1112,18 @@ function resolveProp(columnMappingObj, target) {
 .subtitle-dim { font-weight: 400; font-size: 0.85rem; color: #6b7280; }
 .field-label { display: block; font-size: 0.8rem; font-weight: 600; color: #4b5563; margin-bottom: 0.25rem; }
 .wide { width: 100%; }
+.num-input-sm { width: 90px; }
 .mb-card { margin-bottom: 1rem; }
 .card-warn-border { border-left: 4px solid #f59e0b; }
 .card-danger-border { border-left: 4px solid #ef4444; }
 
+.pset-separator { height: 1px; background: #e5e7eb; margin: 0.6rem 0; }
 .pset-block { margin-bottom: 0.5rem; border: 1px solid #e5e7eb; border-radius: 6px; overflow: hidden; }
-.pset-header { display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.75rem; background: #f9fafb; }
-.pset-label { font-weight: 600; font-size: 0.9rem; flex: 1; cursor: pointer; }
+.pset-header { display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 0.75rem; background: #f9fafb; cursor: pointer; user-select: none; }
+.pset-header-open { background: #f3f4f6; }
+.pset-header .pi { color: #9ca3af; font-size: 0.75rem; }
+.pset-check { display: inline-flex; align-items: center; }
+.pset-label { font-weight: 600; font-size: 0.9rem; flex: 1; }
 .pset-count { color: #9ca3af; font-size: 0.75rem; }
 .pset-props { padding: 0.25rem 0.75rem 0.5rem 2rem; }
 .prop-row { display: flex; align-items: center; gap: 0.4rem; padding: 0.2rem 0; }
@@ -1005,8 +1131,4 @@ function resolveProp(columnMappingObj, target) {
 .prop-type { color: #9ca3af; font-size: 0.7rem; margin-left: auto; }
 
 .summary-chips { display: flex; gap: 0.5rem; flex-wrap: wrap; }
-.chip-new { background: #dcfce7; color: #166534; padding: 0.2rem 0.6rem; border-radius: 12px; font-size: 0.8rem; font-weight: 600; }
-.chip-changed { background: #fef3c7; color: #92400e; padding: 0.2rem 0.6rem; border-radius: 12px; font-size: 0.8rem; font-weight: 600; }
-.chip-identical { background: #e0e7ff; color: #3730a3; padding: 0.2rem 0.6rem; border-radius: 12px; font-size: 0.8rem; font-weight: 600; }
-.chip-blocked { background: #fce4ec; color: #b91c1c; padding: 0.2rem 0.6rem; border-radius: 12px; font-size: 0.8rem; font-weight: 600; }
 </style>

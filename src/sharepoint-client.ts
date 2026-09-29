@@ -12,8 +12,8 @@
 //
 // The Azure AD app needs the SharePoint permission Sites.ReadWrite.All.
 
-import { env } from "./env.js";
-import { logger } from "./logger.js";
+import { env } from "./env.ts";
+import { logger } from "./logger.ts";
 
 let accessToken: string | null = null;
 let tokenExpiresAt = 0;

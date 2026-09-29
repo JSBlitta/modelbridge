@@ -13,20 +13,16 @@
 // import can only ever apply the payload that was actually previewed, once.
 
 import type { Context } from "hono";
-import * as db from "../db.js";
-import type { PreviewTokenFailure } from "../db.js";
-import { fingerprint, newPreviewToken } from "./fingerprint.js";
-import { logger } from "../logger.js";
+import * as db from "../db.ts";
+import type { PreviewTokenFailure } from "../db.ts";
+import { fingerprint, newPreviewToken } from "./fingerprint.ts";
+import { logger } from "../logger.ts";
 
 // Scope names keep a token minted for one flow from being spent on another.
 export const GATE = {
   trimbleImport: "trimble:import",
   assemblyImport: "assembly:import",
   batchCreate: "batch:create",
-  projectCreate: "project:create",
-  countCreate: "count:create",
-  phaseCreate: "phase:create",
-  assemblyUpdate: "assembly:update",
 } as const;
 
 export type GateScope = (typeof GATE)[keyof typeof GATE];

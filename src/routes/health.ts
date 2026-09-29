@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { env } from "../env.js";
+import { env } from "../env.ts";
 
 const app = new Hono();
 

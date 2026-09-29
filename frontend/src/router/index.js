@@ -1,5 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
-import { api, onUnauthorized } from '../api.js'
+import { onUnauthorized } from '../api.js'
 import Landing from '../views/Landing.vue'
 import Login from '../views/Login.vue'
 import UnifiedImport from '../views/UnifiedImport.vue'

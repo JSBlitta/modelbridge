@@ -16,24 +16,16 @@ export function targetsOf(t: string | string[]): string[] {
   return Array.isArray(t) ? t : [t];
 }
 
-// Parse a production count value — invalid or missing values default to 1
-// so existing single-assembly behaviour is preserved.
-export function parseCount(val: unknown): number {
-  if (val == null || val === "") return 1;
-  if (typeof val === "number") return val >= 1 ? Math.floor(val) : 1;
-  const n = parseInt(String(val).trim(), 10);
-  return isNaN(n) || n < 1 ? 1 : n;
+// Coerce a production count value to a positive integer, falling back when it is
+// missing, non-numeric or below 1.
+export function normalizeCount(val: unknown, fallback = 1): number {
+  const n = typeof val === "number" ? val : parseInt(String(val ?? "").trim(), 10);
+  return Number.isFinite(n) && n >= 1 ? Math.floor(n) : fallback;
 }
 
-// Generate unique order IDs for count-based creation, e.g. "A20-EL-001"
-export function generateOrderIds(prefix: string, start: number, count: number): string[] {
-  const ids: string[] = [];
-  for (let i = 0; i < count; i++) {
-    ids.push(`${prefix}-${String(start + i).padStart(3, "0")}`);
-  }
-  return ids;
-}
-
-export function orderPrefix(designName: string): string {
-  return (designName || "element").replace(/\s+/g, "-");
+// Parse a production count value. Invalid or missing values use `fallback`
+// (the operator's default count) so behaviour is explicit at the call site.
+export function parseCount(val: unknown, fallback = 1): number {
+  if (val == null || val === "") return fallback;
+  return normalizeCount(val, fallback);
 }

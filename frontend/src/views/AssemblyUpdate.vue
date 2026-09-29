@@ -108,14 +108,12 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { useI18n } from 'vue-i18n'
-const { t } = useI18n()
 import { api } from '../api.js'
 import { useProduuzitProjects } from '../composables/useProduuzitProjects.js'
 
 let _dbBatchesCache = null
 
-const { projects, loading: projectsLoading, error: projectsError, fetchProjects } = useProduuzitProjects()
+const { projects, fetchProjects } = useProduuzitProjects()
 const batches = ref([])
 const selectedProject = ref(null)
 const selectedBatch = ref(null)

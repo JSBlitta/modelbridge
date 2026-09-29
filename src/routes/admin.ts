@@ -1,7 +1,7 @@
 import { Hono } from "hono";
-import * as db from "../db.js";
-import { getRedactedSettings, saveSettings } from "../settings.js";
-import { requireAdmin } from "../middleware/session.js";
+import * as db from "../db.ts";
+import { getRedactedSettings, saveSettings } from "../settings.ts";
+import { requireAdmin } from "../middleware/session.ts";
 
 // Admin-only API. The session cookie identifies the user; an admin is a session
 // whose username is in the `admin_usernames` setting. Everything else in the
@@ -78,6 +78,31 @@ app.delete("/schedule/:id", (c) => {
   const id = parseInt(c.req.param("id"), 10);
   db.deleteReportingSchedule(id);
   return c.json({ ok: true });
+});
+
+// --- Trimble discovery cache ---
+
+// Project/model/library ids are stable, so the topology is cached indefinitely.
+// This reports what is cached; force-refresh invalidates it so the next import
+// screen repopulates from Trimble.
+app.get("/trimble-cache", (c) => {
+  return c.json({
+    stats: db.getTrimbleCacheStats(),
+    projects: db.getTrimbleProjects().map((p) => ({ project_id: p.project_id, name: p.name, fetched_at: p.fetched_at })),
+    models: db.getTrimbleModels().map((m) => ({ model_id: m.model_id, project_id: m.project_id, name: m.name, fetched_at: m.fetched_at })),
+    libraries: db.getTrimbleLibraries().map((l) => ({ library_id: l.library_id, project_id: l.project_id, name: l.name, fetched_at: l.fetched_at })),
+    model_libraries: db.getTrimbleModelLibraries(),
+  });
+});
+
+app.post("/trimble-cache/refresh", (c) => {
+  const cleared = db.clearTrimbleCache();
+  db.recordEvent({
+    category: "trimble",
+    summary: "Trimble cache force-refreshed",
+    detail: `cleared ${cleared.projects} projects, ${cleared.models} models, ${cleared.libraries} libraries`,
+  });
+  return c.json({ ok: true, cleared });
 });
 
 export default app;

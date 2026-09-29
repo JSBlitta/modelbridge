@@ -1,11 +1,11 @@
 import { Hono } from "hono";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
 import { randomUUID } from "node:crypto";
-import { loginWithCredentials, fetchMyUser } from "../produuzit-client.js";
-import * as db from "../db.js";
-import { isAdmin, getAdminUsernames } from "../settings.js";
-import { logger } from "../logger.js";
-import { SESSION_COOKIE, isSecureRequest } from "../middleware/session.js";
+import { loginWithCredentials, fetchMyUser } from "../produuzit-client.ts";
+import * as db from "../db.ts";
+import { isAdmin, getAdminUsernames } from "../settings.ts";
+import { logger } from "../logger.ts";
+import { SESSION_COOKIE, isSecureRequest } from "../middleware/session.ts";
 
 const app = new Hono();
 

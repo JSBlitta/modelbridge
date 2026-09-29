@@ -5,9 +5,6 @@ import YAML from "yaml";
 export interface AppConfig {
   defaults: {
     client_name: string;
-    batch_name_pattern: string;
-    batch_name_pattern_phase_vbw: string;
-    batch_state: string;
   };
   synonyms: Record<string, string[]>;
   description_to_suffix: Record<string, string>;
@@ -27,9 +24,6 @@ export function loadConfig(): AppConfig {
   _config = {
     defaults: {
       client_name: parsed?.defaults?.client_name ?? "BLITTA",
-      batch_name_pattern: parsed?.defaults?.batch_name_pattern ?? "3 digits",
-      batch_name_pattern_phase_vbw: parsed?.defaults?.batch_name_pattern_phase_vbw ?? "{number}{suffix}-{phase}",
-      batch_state: parsed?.defaults?.batch_state ?? "provisional",
     },
     synonyms: {
       stdlib: ["stdlib", "standard_library", "std_lib", "stdlibs"],

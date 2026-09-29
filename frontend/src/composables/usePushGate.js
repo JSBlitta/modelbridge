@@ -28,7 +28,6 @@ export function usePushGate({ identity, check, push }) {
   const checking = ref(false)
   const pushing = ref(false)
   const checkResult = ref(null)
-  const pushResult = ref(null)
   const previewToken = ref('')
   const confirmed = ref(false)
   const error = ref('')
@@ -47,7 +46,6 @@ export function usePushGate({ identity, check, push }) {
 
   function reset() {
     checkResult.value = null
-    pushResult.value = null
     previewToken.value = ''
     confirmed.value = false
     error.value = ''
@@ -66,7 +64,6 @@ export function usePushGate({ identity, check, push }) {
     checking.value = true
     error.value = ''
     checkResult.value = null
-    pushResult.value = null
     previewToken.value = ''
     confirmed.value = false
     try {
@@ -91,7 +88,6 @@ export function usePushGate({ identity, check, push }) {
     error.value = ''
     try {
       const data = await push(previewToken.value)
-      pushResult.value = data ?? null
       // The token is spent server-side; make that visible rather than leaving a
       // dead button armed.
       previewToken.value = ''
@@ -118,7 +114,7 @@ export function usePushGate({ identity, check, push }) {
   // in templates. reactive() unwraps them, so `gate.checking` is a boolean and
   // `v-model="gate.confirmed"` works.
   return reactive({
-    checking, pushing, checkResult, pushResult, confirmed,
+    checking, pushing, checkResult, confirmed,
     checked, canPush, error, runCheck, runPush, reset,
   })
 }

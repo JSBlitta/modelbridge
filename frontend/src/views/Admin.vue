@@ -62,6 +62,26 @@
         </template>
       </Card>
 
+      <Card class="mb-card">
+        <template #title>{{ $t('admin.trimbleCache') }}</template>
+        <template #content>
+          <p class="cache-hint">{{ $t('admin.trimbleCacheHint') }}</p>
+          <div v-if="cache" class="cache-stats">
+            <span>{{ $t('admin.trimbleProjects') }}: <strong>{{ cache.stats.projects }}</strong></span>
+            <span>{{ $t('admin.trimbleModels') }}: <strong>{{ cache.stats.models }}</strong></span>
+            <span>{{ $t('admin.trimbleLibraries') }}: <strong>{{ cache.stats.libraries }}</strong></span>
+            <span>{{ $t('admin.trimbleModelLibraries') }}: <strong>{{ cache.stats.model_libraries }}</strong></span>
+          </div>
+          <p class="cache-hint">
+            {{ $t('admin.trimbleLastRefreshed') }}:
+            {{ cache?.stats?.last_refreshed_at ? formatDate(cache.stats.last_refreshed_at) : $t('admin.trimbleNever') }}
+          </p>
+          <div class="actions-row">
+            <Button :label="$t('admin.trimbleRefresh')" icon="pi pi-refresh" :loading="refreshing" @click="refreshCache" />
+          </div>
+        </template>
+      </Card>
+
       <Card>
         <template #title>{{ $t('admin.schedule') }}</template>
         <template #content>
@@ -132,6 +152,8 @@ const frequencies = [
 ]
 
 const rows = ref([])
+const cache = ref(null)
+const refreshing = ref(false)
 let _seq = 0
 
 onMounted(async () => {
@@ -156,7 +178,30 @@ onMounted(async () => {
   } catch (e) {
     if (e?.response?.status === 403) forbidden.value = true
   }
+  loadCache()
 })
+
+async function loadCache() {
+  try {
+    const res = await api.get('/api/admin/trimble-cache')
+    cache.value = res.data
+  } catch { /* non-fatal */ }
+}
+
+async function refreshCache() {
+  refreshing.value = true
+  try {
+    await api.post('/api/admin/trimble-cache/refresh')
+    notify({ severity: 'success', summary: t('admin.trimbleRefreshed') })
+    await loadCache()
+  } finally {
+    refreshing.value = false
+  }
+}
+
+function formatDate(iso) {
+  try { return new Date(iso).toLocaleString() } catch { return iso }
+}
 
 function applySettings(s) {
   adminsText.value = (Array.isArray(s.admin_usernames) ? s.admin_usernames : []).join('\n')
@@ -245,6 +290,8 @@ async function saveSchedule() {
 .checkbox-row { display: flex; align-items: center; gap: 0.5rem; }
 .form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 0.75rem; }
 .actions-row { display: flex; gap: 0.5rem; margin-top: 0.75rem; }
+.cache-hint { color: #6b7280; font-size: 0.82rem; margin: 0 0 0.5rem; }
+.cache-stats { display: flex; flex-wrap: wrap; gap: 1.25rem; font-size: 0.85rem; color: #374151; margin-bottom: 0.5rem; }
 .schedule-table { width: 100%; border-collapse: collapse; }
 .schedule-table th, .schedule-table td { padding: 0.4rem 0.5rem; border-bottom: 1px solid #e5e7eb; text-align: left; vertical-align: middle; }
 .schedule-table th { font-size: 0.75rem; font-weight: 600; color: #4b5563; }

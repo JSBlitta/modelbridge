@@ -122,7 +122,6 @@
           <ColumnMapper
             :detected-columns="parseResult.headers"
             :auto-mapping="initialMapping"
-            :unmapped-columns="parseResult.unmapped_columns"
             :preview-rows="parseResult.preview"
             @mapping-updated="onMappingUpdated"
           />
@@ -141,6 +140,20 @@
         <div v-if="hasRequiredMapping">
           <Button :label="$t('unified.previewBtn')" icon="pi pi-search" @click="doPreview" :loading="previewing" class="btn-preview" />
         </div>
+
+        <div v-if="parseResult && !isUuidMode" class="flex-row gap-md" style="margin-bottom:0.75rem;align-items:center;flex-wrap:wrap;margin-top:0.75rem;">
+          <div style="display:flex;align-items:center;gap:0.4rem;">
+            <Checkbox v-model="includeProductionCounts" :binary="true" input-id="uc_counts_toggle" />
+            <label for="uc_counts_toggle" style="font-size:0.85rem;cursor:pointer;">{{ $t('unified.includeCounts') }}</label>
+          </div>
+          <div style="display:flex;align-items:center;gap:0.4rem;">
+            <label for="uc_default_count" style="font-size:0.85rem;">{{ $t('unified.defaultCount') }}</label>
+            <InputNumber v-model="defaultCount" input-id="uc_default_count" :min="1" :step="1" :disabled="!includeProductionCounts" style="width:90px;" />
+          </div>
+        </div>
+        <Message v-if="previewData && !isUuidMode" :severity="includeProductionCounts ? 'warn' : 'secondary'" :closable="false" size="small" style="margin-bottom:0.75rem;">
+          {{ includeProductionCounts ? $t('unified.countsIncluded', { default: defaultCount || 1 }) : $t('unified.countsExcluded') }}
+        </Message>
 
         <div v-if="previewData" class="mt-sm">
           <!-- UUID mode: flat row preview -->
@@ -286,7 +299,7 @@
 import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 const { t } = useI18n()
-import { api } from '../api.js'
+import { api, apiErrorMessage } from '../api.js'
 import { useProduuzitProjects } from '../composables/useProduuzitProjects.js'
 import { useProjectChecker } from '../composables/useProjectChecker.js'
 import { useNotifications } from '../composables/useNotifications.js'
@@ -296,10 +309,11 @@ import PhaseTable from '../components/PhaseTable.vue'
 import ConfirmationTable from '../components/ConfirmationTable.vue'
 import PushGate from '../components/PushGate.vue'
 import { usePushGate } from '../composables/usePushGate.js'
+import { useImportPreview } from '../composables/useImportPreview.js'
 import ColumnMapper from '../components/ColumnMapper.vue'
 
 // Project
-const { projects: allProjects, loading: refreshing, error: projectsError, fetchProjects } = useProduuzitProjects()
+const { projects: allProjects, loading: refreshing, fetchProjects } = useProduuzitProjects()
 const project = ref(null)
 const context = ref(null)
 
@@ -308,7 +322,6 @@ const phaseSuggestions = ref([])
 const superParseError = ref('')
 const superNoProjects = ref(false)
 const { checking, checkDone, checkProjects } = useProjectChecker()
-const confirmCreateProjects = ref(false)
 const creatingProjects = ref(false)
 const createProjectResults = ref([])
 const addingPhasesBatches = ref(false)
@@ -322,6 +335,9 @@ const selectedPreset = ref(null)
 // previewing / importing come from importGate (declared below).
 const previewData = ref(null)
 const importResults = ref([])
+// Production counts are an explicit opt-in per import; default off.
+const includeProductionCounts = ref(false)
+const defaultCount = ref(1)
 
 const newProjectCount = computed(() => phaseSuggestions.value.filter(r => r.status === 'new').length)
 const foundProjectCount = computed(() => phaseSuggestions.value.filter(r => r.status === 'found').length)
@@ -354,14 +370,6 @@ const initialMapping = computed(() => {
   return m
 })
 
-const mappingWarnings = computed(() => {
-  const targets = Object.values(columnMapping.value).flatMap(v => Array.isArray(v) ? v : [v])
-  const w = []
-  if (!targets.includes('design_name')) w.push(t('unified.noDesignName'))
-  if (!targets.includes('batch_number')) w.push(t('unified.noBatchNumber'))
-  return w
-})
-
 const hasRequiredMapping = computed(() => {
   const targets = Object.values(columnMapping.value).flatMap(v => Array.isArray(v) ? v : [v])
   return parseResult.value && project.value &&
@@ -370,14 +378,8 @@ const hasRequiredMapping = computed(() => {
 })
 
 const isUuidMode = computed(() => previewData.value?.uuid_mode)
-const previewRows = computed(() => {
-  const rows = []
-  for (const bp of previewData.value?.batch_previews || []) {
-    for (const r of bp.rows || []) {
-      rows.push({ ...r, batch_name: bp.batch_name })
-    }
-  }
-  return rows
+const { mappingWarnings, previewRows } = useImportPreview({
+  t, ns: 'unified', columnMapping, previewData,
 })
 const totalNew = computed(() => previewData.value?.batch_previews?.reduce((a, b) => a + b.summary.new, 0) ?? 0)
 const totalChanged = computed(() => isUuidMode.value
@@ -428,7 +430,7 @@ async function parseSuperCsvFile(file) {
     superNoProjects.value = phaseSuggestions.value.length === 0
     checkDone.value = false; createProjectResults.value = []
   } catch (err) {
-    superParseError.value = err.response?.data?.detail || err.message
+    superParseError.value = apiErrorMessage(err)
   }
 }
 
@@ -456,7 +458,7 @@ async function createProjects() {
       status: byKey[p.project_key] || p.status,
     }))
   } catch (err) {
-    superParseError.value = err.response?.data?.detail || err.message
+    superParseError.value = apiErrorMessage(err)
   } finally {
     creatingProjects.value = false
   }
@@ -489,7 +491,7 @@ async function addPhasesAndBatches() {
     // Re-check so the UI updates to show phases/batches as existing
     await checkProjects(phaseSuggestions)
   } catch (err) {
-    superParseError.value = err.response?.data?.detail || err.message
+    superParseError.value = apiErrorMessage(err)
   } finally {
     addingPhasesBatches.value = false
   }
@@ -520,6 +522,8 @@ function importBody() {
     project_uuid: project.value,
     column_mapping: columnMapping.value,
     rows: parseResult.value?.rows ?? [],
+    include_production_counts: includeProductionCounts.value,
+    default_count: Number(defaultCount.value) || 1,
   }
 }
 
@@ -530,6 +534,8 @@ const importGate = usePushGate({
     JSON.stringify(columnMapping.value),
     parseResult.value?.rows?.length ?? -1,
     parseResult.value?.headers?.join('|') ?? '',
+    includeProductionCounts.value ? '1' : '0',
+    String(Number(defaultCount.value) || 1),
   ].join('::'),
   check: async () => {
     const res = await api.post('/api/assemblies/preview-import', importBody())
@@ -545,7 +551,6 @@ const importGate = usePushGate({
 })
 
 const previewing = computed(() => importGate.checking)
-const importing = computed(() => importGate.pushing)
 const doPreview = () => importGate.runCheck()
 
 async function savePreset() {
@@ -583,10 +588,4 @@ function downloadCsv() {
 .chip-changed { color: #b45309; font-weight: 600; font-size: 0.9rem; }
 .chip-identical { color: #6b7280; font-size: 0.9rem; }
 .chip-blocked { color: #dc2626; font-weight: 600; font-size: 0.9rem; }
-
-/* Button color definitions */
-.btn-preview { background: #6366f1; border-color: #6366f1; color: #fff; }
-.btn-preview:hover { background: #4f46e5; border-color: #4f46e5; }
-.btn-create { background: #e40520; border-color: #e40520; color: #fff; }
-.btn-create:hover { background: #c2041b; border-color: #c2041b; }
 </style>

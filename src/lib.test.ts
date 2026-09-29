@@ -7,7 +7,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import { splitCsvDocument, splitCsvLine, detectDelimiter } from "./csv-parser.ts";
-import { parseCount, generateOrderIds, findSource } from "./lib/mapping.ts";
+import { parseCount, findSource } from "./lib/mapping.ts";
 import { fingerprint } from "./lib/fingerprint.ts";
 import { isUuid, isOpaqueId, boundedInt } from "./lib/validate.ts";
 import { compareAssemblies } from "./lib/idempotency.ts";
@@ -53,10 +53,6 @@ test("parseCount defaults to 1 for missing or invalid values", () => {
   }
   assert.equal(parseCount("7"), 7);
   assert.equal(parseCount(4.9), 4);
-});
-
-test("generateOrderIds pads and increments from the given start", () => {
-  assert.deepEqual(generateOrderIds("A20-EL", 9, 3), ["A20-EL-009", "A20-EL-010", "A20-EL-011"]);
 });
 
 test("findSource resolves both single and duplicated mapping targets", () => {

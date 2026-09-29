@@ -1,6 +1,6 @@
 import { Hono } from "hono";
-import * as db from "../db.js";
-import { boundedInt } from "../lib/validate.js";
+import * as db from "../db.ts";
+import { boundedInt } from "../lib/validate.ts";
 
 // Read-only access to the persistent action log (events table).
 // The frontend notification bell hydrates from this on load.

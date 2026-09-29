@@ -1,5 +1,5 @@
-import { apiGet, apiPut } from "../produuzit-client.js";
-import { logger } from "../logger.js";
+import { apiGet, apiPut } from "../produuzit-client.ts";
+import { logger } from "../logger.ts";
 
 export interface ProductionCountEntry {
   batch: string;      // batch uuid
@@ -77,13 +77,21 @@ export async function upsertProductionCounts(
     ? quantities.assd_batch_counts
     : [];
 
+  // Index existing rows once so merging N entries is O(N) rather than scanning
+  // the whole list per entry.
+  const indexByKey = new Map<string, number>();
+  for (let i = 0; i < batchCounts.length; i++) {
+    const x = batchCounts[i];
+    const k = `${x.batch}|${x.phase}|${x.design}`;
+    if (!indexByKey.has(k)) indexByKey.set(k, i);
+  }
   for (const e of entries) {
-    const idx = batchCounts.findIndex(
-      (x) => x.batch === e.batch && x.design === e.design && x.phase === e.phase,
-    );
-    if (idx >= 0) {
+    const k = `${e.batch}|${e.phase}|${e.design}`;
+    const idx = indexByKey.get(k);
+    if (idx !== undefined) {
       batchCounts[idx].count = e.count;
     } else {
+      indexByKey.set(k, batchCounts.length);
       batchCounts.push({ batch: e.batch, count: e.count, phase: e.phase, design: e.design });
     }
   }

@@ -9,12 +9,10 @@ import { api } from '../api.js'
 export function useProjectChecker() {
   const checking = ref(false)
   const checkDone = ref(false)
-  const error = ref('')
 
   async function checkProjects(phaseSuggestions) {
     checking.value = true
     checkDone.value = false
-    error.value = ''
     try {
       const payload = phaseSuggestions.value.map(p => ({
         project_key: p.project_key,
@@ -46,12 +44,12 @@ export function useProjectChecker() {
         }
       })
       checkDone.value = true
-    } catch (err) {
-      error.value = err.response?.data?.detail || err.message
+    } catch {
+      // Errors are surfaced by the global API error toast.
     } finally {
       checking.value = false
     }
   }
 
-  return { checking, checkDone, error, checkProjects }
+  return { checking, checkDone, checkProjects }
 }

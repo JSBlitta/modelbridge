@@ -47,6 +47,13 @@ export const env = {
   TRIMBLE_CALLBACK_URLS: optional("TRIMBLE_CALLBACK_URLS", "http://localhost/api/trimble/auth/callback")
     .split(",").map((u) => u.trim()).filter(Boolean),
 
+  // Server-side free-text filter for model entities (entity class, product
+  // name, pset names/values). 'CalculatedGeometryValues' keeps only entities
+  // that carry geometry — the fallback for models polluted with geometry-less
+  // catalog/type entities. Default: off (schematic models need no filter).
+  // A per-request entity_text_filter overrides this.
+  TRIMBLE_ENTITY_TEXT_FILTER: optional("TRIMBLE_ENTITY_TEXT_FILTER"),
+
   // Logging: error | warn | info | debug (default: info)
   LOG_LEVEL: optional("LOG_LEVEL", "info"),
   // Optional log file — when set, all log lines are also appended here

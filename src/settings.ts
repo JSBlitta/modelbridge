@@ -2,8 +2,8 @@
 // configuration. Values seed from environment variables on first read and can
 // then be overridden via the admin page (stored in the `settings` table).
 
-import * as db from "./db.js";
-import { env } from "./env.js";
+import * as db from "./db.ts";
+import { env } from "./env.ts";
 
 export interface ReportingSettings {
   enabled: boolean;
@@ -14,11 +14,6 @@ export interface ReportingSettings {
   pageSize: number;
   maxPages: number;
   outputDir: string;
-}
-
-export interface AppSettings {
-  adminUsernames: string[];
-  reporting: ReportingSettings;
 }
 
 // key -> env-seeded default. Values stored in DB override these once saved.
@@ -35,6 +30,9 @@ const SETTING_DEFAULTS: Record<string, unknown> = {
   reporting_page_size: env.REPORTING_PAGE_SIZE,
   reporting_max_pages: env.REPORTING_MAX_PAGES,
   reporting_output_dir: env.REPORTING_OUTPUT_DIR,
+  // Entity text filter for the Trimble import (e.g. 'CalculatedGeometryValues'
+  // to keep only geometry-carrying entities). Toggled from the import screen.
+  trimble_entity_text_filter: env.TRIMBLE_ENTITY_TEXT_FILTER,
 };
 
 let _cache: Record<string, unknown> | null = null;

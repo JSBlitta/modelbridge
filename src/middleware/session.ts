@@ -11,8 +11,8 @@
 
 import type { Context, MiddlewareHandler } from "hono";
 import { getCookie } from "hono/cookie";
-import * as db from "../db.js";
-import { isAdmin } from "../settings.js";
+import * as db from "../db.ts";
+import { isAdmin } from "../settings.ts";
 
 export const SESSION_COOKIE = "session_id";
 

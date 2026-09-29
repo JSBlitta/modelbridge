@@ -60,9 +60,6 @@
   </div>
 </template>
 
-<script setup>
-</script>
-
 <style scoped>
 .landing {
   max-width: 1000px;

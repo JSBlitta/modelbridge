@@ -7,7 +7,7 @@
 
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
-import { sharepointFileExists, sharepointRead, sharepointUpload } from "../sharepoint-client.js";
+import { sharepointFileExists, sharepointRead, sharepointUpload } from "../sharepoint-client.ts";
 
 export interface WriteResult {
   path: string;        // absolute path of the file
@@ -83,7 +83,6 @@ export class SharePointFileStore implements OutputStore {
 // item's "Laatste run" column; locally we keep the same information in a JSON
 // state file (a SharePoint-backed store can be added later).
 export interface LastRunStore {
-  get(endpoint: string): Promise<string | null>;
   set(endpoint: string, when: string): Promise<void>;
 }
 
@@ -98,10 +97,6 @@ export class JsonLastRunStore implements LastRunStore {
     } catch {
       return {};
     }
-  }
-
-  async get(endpoint: string): Promise<string | null> {
-    return this.read()[endpoint] ?? null;
   }
 
   async set(endpoint: string, when: string): Promise<void> {

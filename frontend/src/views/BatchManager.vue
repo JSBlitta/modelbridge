@@ -186,7 +186,6 @@
           <ColumnMapper
             :detected-columns="countParseResult.headers"
             :auto-mapping="countInitialMapping"
-            :unmapped-columns="countParseResult.unmapped_columns"
             :preview-rows="countParseResult.preview"
             @mapping-updated="onCountMappingUpdated"
           />
@@ -234,15 +233,13 @@
 
 <script setup>
 import { ref, computed } from 'vue'
-import { useI18n } from 'vue-i18n'
-const { t } = useI18n()
 import { api } from '../api.js'
 import { useProduuzitProjects } from '../composables/useProduuzitProjects.js'
 import { useConfirm } from 'primevue/useconfirm'
 
 const confirm = useConfirm()
 
-const { projects, loading: loadingProjects, error: projectsError, fetchProjects } = useProduuzitProjects()
+const { projects, loading: loadingProjects, fetchProjects } = useProduuzitProjects()
 const selectedProject = ref(null)
 const apiBatches = ref([])
 const dbBatches = ref([])
@@ -505,8 +502,4 @@ async function doCountImport() {
 .page-title { font-size: 1.5rem; font-weight: 700; margin-bottom: 1.5rem; }
 .mb-card { margin-bottom: 1.25rem; }
 .info-text { color: #374151; }
-.btn-preview { background: #6366f1; border-color: #6366f1; color: #fff; }
-.btn-preview:hover { background: #4f46e5; border-color: #4f46e5; }
-.btn-create { background: #e40520; border-color: #e40520; color: #fff; }
-.btn-create:hover { background: #c2041b; border-color: #c2041b; }
 </style>

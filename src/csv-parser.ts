@@ -109,8 +109,7 @@ export function parseProjectCsv(
       superproject = number;
     }
 
-    const phases = [...data.phases];
-    const suggestedPhase = phases.length === 1 ? phases[0] : phases[0] ?? null;
+    const suggestedPhase = [...data.phases][0] ?? null;
     const seenNums = new Map<number | string, { stdlibs: string[]; phase: string }>();
     for (const b of data.batches) {
       if (!seenNums.has(b.number)) seenNums.set(b.number, { stdlibs: b.stdlibs, phase: b.phase });

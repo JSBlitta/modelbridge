@@ -9,7 +9,7 @@
 // - The non-overwrite filename carries the ISO 8601 week number, computed with
 //   the same formula Power Automate used (week containing Thursday).
 
-import type { ScheduleEntry } from "./types.js";
+import type { ScheduleEntry } from "./types.ts";
 
 export const DUTCH_WEEKDAYS = [
   "Zondag",

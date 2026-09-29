@@ -29,9 +29,11 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { api } from '../api.js'
 import { setAuthenticated } from '../router/index.js'
+import { useAuth } from '../composables/useAuth.js'
 
 const router = useRouter()
 const { t } = useI18n()
+const { refreshAuthStatus } = useAuth()
 const username = ref('')
 const password = ref('')
 const error = ref('')
@@ -43,6 +45,8 @@ async function submit() {
   try {
     await api.post('/api/auth/login', { username: username.value, password: password.value })
     setAuthenticated(true)
+    // Refresh shared session state so admin-only navigation appears right away.
+    await refreshAuthStatus()
     router.push('/')
   } catch (e) {
     error.value = e.response?.data?.error ?? t('login.loginFailed')

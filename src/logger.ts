@@ -1,4 +1,5 @@
-import { appendFileSync, mkdirSync } from "node:fs";
+import { createWriteStream, mkdirSync } from "node:fs";
+import type { WriteStream } from "node:fs";
 import { dirname } from "node:path";
 
 const LEVELS = { error: 0, warn: 1, info: 2, debug: 3 } as const;
@@ -6,6 +7,7 @@ type Level = keyof typeof LEVELS;
 
 let _level: number = LEVELS.info;
 let _logFile: string | null = null;
+let _stream: WriteStream | null = null;
 
 // Configure level ("error" | "warn" | "info" | "debug", default "info") and an
 // optional log file. When LOG_FILE is set, every message is also appended to
@@ -15,6 +17,7 @@ export function initLogger(level?: string, logFile?: string): void {
   if (lvl in LEVELS) _level = LEVELS[lvl as Level];
 
   _logFile = logFile || process.env.LOG_FILE || "";
+  if (_stream) { _stream.end(); _stream = null; }
   if (_logFile) {
     try {
       const dir = dirname(_logFile);
@@ -46,10 +49,15 @@ function write(level: Level, args: unknown[]): void {
     : console.debug;
   consoleFn(...args);
 
-  // File output (not gated — the level check above already applies)
+  // File output (not gated — the level check above already applies). A buffered
+  // stream avoids blocking the event loop on every logged request.
   if (_logFile) {
     try {
-      appendFileSync(_logFile, line + "\n");
+      if (!_stream) {
+        _stream = createWriteStream(_logFile, { flags: "a" });
+        _stream.on("error", () => { /* logging must never crash the app */ });
+      }
+      _stream.write(line + "\n");
     } catch { /* ignore */ }
   }
 }

@@ -1,6 +1,7 @@
 {
   "name": "modelbridge",
-  "version": "2.0.0",
+  "version": "2.1.0",
+  "description": "Trimble Connect to Produuzit bridge, plus the Trimble Connect entity/pset pipeline",
   "type": "module",
   "scripts": {
     "setup": "npm install && cd frontend && npm install",
@@ -9,19 +10,28 @@
     "build": "cd frontend && npm run build",
     "start": "tsx src/index.ts",
     "reporting": "tsx src/reporting-cli.ts",
+    "trimble-cli": "tsx src/trimble-cli.ts",
+    "trimble-connect": "tsx src/trimble/cli.ts",
     "typecheck": "tsc --noEmit",
-    "test": "node --experimental-strip-types --test src/**/*.test.ts"
+    "test": "npm run test:node && npm run test:vitest",
+    "test:node": "node --experimental-strip-types --experimental-test-module-mocks --test src/*.test.ts src/middleware/*.test.ts",
+    "test:vitest": "vitest run"
   },
   "dependencies": {
     "@hono/node-server": "^1.13.0",
     "better-sqlite3": "^11.7.0",
     "hono": "^4.6.0",
-    "yaml": "^2.6.0"
+    "yaml": "^2.6.0",
+    "zod": "^3.22.4"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.0",
     "@types/node": "^22.0.0",
     "tsx": "^4.19.0",
-    "typescript": "^5.7.0"
+    "typescript": "^5.7.0",
+    "vitest": "^1.2.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
   }
 }

@@ -1,7 +1,4 @@
 defaults:
-  batch_name_pattern: 3 digits
-  batch_name_pattern_phase_vbw: '{number}{suffix}-{phase}'
-  batch_state: provisional
   client_name: BLITTA
 
 synonyms:

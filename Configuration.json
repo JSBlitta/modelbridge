@@ -1,0 +1,133 @@
+{
+  "connectorSettings": {
+    "companyName": "Blitta",
+    "companyFolderOnly": true,
+    "standardFields": ["id", "product", "psets", "psets.name"],
+    "decimalPlaces": 2,
+    "batchChunkSize": 5000,
+    "expandAllFields": true,
+    "propertysetToKeep": ["BLITTA"],
+    "propertySetsDiscard": [
+      "CalculatedGeometryValues",
+      "OrientedBoundingBox",
+      "IfcSite",
+      "IfcMaterial",
+      "Pset_WindowCommon",
+      "IfcBuildingStorey",
+      "IfcBuilding",
+      "IfcDiscreteAccessoryType",
+      "IfcClassificationReference",
+      "CustomProfile",
+      "Extrusion",
+      "IfcMemberType",
+      "ImportPluginLog",
+      "IfcMaterialLayerSetUsage",
+      "IfcPlateType",
+      "IfcWindowStyle",
+      "IfcWindow",
+      "IfcRectangleProfile",
+      "IfcBuildingElementProxyType",
+      "IfcProject",
+      "UnitsInContext"
+    ]
+  },
+  "trimbleConnectAuthorization": {
+    "clientId": "13b9fc45-16d7-4f7a-9188-b5b9158c537b",
+    "clientSecret": "",
+    "scope": "openid Datatable_extractor"
+  },
+  "trimbleConnectURLs": {
+    "authorizeUri": "https://id.trimble.com/oauth/authorize",
+    "tokenUri": "https://id.trimble.com/oauth/token",
+    "redirectUri": "https://oauth.powerbi.com/views/oauthredirect.html",
+    "regionsUri": "https://app.connect.trimble.com/tc/api/2.0/regions"
+  },
+  "modelAPI": {
+    "allowedFields": [
+      "id",
+      "idx",
+      "idc",
+      "type",
+      "psets",
+      "psets.name",
+      "boundingBox",
+      "product",
+      "hierarchyInfo",
+      "layerIds"
+    ]
+  },
+    "coreAPI": {
+      "queryStrings": {
+        "fullyLoaded": {
+          "type": "boolean",
+          "description": "Include file/folder details in the listing (No of files, No of Folders, No of File Versions, Size), commerce access info. Default is TRUE"
+        },
+        "minimal": {
+          "type": "boolean",
+          "description": "Retrieve only id, name of the project in the listing. Will override fullyLoaded parameter. Default is FALSE"
+        },
+        "sort": {
+          "type": "string",
+          "description": "Supported sorting fields are \"name\", \"size\", \"lastVisited\", \"modified\", \"updatedOn\". Prefix with \"+\" for ascending and \"-\" for descending sort order. Default is \"-lastVisited\""
+        },
+        "include": {
+          "type": "string",
+          "description": "A comma-separated list of fields to include in the response. Supported values: \"license.appAccess\" and \"license.policyType\". You can specify either or both of these values. If this parameter is present, a \"Range\" header must also be provided to limit the response to a maximum of 25 items."
+        }
+      }
+    },       
+  "tableColumns": {
+    "projectsColumns": [
+      "id",
+      "rootId",
+      "name",
+      "description"
+    ],
+    "folderColumns": [
+      "id",
+      "name",
+      "type",
+      "versionId",
+      "projectId"
+    ],
+    "versionColumns": [
+      "id",
+      "name",
+      "type",
+      "versionId",
+      "projectId",
+      "path",
+      "createdOn",
+      "modifiedOn"
+    ],
+    "releaseColumns":[
+      "id",
+      "name",
+      "status",
+      "projectId",
+      "dueDate",
+      "notes",
+      "modifiedOn",
+      "createdOn"
+    ]
+  },
+  "queryParameters": {
+    "FunctionAllowedValues": [
+      "starts with",
+      "does not start with",
+      "contains",
+      "does not contain",
+      "ends with",
+      "does not end with"
+    ],
+    "PropertiesAllowedValues": [
+      "idx",
+      "idc",
+      "type",
+      "layercount",
+      "name",
+      "objectType",
+      "description"
+    ]
+  }
+}

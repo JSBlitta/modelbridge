@@ -23,7 +23,6 @@
 .text-identical { color: #6b7280; }
 .text-blocked { color: #dc2626; font-weight: 600; }
 .text-dim { color: #6b7280; font-size: 0.85rem; }
-.text-label { display: block; font-size: 0.8rem; font-weight: 600; color: #4b5563; margin-bottom: 0.25rem; }
 
 /* Spacing */
 .mb-card { margin-bottom: 1rem; }
@@ -31,10 +30,6 @@
 .mt-sm { margin-top: 0.75rem; }
 .mb-sm { margin-bottom: 0.5rem; }
 .wide { width: 100%; }
-
-/* Panels */
-.panel-box { background: white; border: 1px solid #e5e7eb; border-radius: 8px; padding: 1rem; }
-.panel-label { display: block; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; color: #6b7280; margin-bottom: 0.5rem; }
 
 /* Badges */
 .badge-info { background: #e0f2fe; color: #0369a1; padding: 0.2rem 0.5rem; border-radius: 999px; font-size: 0.78rem; display: inline-block; }

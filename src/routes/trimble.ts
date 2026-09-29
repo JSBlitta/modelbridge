@@ -1,11 +1,16 @@
 import { Hono } from "hono";
+import type { Context } from "hono";
 import { getCookie, setCookie, deleteCookie } from "hono/cookie";
+import { getSettings } from "../settings.ts";
 import {
   beginOAuth,
-  buildAuthorizeUrl,
   clearTokens,
   exchangeCode,
   fetchAllTrimblePages,
+  fetchProjectPsetLibraries,
+  fetchProjectPsetCatalog,
+  fetchEntityPsets,
+  type ProjectPsetInstance,
   getCallbackUrls,
   getOAuthState,
   getRefreshToken,
@@ -17,19 +22,21 @@ import {
   restoreRefreshToken,
   setManualToken,
   trimbleGet,
-} from "../trimble-client.js";
-import { apiGet, apiPatch, apiPost, fetchAllPages } from "../produuzit-client.js";
-import * as db from "../db.js";
-import { findSource, parseCount } from "../lib/mapping.js";
-import type { ColumnMapping } from "../lib/mapping.js";
+} from "../trimble-client.ts";
+import { apiGet, apiPatch, apiPost, fetchAllPages } from "../produuzit-client.ts";
+import * as db from "../db.ts";
+import { findSource, parseCount, normalizeCount } from "../lib/mapping.ts";
+import type { ColumnMapping } from "../lib/mapping.ts";
 import {
   ConcurrentModificationError,
   getProductionCounts,
   getProductionCountsSignature,
   upsertProductionCounts,
-} from "../lib/production-counts.js";
-import { logger } from "../logger.js";
-import { GATE, issuePreviewToken, requirePreviewToken } from "../lib/push-gate.js";
+} from "../lib/production-counts.ts";
+import { logger } from "../logger.ts";
+import { GATE, issuePreviewToken, requirePreviewToken } from "../lib/push-gate.ts";
+import { isOpaqueId } from "../lib/validate.ts";
+import { loadDesigns, loadBatches, fuzzyDesignLookup, buildBatchMatcher } from "../lib/produuzit-topology.ts";
 
 const app = new Hono();
 
@@ -147,61 +154,157 @@ app.post("/auth/token", async (c) => {
 });
 
 // --- Trimble data routes ---
+//
+// Project ids, model ids and library ids are extremely stable, so this topology
+// is cached in SQLite and served from there indefinitely. It is only refreshed
+// when the cache misses or an admin explicitly forces it (?refresh=1).
+
+function wantsRefresh(c: { req: { query: (k: string) => string | undefined } }): boolean {
+  const v = c.req.query("refresh");
+  return v === "1" || v === "true";
+}
+
+function toItemList(raw: unknown): Record<string, unknown>[] {
+  if (Array.isArray(raw)) return raw as Record<string, unknown>[];
+  if (raw && typeof raw === "object") {
+    const p = raw as Record<string, unknown>;
+    return (p.results ?? p.items ?? []) as Record<string, unknown>[];
+  }
+  return [];
+}
+
+// Read-through SQLite cache. Serve the cached JSON unless the caller asked to
+// refresh; otherwise load fresh, persist the result and return it.
+async function cachedJson(c: Context, key: string, load: () => Promise<unknown>) {
+  if (!wantsRefresh(c)) {
+    const hit = db.getTrimbleCache(key);
+    if (hit) return c.json(hit.value);
+  }
+  const value = await load();
+  db.setTrimbleCache(key, value);
+  return c.json(value);
+}
 
 app.get("/projects", async (c) => {
-  const endpoints = getRegionEndpoints();
-  return c.json(await trimbleGet(endpoints.Core + "projects", { fullyLoaded: "false", sort: "-name" }));
+  return cachedJson(c, "projects", async () => {
+    const endpoints = getRegionEndpoints();
+    const raw = await trimbleGet(endpoints.Core + "projects", { fullyLoaded: "false", sort: "-name" });
+    const projects = toItemList(raw)
+      .map((p) => ({
+        project_id: String(p.id ?? p.projectId ?? ""),
+        name: (p.name as string) ?? null,
+        raw: p,
+      }))
+      .filter((p) => p.project_id);
+    db.upsertTrimbleProjects(projects);
+    return raw;
+  });
 });
 
 app.get("/projects/:projectId/releases", async (c) => {
+  const projectId = c.req.param("projectId");
+  if (!isOpaqueId(projectId)) return c.json({ error: "Invalid projectId" }, 400);
   const endpoints = getRegionEndpoints();
-  return c.json(await trimbleGet(endpoints.Core + "releases", { projectId: c.req.param("projectId") }));
+  return c.json(await trimbleGet(endpoints.Core + "releases", { projectId }));
 });
 
 app.get("/releases/:releaseId/files", async (c) => {
+  const releaseId = c.req.param("releaseId");
+  if (!isOpaqueId(releaseId)) return c.json({ error: "Invalid releaseId" }, 400);
   const endpoints = getRegionEndpoints();
-  return c.json(await trimbleGet(endpoints.Core + `releases/${c.req.param("releaseId")}/files`));
+  return c.json(await trimbleGet(endpoints.Core + `releases/${releaseId}/files`));
 });
+
 
 app.get("/projects/:projectId/tree", async (c) => {
   const projectId = c.req.param("projectId");
-  const endpoints = getRegionEndpoints();
-  let items: Record<string, unknown>[] = [];
+  if (!isOpaqueId(projectId)) return c.json({ error: "Invalid projectId" }, 400);
+  return cachedJson(c, `tree:${projectId}`, async () => {
+    const endpoints = getRegionEndpoints();
+    let items: Record<string, unknown>[] = [];
 
-  try {
-    const rootId = await getProjectRootId(endpoints, projectId);
-    if (rootId) items = await walkFolders(endpoints, rootId, "");
-  } catch { /* fall through to releases */ }
-
-  if (!items.length) {
     try {
-      const rels = await trimbleGet(endpoints.Core + "releases", { projectId });
-      const relList = Array.isArray(rels) ? rels : ((rels as Record<string, unknown>).results ?? []) as Record<string, unknown>[];
-      for (const rel of relList) {
-        try {
-          const files = await trimbleGet(endpoints.Core + `releases/${rel.id}/files`);
-          const fileList = (Array.isArray(files) ? files : ((files as Record<string, unknown>).results ?? [])) as Record<string, unknown>[];
-          for (const f of fileList) {
-            f._source = "release";
-            f._releaseName = rel.name ?? "";
-            items.push(f);
-          }
-        } catch { /* skip failed release */ }
-      }
-    } catch { /* no releases */ }
-  }
+      const rootId = await getProjectRootId(endpoints, projectId);
+      if (rootId) items = await walkFolders(endpoints, rootId, "");
+    } catch { /* fall through to releases */ }
 
-  const ifcItems = items.filter((it) => isIfcFile((it.name as string) ?? (it.filename as string) ?? ""));
-  return c.json({ items: ifcItems, total: ifcItems.length });
+    if (!items.length) {
+      try {
+        const rels = await trimbleGet(endpoints.Core + "releases", { projectId });
+        // Sequential on purpose: a project can have many releases and buffering
+        // all of their file lists at once is an easy way to exhaust memory.
+        for (const rel of toItemList(rels)) {
+          try {
+            const files = await trimbleGet(endpoints.Core + `releases/${rel.id}/files`);
+            for (const f of toItemList(files)) {
+              f._source = "release";
+              f._releaseName = rel.name ?? "";
+              items.push(f);
+            }
+          } catch { /* skip failed release */ }
+        }
+      } catch { /* no releases */ }
+    }
+
+    const ifcItems = items.filter((it) => isIfcFile((it.name as string) ?? (it.filename as string) ?? ""));
+    // Persist the discovered models so model -> library links can be formed even
+    // when the libraries endpoint is called before the tree.
+    db.upsertTrimbleModels(projectId, ifcItems
+      .map((it) => ({
+        model_id: String(it.id ?? ""),
+        name: (it.name as string) ?? (it.filename as string) ?? null,
+        raw: it,
+      }))
+      .filter((m) => m.model_id));
+    return { items: ifcItems, total: ifcItems.length };
+  });
+});
+
+// Pset libraries attached to a project, plus which of the project's cached
+// models each library maps to. Libraries live on the Organizer discovery tree.
+// Only the library ids are cached (with the model links); the library's property
+// definitions are fetched live by /pset-catalog.
+app.get("/projects/:projectId/libraries", async (c) => {
+  const projectId = c.req.param("projectId");
+  if (!isOpaqueId(projectId)) return c.json({ error: "Invalid projectId" }, 400);
+  return cachedJson(c, `libraries:${projectId}`, async () => {
+    const libs = await fetchProjectPsetLibraries(projectId);
+    db.replaceTrimbleProjectLibraries(projectId, libs.map((l) => ({ library_id: l.library_id, name: l.name, raw: l.raw })));
+
+    const modelLibs = db.getTrimbleModelLibraries();
+    return {
+      libraries: db.getTrimbleLibraries(projectId).map((l) => ({ library_id: l.library_id, name: l.name })),
+      models: db.getTrimbleModels(projectId).map((m) => ({
+        model_id: m.model_id,
+        name: m.name,
+        library_ids: modelLibs.filter((ml) => ml.model_id === m.model_id).map((ml) => ml.library_id),
+      })),
+    };
+  });
+});
+
+// Project property-set definitions from the PSet service. These are the
+// Trimble-added psets (not present in the IFC). Property data is always fetched
+// live — only the library/model/project ids are cached.
+app.get("/projects/:projectId/pset-catalog", async (c) => {
+  const projectId = c.req.param("projectId");
+  if (!isOpaqueId(projectId)) return c.json({ error: "Invalid projectId" }, 400);
+  const { libraries, definitions } = await fetchProjectPsetCatalog(projectId);
+  return c.json({
+    libraries: libraries.map((l) => ({ library_id: l.library_id, name: l.name })),
+    definitions,
+  });
 });
 
 app.get("/models/:modelId/psetdefs", async (c) => {
   const modelId = c.req.param("modelId");
+  if (!isOpaqueId(modelId)) return c.json({ error: "Invalid modelId" }, 400);
   const versionId = c.req.query("versionId") ?? undefined;
   const endpoints = getRegionEndpoints();
   const extra: Record<string, string> = {};
   if (versionId) extra.versionId = versionId;
 
+  // IFC property definitions are always fetched live.
   const items = (await fetchAllTrimblePages(endpoints.Model + `models/${modelId}/psetdefs`, 30000, extra)) as Record<string, unknown>[];
   const result = items.map((item) => ({
     name: item.name ?? "",
@@ -212,6 +315,7 @@ app.get("/models/:modelId/psetdefs", async (c) => {
 
 app.get("/models/:modelId/entities", async (c) => {
   const modelId = c.req.param("modelId");
+  if (!isOpaqueId(modelId)) return c.json({ error: "Invalid modelId" }, 400);
   const versionId = c.req.query("versionId") ?? "";
   const fields = c.req.query("fields") ?? "";
   const top = c.req.query("top") ?? "1000";
@@ -227,6 +331,7 @@ app.get("/models/:modelId/entities", async (c) => {
 // GET one entity without field filtering — diagnostic to inspect raw entity structure
 app.get("/models/:modelId/entities/sample", async (c) => {
   const modelId = c.req.param("modelId");
+  if (!isOpaqueId(modelId)) return c.json({ error: "Invalid modelId" }, 400);
   const versionId = c.req.query("versionId") ?? "";
   const endpoints = getRegionEndpoints();
   // fields=psets,psets.name is required to get property-set data + names (API docs requirement)
@@ -283,14 +388,17 @@ function transformEntityPsets(
 // POST: fetch all entities — cross-references psetdefs to produce key-value pset objects
 app.post("/models/:modelId/entities", async (c) => {
   const modelId = c.req.param("modelId");
+  if (!isOpaqueId(modelId)) return c.json({ error: "Invalid modelId" }, 400);
   const body = await c.req.json<{
     versionId: string;
     fields?: string[] | string;
     filters?: string;
+    entity_text_filter?: string;
     unique_only?: boolean;
     unique_key_prop?: string;
     include_assemblies?: boolean;
     column_mapping?: ColumnMapping;
+    project_id?: string;
   }>();
 
   if (!body.versionId) return c.json({ error: "Missing versionId" }, 400);
@@ -299,8 +407,17 @@ app.post("/models/:modelId/entities", async (c) => {
   const extra: Record<string, string> = { versionId: body.versionId };
   // Must request BOTH psets and psets.name — without psets.name the name field is omitted
   // Also request type so we can distinguish physical elements from spatial structure
-  extra.fields = "psets,psets.name,type";
+  // idc is the connect identifier: pset links (frn:entity:...) may reference it
+  // rather than the source id, so fetch both to match Trimble-added properties.
+  extra.fields = "idc,psets,psets.name,type";
   if (body.filters) extra.filters = body.filters;
+  // Server-side free-text filter (entity class, product name, pset names/values).
+  // 'CalculatedGeometryValues' keeps only entities that carry geometry — the
+  // fallback for models polluted with geometry-less catalog/type entities.
+  // Precedence: request body > persisted setting (seeded from the env var).
+  const entityTextFilter =
+    body.entity_text_filter?.trim() || String(getSettings().trimble_entity_text_filter ?? "").trim();
+  if (entityTextFilter) extra.text = entityTextFilter;
 
   // Fetch psetdefs and entities in parallel
   const [rawEntities, psetdefsRaw] = await Promise.all([
@@ -353,6 +470,53 @@ app.post("/models/:modelId/entities", async (c) => {
     entities = deduped;
   }
 
+  // Merge properties added through Trimble Connect. They live in the PSet
+  // service, not the IFC, so the model API's `psets` field omits them entirely —
+  // without this they never appear in the Trimble flow.
+  if (body.project_id && isOpaqueId(body.project_id) && entities.length) {
+    try {
+      const entityGuids = entities
+        .map((e) => [e.id, e.idc, e.entityId].filter((v) => v != null).map(String)[0])
+        .filter((guid): guid is string => Boolean(guid));
+      const instances = await fetchEntityPsets(entityGuids, { projectId: body.project_id });
+      if (instances.length) {
+        const byEntity = new Map<string, ProjectPsetInstance[]>();
+        for (const inst of instances) {
+          const list = byEntity.get(inst.entity_id);
+          if (list) list.push(inst);
+          else byEntity.set(inst.entity_id, [inst]);
+        }
+        let merged = 0;
+        for (const e of entities) {
+          const candidates = [e.id, e.idc, e.entityId].filter((v) => v != null).map((v) => String(v));
+          let list: ProjectPsetInstance[] | undefined;
+          for (const c of candidates) {
+            list = byEntity.get(c);
+            if (list) break;
+          }
+          if (!list) continue;
+          const psets = (e.psets && typeof e.psets === "object" && !Array.isArray(e.psets))
+            ? (e.psets as Record<string, unknown>)
+            : {};
+          for (const inst of list) {
+            const target = (psets[inst.def_name] && typeof psets[inst.def_name] === "object")
+              ? (psets[inst.def_name] as Record<string, unknown>)
+              : {};
+            for (const [k, v] of Object.entries(inst.props)) {
+              if (v !== null && v !== undefined && v !== "") target[k] = String(v);
+            }
+            psets[inst.def_name] = target;
+            merged++;
+          }
+          e.psets = psets;
+        }
+        logger.debug(`[trimble] merged ${merged} Trimble pset instance(s) into ${entities.length} entities`);
+      }
+    } catch (e) {
+      logger.warn(`[trimble] could not merge PSet-service properties: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
   return c.json({ entities, total: entities.length });
 });
 
@@ -364,12 +528,17 @@ app.post("/preview-import", async (c) => {
     column_mapping: ColumnMapping;
     entities: Record<string, unknown>[];
     unique_only?: boolean;
+    include_production_counts?: boolean;
+    default_count?: number;
   }>();
 
   if (!body.project_uuid) return c.json({ error: "Missing project_uuid" }, 400);
   if (!body.entities?.length) return c.json({ error: "Missing entities" }, 400);
 
-  const designsMap = await loadDesigns(body.project_uuid);
+  const defaultCount = normalizeCount(body.default_count);
+  const includeCounts = Boolean(body.include_production_counts);
+
+  const designsMap = await loadDesigns(body.project_uuid, { fuzzy: true });
   const batches = await loadBatches(body.project_uuid);
   const dbBatches = new Map(db.getBatches(body.project_uuid).map((b) => [b.uuid, b]));
   const existingCounts = await getProductionCounts(body.project_uuid);
@@ -420,6 +589,7 @@ app.post("/preview-import", async (c) => {
   logger.debug(`[trimble preview] loaded ${allAssemblies.length} assemblies across ${asmByBatch.size} batches`);
 
   const byBatch = new Map<string, Record<string, unknown>[]>();
+  const matchBatch = buildBatchMatcher(batches);
   const unresolvedBatches = new Set<string>();
   const unresolvedDesigns = new Set<string>();
   const unresolvedPhases = new Set<string>();
@@ -449,7 +619,7 @@ app.post("/preview-import", async (c) => {
     for (const entity of entities) {
       const batchRaw = extractProp(entity, batchProp);
       const entityPhase = phaseProp ? (extractProp(entity, phaseProp) || "").trim() : "";
-      const matched = batchRaw ? matchBatchByNumber(batches, batchRaw, entityPhase) : null;
+      const matched = batchRaw ? matchBatch(batchRaw, entityPhase) : null;
       if (!matched) { if (batchRaw) unresolvedBatches.add(batchRaw); continue; }
       const uuid = matched.uuid as string;
       if (!byBatch.has(uuid)) byBatch.set(uuid, []);
@@ -477,7 +647,7 @@ app.post("/preview-import", async (c) => {
       if (!designUuid) continue;
       const entityPhase = phaseProp ? (extractProp(entity, phaseProp) || "").trim() : "";
       const phase = entityPhase || batchPhase;
-      const count = countProp ? parseCount(extractProp(entity, countProp)) : 1;
+      const count = countProp ? parseCount(extractProp(entity, countProp), defaultCount) : defaultCount;
       const key = `${phase}|${designUuid}`;
       const entry = countMap.get(key);
       if (entry) entry.count += count;
@@ -531,6 +701,8 @@ app.post("/preview-import", async (c) => {
     unresolved_batches: [...unresolvedBatches].sort(),
     unresolved_designs: [...unresolvedDesigns].sort(),
     unresolved_phases: [...unresolvedPhases].sort(),
+    production_counts_included: includeCounts,
+    default_count: defaultCount,
     preview_token: issuePreviewToken(GATE.trimbleImport, trimbleGateInput(body)),
   });
 });
@@ -543,6 +715,8 @@ app.post("/import", async (c) => {
     entities: Record<string, unknown>[];
     unique_only?: boolean;
     preview_token?: string;
+    include_production_counts?: boolean;
+    default_count?: number;
   }>();
 
   if (!body.project_uuid) return c.json({ error: "Missing project_uuid" }, 400);
@@ -552,11 +726,14 @@ app.post("/import", async (c) => {
   const blocked = requirePreviewToken(c, GATE.trimbleImport, body.preview_token, trimbleGateInput(body));
   if (blocked) return blocked;
 
+  const defaultCount = normalizeCount(body.default_count);
+  const includeCounts = Boolean(body.include_production_counts);
+
   // Snapshot the project's counts before doing any work; the write below is
   // conditional on them being unchanged.
-  const countsSignature = await getProductionCountsSignature(body.project_uuid);
+  const countsSignature = includeCounts ? await getProductionCountsSignature(body.project_uuid) : null;
 
-  const designsMap = await loadDesigns(body.project_uuid);
+  const designsMap = await loadDesigns(body.project_uuid, { fuzzy: true });
   const batches = await loadBatches(body.project_uuid);
   const dbBatches = new Map(db.getBatches(body.project_uuid).map((b) => [b.uuid, b]));
 
@@ -588,6 +765,7 @@ app.post("/import", async (c) => {
   const countMap = new Map<string, { batch: string; phase: string; design: string; design_name: string; count: number }>();
 
   const byBatch = new Map<string, Record<string, unknown>[]>();
+  const matchBatch = buildBatchMatcher(batches);
 
   if (!batchProp) {
     // Design-only mode: route by design name across all batches
@@ -614,7 +792,7 @@ app.post("/import", async (c) => {
     for (const entity of entities) {
       const batchRaw = extractProp(entity, batchProp);
       const entityPhase = phaseProp ? (extractProp(entity, phaseProp) || "").trim() : "";
-      const matched = batchRaw ? matchBatchByNumber(batches, batchRaw, entityPhase) : null;
+      const matched = batchRaw ? matchBatch(batchRaw, entityPhase) : null;
       if (matched) {
         const uuid = matched.uuid as string;
         if (!byBatch.has(uuid)) byBatch.set(uuid, []);
@@ -649,7 +827,7 @@ app.post("/import", async (c) => {
       }
       const entityPhase = phaseProp ? (extractProp(entity, phaseProp) || "").trim() : "";
       const phase = entityPhase || batchPhase;
-      const count = countProp ? parseCount(extractProp(entity, countProp)) : 1;
+      const count = countProp ? parseCount(extractProp(entity, countProp), defaultCount) : defaultCount;
       const key = `${batchUuid}|${phase}|${designUuid}`;
       const entry = countMap.get(key);
       if (entry) entry.count += count;
@@ -657,9 +835,11 @@ app.post("/import", async (c) => {
     }
   }
 
-  if (countMap.size) {
+  if (!includeCounts) {
+    results.push({ status: "skipped", reason: "Production counts not requested" });
+  } else if (countMap.size) {
     try {
-      await upsertProductionCounts(body.project_uuid, [...countMap.values()], countsSignature);
+      await upsertProductionCounts(body.project_uuid, [...countMap.values()], countsSignature ?? undefined);
       for (const e of countMap.values()) {
         const bn = (batchById.get(e.batch)?.name as string) ?? e.batch;
         results.push({ design_name: e.design_name, batch: bn, phase: e.phase, design: e.design, status: "created", count: e.count });
@@ -680,7 +860,7 @@ app.post("/import", async (c) => {
     blocked: results.filter((r) => r.status === "blocked").length,
     error: results.filter((r) => r.status === "error").length,
   };
-  return c.json({ results, summary });
+  return c.json({ results, summary, production_counts: { included: includeCounts, default_count: defaultCount } });
 });
 
 // Create missing designs explicitly — separate from the import confirmation.
@@ -692,7 +872,7 @@ app.post("/create-missing-designs", async (c) => {
   if (!body.project_uuid) return c.json({ error: "Missing project_uuid" }, 400);
   if (!body.design_names?.length) return c.json({ results: [], summary: { created: 0, failed: 0 } });
 
-  const designsMap = await loadDesigns(body.project_uuid);
+  const designsMap = await loadDesigns(body.project_uuid, { fuzzy: true });
   const results: Record<string, unknown>[] = [];
   const created = new Set<string>();
 
@@ -737,7 +917,7 @@ app.post("/create-missing-phases", async (c) => {
   if (!body.phases?.length) return c.json({ results: [], summary: { created: 0, failed: 0 } });
 
   const project = (await apiGet(`/company/projects/${body.project_uuid}/`)) as Record<string, unknown>;
-  const existingPhases = (Array.isArray(project.phases) ? project.phases : []).map((p) => String(p));
+  const existingPhases = phasesOf(project);
   const existingNorm = new Set(existingPhases.map((p) => p.trim().toLowerCase()));
 
   const results: Record<string, unknown>[] = [];
@@ -783,12 +963,16 @@ export function trimbleGateInput(body: {
   column_mapping: ColumnMapping;
   entities: Record<string, unknown>[];
   unique_only?: boolean;
+  include_production_counts?: boolean;
+  default_count?: number;
 }) {
   return {
     project_uuid: body.project_uuid,
     column_mapping: body.column_mapping,
     entities: body.entities,
     unique_only: Boolean(body.unique_only),
+    include_production_counts: Boolean(body.include_production_counts),
+    default_count: normalizeCount(body.default_count),
   };
 }
 
@@ -839,62 +1023,14 @@ function resolveProp(columnMapping: ColumnMapping, target: string): string {
   return findSource(columnMapping, target);
 }
 
-// Normalize only the 4th character: swap dash/underscore at position 3 (0-indexed).
-// This allows A20-EL020 to match A20_EL020, but only at position 3.
-export function normalizeDesignName(name: string): string {
-  if (name.length < 4) return name;
-  const chars = name.split('');
-  if (chars[3] === '-') { chars[3] = '_'; return chars.join(''); }
-  if (chars[3] === '_') { chars[3] = '-'; return chars.join(''); }
-  return name;
-}
-
-function fuzzyDesignLookup(designsMap: Map<string, string>, name: string): string | null {
-  const exact = designsMap.get(name);
-  if (exact) return exact;
-  const alt = normalizeDesignName(name);
-  if (alt !== name) return designsMap.get(alt) ?? null;
-  return null;
-}
-
-async function loadDesigns(projectUuid: string): Promise<Map<string, string>> {
-  const all = (await fetchAllPages("/constructibles/assembly_designs/", { project: projectUuid })) as Record<string, unknown>[];
-  const m = new Map<string, string>();
-  for (const d of all) {
-    const name = d.name as string;
-    m.set(name, d.uuid as string);
-    // Also index the 4th-char normalized variant so A20-EL020 = A20_EL020
-    const alt = normalizeDesignName(name);
-    if (alt !== name) m.set(alt, d.uuid as string);
-  }
-  return m;
-}
-
-async function loadBatches(projectUuid: string): Promise<Record<string, unknown>[]> {
-  return (await fetchAllPages("/constructibles/batches/", { project: projectUuid })) as Record<string, unknown>[];
-}
-
 // Load the project's phase list (project.phases) — phases are project-scoped.
-async function loadProjectPhases(projectUuid: string): Promise<string[]> {
-  const project = (await apiGet(`/company/projects/${projectUuid}/`)) as Record<string, unknown>;
+function phasesOf(project: Record<string, unknown>): string[] {
   return (Array.isArray(project.phases) ? project.phases : []).map((p) => String(p));
 }
 
-export function matchBatchByNumber(batches: Record<string, unknown>[], batchRaw: string, phase = ""): Record<string, unknown> | null {
-  // Strict exact match on batch name. When a phase is supplied, the match is
-  // also scoped to that phase, tying the batch number definitively to the phase
-  // it belongs to. Without a phase, name-only matching is preserved.
-  const raw = String(batchRaw ?? "").trim().toLowerCase();
-  if (!raw) return null;
-  const phaseNorm = String(phase ?? "").trim().toLowerCase();
-  for (const b of batches) {
-    const name = String(b.name ?? "").trim().toLowerCase();
-    if (name !== raw) continue;
-    if (!phaseNorm) return b;
-    const bPhase = String(b.phase ?? "").trim().toLowerCase();
-    if (bPhase === phaseNorm) return b;
-  }
-  return null;
+async function loadProjectPhases(projectUuid: string): Promise<string[]> {
+  const project = (await apiGet(`/company/projects/${projectUuid}/`)) as Record<string, unknown>;
+  return phasesOf(project);
 }
 
 function isIfcFile(filename: string): boolean {
@@ -926,7 +1062,7 @@ async function walkFolders(
     return [];
   }
 
-  const itemList = Array.isArray(contents) ? contents : ((contents as Record<string, unknown>).results ?? []) as Record<string, unknown>[];
+  const itemList = toItemList(contents);
 
   for (const item of itemList) {
     const itemType = String(item.type ?? "").toLowerCase();

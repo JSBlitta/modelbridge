@@ -68,7 +68,6 @@ const { t } = useI18n()
 const props = defineProps({
   detectedColumns: { type: Array, default: () => [] },
   autoMapping:     { type: Object, default: () => ({}) },
-  unmappedColumns: { type: Array, default: () => [] },
   previewRows:     { type: Array, default: () => [] },  // first few rows for preview
 })
 const emit = defineEmits(['mapping-updated'])

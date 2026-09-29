@@ -1,40 +1,25 @@
 import { Hono } from "hono";
-import { apiGet, apiPost, apiPatch, fetchAllPages } from "../produuzit-client.js";
-import { parseAssemblyCsv } from "../csv-parser.js";
-import { getConfig } from "../config.js";
-import * as db from "../db.js";
-import { findSource, targetsOf, parseCount, generateOrderIds } from "../lib/mapping.js";
-import type { ColumnMapping } from "../lib/mapping.js";
+import { apiGet, apiPost, apiPatch, fetchAllPages } from "../produuzit-client.ts";
+import { parseAssemblyCsv } from "../csv-parser.ts";
+import { getConfig } from "../config.ts";
+import * as db from "../db.ts";
+import { findSource, targetsOf, parseCount, normalizeCount } from "../lib/mapping.ts";
+import type { ColumnMapping } from "../lib/mapping.ts";
 import {
   ConcurrentModificationError,
   getProductionCounts,
   getProductionCountsSignature,
   upsertProductionCounts,
-} from "../lib/production-counts.js";
-import { GATE, issuePreviewToken, requirePreviewToken } from "../lib/push-gate.js";
-import { boundedInt, isUuid } from "../lib/validate.js";
+} from "../lib/production-counts.ts";
+import { GATE, issuePreviewToken, requirePreviewToken } from "../lib/push-gate.ts";
+import { boundedInt, isUuid } from "../lib/validate.ts";
+import { readUploadedText } from "../lib/upload-limits.ts";
+import { loadDesigns, loadBatches, buildBatchMatcher } from "../lib/produuzit-topology.ts";
 
 const app = new Hono();
 
 const NA_PATTERN = /^#?n\/?a$/i;
 const WARN_CHARS = /["\\\n\r]/;
-
-// Ask Produuzit to filter by project, then narrow to the batch locally.
-//
-// The previous version passed no params at all and pulled every assembly in the
-// company on each preview and create. That contradicted the rest of this file
-// (and trimble.ts), which all pass `project` and depend on it working; the
-// client-side filter below stays as a belt-and-braces narrowing in case the
-// upstream filter is ignored.
-async function fetchAssembliesByBatch(
-  batchUuid: string,
-  projectUuid?: string,
-): Promise<Record<string, unknown>[]> {
-  const params: Record<string, string> = {};
-  if (projectUuid) params.project = projectUuid;
-  const all = (await fetchAllPages("/constructibles/assemblies/", params)) as Record<string, unknown>[];
-  return all.filter((a) => a.batch === batchUuid);
-}
 
 // The exact inputs that determine what an import writes. Preview and import must
 // build this identically or the fingerprints will not match.
@@ -42,11 +27,15 @@ function assemblyGateInput(body: {
   project_uuid: string;
   column_mapping: ColumnMapping;
   rows: Record<string, string>[];
+  include_production_counts?: boolean;
+  default_count?: number;
 }) {
   return {
     project_uuid: body.project_uuid,
     column_mapping: body.column_mapping,
     rows: body.rows,
+    include_production_counts: Boolean(body.include_production_counts),
+    default_count: normalizeCount(body.default_count),
   };
 }
 
@@ -93,17 +82,6 @@ function mapRow(
   return { mapped, warnings };
 }
 
-async function loadDesigns(projectUuid: string): Promise<Map<string, string>> {
-  const all = (await fetchAllPages("/constructibles/assembly_designs/", { project: projectUuid })) as Record<string, unknown>[];
-  const m = new Map<string, string>();
-  for (const d of all) m.set(d.name as string, d.uuid as string);
-  return m;
-}
-
-async function loadBatches(projectUuid: string): Promise<Record<string, unknown>[]> {
-  return (await fetchAllPages("/constructibles/batches/", { project: projectUuid })) as Record<string, unknown>[];
-}
-
 // Resolve design name → uuid, creating the design in Produuzit when missing
 async function resolveDesignUuid(
   designsMap: Map<string, string>,
@@ -120,37 +98,19 @@ async function resolveDesignUuid(
       createdDesigns.set(designName, uuid);
       return uuid;
     }
-  } catch (e) {
+  } catch {
     // Fall through to null — caller reports the design as unresolved
-  }
-  return null;
-}
-
-function matchBatchByNumber(batches: Record<string, unknown>[], batchRaw: string): Record<string, unknown> | null {
-  // Strict exact match: entity value must fully match a batch name.
-  const raw = String(batchRaw ?? "").trim().toLowerCase();
-  if (!raw) return null;
-  for (const b of batches) {
-    const name = String(b.name ?? "").trim().toLowerCase();
-    if (name === raw) return b;
   }
   return null;
 }
 
 // Parse uploaded CSV
 app.post("/parse-csv", async (c) => {
-  const formData = await c.req.formData();
-  const file = formData.get("file");
-  if (!file || !(file instanceof File)) return c.json({ error: "No file uploaded" }, 400);
-
-  const buffer = await file.arrayBuffer();
-  const decoder = new TextDecoder("utf-8");
-  let text = decoder.decode(buffer);
-  if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
+  const read = await readUploadedText(c);
+  if (read instanceof Response) return read;
 
   const cfg = getConfig();
-  const result = parseAssemblyCsv(text, cfg.synonyms, cfg.client_meta_defaults);
-  return c.json(result);
+  return c.json(parseAssemblyCsv(read.text, cfg.synonyms, cfg.client_meta_defaults));
 });
 
 // Load project context (designs + batches) for the column mapper
@@ -178,7 +138,12 @@ app.post("/preview-import", async (c) => {
     project_uuid: string;
     column_mapping: ColumnMapping;
     rows: Record<string, string>[];
+    include_production_counts?: boolean;
+    default_count?: number;
   }>();
+
+  const defaultCount = normalizeCount(body.default_count);
+  const includeCounts = Boolean(body.include_production_counts);
 
   const designsMap = await loadDesigns(body.project_uuid);
   const batches = await loadBatches(body.project_uuid);
@@ -289,10 +254,11 @@ app.post("/preview-import", async (c) => {
   const batchById = new Map<string, Record<string, unknown>>();
   for (const b of batches) batchById.set(b.uuid as string, b);
   const existingCounts = await getProductionCounts(body.project_uuid);
+  const matchBatch = buildBatchMatcher(batches);
 
   for (const row of body.rows) {
     const batchNum = batchNumberCol ? (row[batchNumberCol] ?? "") : "";
-    const matchedBatch = batchNum ? matchBatchByNumber(batches, batchNum) : null;
+    const matchedBatch = batchNum ? matchBatch(batchNum) : null;
     if (!matchedBatch) { unresolvedBatches.add(String(batchNum)); continue; }
     const batchUuid = matchedBatch.uuid as string;
     if (!byBatch.has(batchUuid)) byBatch.set(batchUuid, []);
@@ -312,7 +278,7 @@ app.post("/preview-import", async (c) => {
       const designUuid = designName ? await resolveDesignUuid(designsMap, body.project_uuid, designName, createdDesigns) : null;
       if (designName && !designUuid) { unresolvedDesigns.add(designName); continue; }
       if (!designUuid) continue;
-      const count = countCol ? parseCount(cleanValue(row[countCol])) : 1;
+      const count = countCol ? parseCount(cleanValue(row[countCol]), defaultCount) : defaultCount;
       const key = `${batchPhase}|${designUuid}`;
       const entry = countMap.get(key);
       if (entry) entry.count += count;
@@ -368,6 +334,8 @@ app.post("/preview-import", async (c) => {
     unresolved_designs: [...unresolvedDesigns].sort(),
     no_client_order_id: !orderIdCol,
     warnings: [],
+    production_counts_included: includeCounts,
+    default_count: defaultCount,
     preview_token: issuePreviewToken(GATE.assemblyImport, assemblyGateInput(body)),
   });
 });
@@ -379,14 +347,19 @@ app.post("/import", async (c) => {
     column_mapping: ColumnMapping;
     rows: Record<string, string>[];
     preview_token?: string;
+    include_production_counts?: boolean;
+    default_count?: number;
   }>();
 
   const blocked = requirePreviewToken(c, GATE.assemblyImport, body.preview_token, assemblyGateInput(body));
   if (blocked) return blocked;
 
+  const defaultCount = normalizeCount(body.default_count);
+  const includeCounts = Boolean(body.include_production_counts);
+
   // Snapshot the project's counts before doing any work; the write below is
   // conditional on them being unchanged.
-  const countsSignature = await getProductionCountsSignature(body.project_uuid);
+  const countsSignature = includeCounts ? await getProductionCountsSignature(body.project_uuid) : null;
 
   const designsMap = await loadDesigns(body.project_uuid);
   const batches = await loadBatches(body.project_uuid);
@@ -394,7 +367,6 @@ app.post("/import", async (c) => {
 
   const designNameCol = findSource(body.column_mapping, "design_name");
   const batchNumberCol = findSource(body.column_mapping, "batch_number");
-  const orderIdCol = findSource(body.column_mapping, "client_order_id");
   const countCol = findSource(body.column_mapping, "count");
   const uuidCol = findSource(body.column_mapping, "uuid");
 
@@ -455,9 +427,10 @@ app.post("/import", async (c) => {
   // ── Standard mode: group by batch, match by (design, client_order_id) ──
 
   const byBatch = new Map<string, Record<string, string>[]>();
+  const matchBatch = buildBatchMatcher(batches);
   for (const row of body.rows) {
     const batchNum = batchNumberCol ? (row[batchNumberCol] ?? "") : "";
-    const matchedBatch = batchNum ? matchBatchByNumber(batches, batchNum) : null;
+    const matchedBatch = batchNum ? matchBatch(batchNum) : null;
     if (matchedBatch) {
       const uuid = matchedBatch.uuid as string;
       if (!byBatch.has(uuid)) byBatch.set(uuid, []);
@@ -494,7 +467,7 @@ app.post("/import", async (c) => {
         results.push({ design_name: designName, batch: batchName, status: "error", reason: `Design '${designName}' not found in project` });
         continue;
       }
-      const count = countCol ? parseCount(cleanValue(row[countCol])) : 1;
+      const count = countCol ? parseCount(cleanValue(row[countCol]), defaultCount) : defaultCount;
       const key = `${batchUuid}|${batchPhase}|${designUuid}`;
       const entry = countMap.get(key);
       if (entry) entry.count += count;
@@ -502,9 +475,11 @@ app.post("/import", async (c) => {
     }
   }
 
-  if (countMap.size) {
+  if (!includeCounts) {
+    results.push({ status: "skipped", reason: "Production counts not requested" });
+  } else if (countMap.size) {
     try {
-      await upsertProductionCounts(body.project_uuid, [...countMap.values()], countsSignature);
+      await upsertProductionCounts(body.project_uuid, [...countMap.values()], countsSignature ?? undefined);
       for (const e of countMap.values()) {
         const bn = (batchById.get(e.batch)?.name as string) ?? e.batch;
         results.push({ design_name: e.design_name, batch: bn, phase: e.phase, status: "created", count: e.count });
@@ -529,22 +504,41 @@ app.get("/", async (c) => {
   if (projectUuid && !isUuid(projectUuid)) return c.json({ error: "Invalid project_uuid" }, 400);
 
   // Produuzit API does NOT support filtering assemblies by batch or project.
-  // If a filter is requested, fetch all assemblies and filter client-side.
+  // Previously this buffered every assembly in the project before filtering,
+  // which ran the server out of memory on large projects. Stream page by page
+  // and keep only the matches instead.
   if (batchUuid || projectUuid) {
     const params: Record<string, string | number> = {};
     if (batchUuid) params.batch = batchUuid;
     if (projectUuid) params.project = projectUuid;
-    const all = await fetchAllPages("/constructibles/assemblies/", params) as Record<string, unknown>[];
-    const filtered = all.filter((a) => {
-      if (batchUuid && a.batch !== batchUuid) return false;
-      if (projectUuid && a.project !== projectUuid) return false;
-      return true;
-    });
+
+    const PAGE_SIZE = 200;
+    const MAX_PAGES = 500;
+    const matched: Record<string, unknown>[] = [];
+    let pageOffset = 0;
+    let pages = 0;
+    while (pages < MAX_PAGES) {
+      pages++;
+      const page = (await apiGet("/constructibles/assemblies/", {
+        ...params,
+        limit: PAGE_SIZE,
+        offset: pageOffset,
+      })) as { results?: Record<string, unknown>[]; next?: string | null };
+      const items = page.results ?? [];
+      for (const a of items) {
+        if (batchUuid && a.batch !== batchUuid) continue;
+        if (projectUuid && a.project !== projectUuid) continue;
+        matched.push(a);
+      }
+      if (!page.next || items.length < PAGE_SIZE) break;
+      pageOffset += PAGE_SIZE;
+    }
+
     return c.json({
-      count: filtered.length,
+      count: matched.length,
       next: null,
       previous: null,
-      results: filtered.slice(offset, offset + limit),
+      results: matched.slice(offset, offset + limit),
     });
   }
 
@@ -565,116 +559,6 @@ app.patch("/:uuid", async (c) => {
   if (!Object.keys(patch).length) return c.json({ error: "No updatable fields supplied" }, 400);
 
   return c.json(await apiPatch(`/constructibles/assemblies/${uuid}/`, patch));
-});
-
-// --- Count-based constructible creation ---
-// Each physical element in Produuzit is its own Assembly (constructible) with a unique UUID.
-// "Production count" means: create N assemblies for a given design, each with a unique client_order_id.
-
-interface CountItem {
-  design_uuid: string;
-  design_name: string;
-  count: number;
-  order_prefix?: string;     // prefix for auto-generated order IDs, e.g. "A20-EL" → A20-EL-001
-  scheduled_prod_date?: string;
-  priority?: number;
-  client_meta?: Record<string, unknown>;
-}
-
-function countGateInput(body: { batch_uuid: string; items: CountItem[] }) {
-  return { batch_uuid: body.batch_uuid, items: body.items };
-}
-
-// Preview: shows existing count, how many will be created, and the order IDs that will be used
-app.post("/preview-by-count", async (c) => {
-  const body = await c.req.json<{ batch_uuid: string; project_uuid?: string; items: CountItem[] }>();
-  if (!isUuid(body.batch_uuid)) return c.json({ error: "Missing or invalid batch_uuid" }, 400);
-
-  const existing = await fetchAssembliesByBatch(body.batch_uuid, body.project_uuid);
-
-  const previews = body.items.map((item) => {
-    const existingForDesign = existing.filter((a) => a.design === item.design_uuid);
-    const existingIds = existingForDesign.map((a) => a.client_order_id as string).filter(Boolean);
-    const prefix = (item.order_prefix || item.design_name).replace(/\s+/g, "-");
-    const toCreate = Math.max(0, item.count - existingForDesign.length);
-    const nextStart = existingForDesign.length + 1;
-    const newIds = generateOrderIds(prefix, nextStart, toCreate);
-
-    return {
-      design_uuid: item.design_uuid,
-      design_name: item.design_name,
-      count_requested: item.count,
-      count_existing: existingForDesign.length,
-      count_to_create: toCreate,
-      existing_order_ids: existingIds,
-      new_order_ids: newIds,
-      order_prefix: prefix,
-    };
-  });
-
-  return c.json({
-    batch_uuid: body.batch_uuid,
-    previews,
-    preview_token: issuePreviewToken(GATE.countCreate, countGateInput(body)),
-  });
-});
-
-// Execute: creates exactly count_to_create assemblies per design
-app.post("/create-by-count", async (c) => {
-  const body = await c.req.json<{
-    batch_uuid: string;
-    project_uuid: string;
-    items: CountItem[];
-    preview_token?: string;
-  }>();
-  if (!body.batch_uuid || !body.project_uuid) return c.json({ error: "Missing batch_uuid or project_uuid" }, 400);
-
-  const blocked = requirePreviewToken(c, GATE.countCreate, body.preview_token, countGateInput(body));
-  if (blocked) return blocked;
-
-  const existing = await fetchAssembliesByBatch(body.batch_uuid, body.project_uuid);
-
-  const results: Record<string, unknown>[] = [];
-
-  for (const item of body.items) {
-    const existingForDesign = existing.filter((a) => a.design === item.design_uuid);
-    const toCreate = Math.max(0, item.count - existingForDesign.length);
-    const prefix = (item.order_prefix || item.design_name).replace(/\s+/g, "-");
-    const nextStart = existingForDesign.length + 1;
-    const newIds = generateOrderIds(prefix, nextStart, toCreate);
-
-    for (const orderId of newIds) {
-      try {
-        const payload: Record<string, unknown> = {
-          design: item.design_uuid,
-          batch: body.batch_uuid,
-          project: body.project_uuid,
-          client_order_id: orderId,
-        };
-        if (item.scheduled_prod_date) payload.scheduled_prod_date = item.scheduled_prod_date;
-        if (item.priority !== undefined) payload.priority = item.priority;
-        if (item.client_meta) payload.client_meta = item.client_meta;
-
-        await apiPost("/constructibles/assemblies/", payload);
-        results.push({ design_name: item.design_name, client_order_id: orderId, status: "created" });
-      } catch (e) {
-        results.push({ design_name: item.design_name, client_order_id: orderId, status: "error", reason: String(e) });
-      }
-    }
-
-    if (toCreate === 0) {
-      results.push({ design_name: item.design_name, status: "skipped", reason: `Already at count ${item.count}` });
-    }
-  }
-
-  return c.json({
-    results,
-    summary: {
-      created: results.filter((r) => r.status === "created").length,
-      skipped: results.filter((r) => r.status === "skipped").length,
-      error: results.filter((r) => r.status === "error").length,
-    },
-  });
 });
 
 export default app;

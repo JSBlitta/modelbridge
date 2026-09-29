@@ -1,7 +1,8 @@
-import { env } from "./env.js";
-import { recordEvent } from "./db.js";
-import { logger } from "./logger.js";
-import { getStoredRefreshToken, storeRefreshToken } from "./settings.js";
+import { env } from "./env.ts";
+import { recordEvent } from "./db.ts";
+import { logger } from "./logger.ts";
+import { getStoredRefreshToken, storeRefreshToken } from "./settings.ts";
+import { collectOffsetPages } from "./lib/pagination.ts";
 
 // Service account token state — shared across all requests, not per-user.
 // The refresh token seeds from the DB (a previous rotation) and falls back to
@@ -255,28 +256,22 @@ export async function fetchAllPages(
   params?: Record<string, string | number | boolean>,
   pageSize = 200,
 ): Promise<unknown[]> {
-  const all: unknown[] = [];
-  let offset = 0;
-  let pages = 0;
-  while (pages < MAX_PAGES) {
-    pages++;
-    const res = (await apiGet(path, { ...params, limit: pageSize, offset })) as {
-      results?: unknown[];
-      next?: string | null;
-    };
-    const items = res.results ?? [];
-    all.push(...items);
-    if (!res.next || items.length < pageSize) return all;
-    offset += pageSize;
-  }
-  logger.warn(`[produuzit] fetchAllPages hit the ${MAX_PAGES}-page ceiling on ${path}; result is truncated`);
-  recordEvent({
-    category: "produuzit",
-    level: "warn",
-    summary: `Pagination ceiling reached on ${path}`,
-    detail: `Stopped after ${MAX_PAGES} pages (${all.length} records).`,
+  return collectOffsetPages<unknown>({
+    pageSize,
+    maxPages: MAX_PAGES,
+    fetchPage: (limit, offset) => apiGet(path, { ...params, limit, offset }),
+    unwrap: (page) => ((page as { results?: unknown[] } | null)?.results ?? []),
+    shouldContinue: (page) => Boolean((page as { next?: unknown } | null)?.next),
+    onCeiling: (collected) => {
+      logger.warn(`[produuzit] fetchAllPages hit the ${MAX_PAGES}-page ceiling on ${path}; result is truncated`);
+      recordEvent({
+        category: "produuzit",
+        level: "warn",
+        summary: `Pagination ceiling reached on ${path}`,
+        detail: `Stopped after ${MAX_PAGES} pages (${collected} records).`,
+      });
+    },
   });
-  return all;
 }
 
 // Used only by auth route to verify user identity — separate from service token

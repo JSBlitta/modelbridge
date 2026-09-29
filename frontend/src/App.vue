@@ -81,12 +81,12 @@ import { useToast } from 'primevue/usetoast'
 import { api, onApiError, onUnauthorized } from './api.js'
 import ConfirmDialog from 'primevue/confirmdialog'
 import { useNotifications } from './composables/useNotifications.js'
+import { useAuth } from './composables/useAuth.js'
 import logoUrl from './assets/v9-hang.svg'
 
 const router = useRouter()
 const toast = useToast()
-const username = ref('')
-const isAdmin = ref(false)
+const { username, isAdmin, refreshAuthStatus, clearAuth } = useAuth()
 const { t, locale } = useI18n()
 
 const { notifications, unreadCount, notify, registerToaster, clearAll, hydrateFromServer } = useNotifications()
@@ -131,17 +131,13 @@ onUnauthorized(() => {
 })
 
 onMounted(async () => {
-  try {
-    const res = await api.get('/api/auth/status')
-    username.value = res.data.username ?? ''
-    isAdmin.value = res.data.isAdmin ?? false
-  } catch { /* router guard handles redirect */ }
+  await refreshAuthStatus()
   hydrateFromServer(api)
 })
 
 async function logout() {
   await api.post('/api/auth/logout').catch(() => {})
-  username.value = ''
+  clearAuth()
   router.push('/login')
 }
 </script>
@@ -167,9 +163,6 @@ body { font-family: var(--p-font-family, sans-serif); background: #f5f5f5; }
 .nav-link:hover { background: #2d2d30; color: white; }
 .nav-link.active { background: #e40520; color: white; }
 .nav-separator { height: 1px; background: #2d2d30; margin: 0.35rem 0.75rem; }
-.nav-link.nav-highlight { color: #e40520; font-weight: 600; }
-.nav-link.nav-highlight.active { background: #c0392b; color: white; }
-.nav-section-label { font-size: .65rem; letter-spacing: .1em; color: #6e6e73; padding: .5rem 1.25rem .1rem; text-transform: uppercase; }
 .sidebar-footer { padding: .75rem; border-top: 1px solid #2d2d30; }
 .lang-switcher { display: flex; gap: .35rem; margin-bottom: .5rem; }
 .lang-btn { padding: .3rem .6rem; font-size: .7rem; font-weight: 600; background: #2d2d30; color: #8e8e93; border: 1px solid transparent; border-radius: 4px; cursor: pointer; transition: all .15s; }

@@ -1,5 +1,5 @@
 import { ref, computed } from 'vue'
-import { api } from '../api.js'
+import { api, apiErrorMessage } from '../api.js'
 
 // ── Module-level cache — shared across all components ──
 let _cache = null       // { projects: [], fetchedAt: timestamp }
@@ -52,7 +52,7 @@ export function useProduuzitProjects() {
         _cache = { projects: results, fetchedAt: Date.now() }
         projects.value = results
       } catch (e) {
-        const msg = e?.response?.data?.detail || e?.response?.data?.error || e?.message || String(e)
+        const msg = apiErrorMessage(e)
         error.value = msg
         console.error('[useProduuzitProjects] fetch failed:', msg)
       } finally {

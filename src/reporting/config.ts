@@ -6,10 +6,10 @@
 // implementing ScheduleSource.
 
 import { existsSync, readFileSync } from "node:fs";
-import { detectDelimiter, splitCsvLine } from "../csv-parser.js";
-import * as db from "../db.js";
-import { logger } from "../logger.js";
-import type { Frequency, ScheduleEntry } from "./types.js";
+import { detectDelimiter, splitCsvLine } from "../csv-parser.ts";
+import * as db from "../db.ts";
+import { logger } from "../logger.ts";
+import type { Frequency, ScheduleEntry } from "./types.ts";
 
 export interface ScheduleSource {
   load(): Promise<ScheduleEntry[]>;
@@ -89,16 +89,6 @@ export function parseScheduleCsv(text: string): ScheduleEntry[] {
     });
   }
   return entries;
-}
-
-// Loads the schedule from a local CSV file (the SharePoint list export).
-export class CsvScheduleSource implements ScheduleSource {
-  constructor(private readonly path: string) {}
-
-  async load(): Promise<ScheduleEntry[]> {
-    const text = readFileSync(this.path, "utf-8");
-    return parseScheduleCsv(text);
-  }
 }
 
 function rowToEntry(r: db.ReportingScheduleRow): ScheduleEntry {

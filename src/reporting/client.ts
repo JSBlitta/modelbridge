@@ -12,9 +12,9 @@
 //   - On rotation the new refresh token is saved back to the settings store, so
 //     the freshest token survives restarts.
 
-import { recordEvent } from "../db.js";
-import { logger } from "../logger.js";
-import { getReportingSettings, saveSettings } from "../settings.js";
+import { recordEvent } from "../db.ts";
+import { logger } from "../logger.ts";
+import { getReportingSettings, saveSettings } from "../settings.ts";
 
 let accessToken: string | null = null;
 

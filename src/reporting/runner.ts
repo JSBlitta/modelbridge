@@ -11,17 +11,17 @@
 // Every action is recorded in the persistent event history (category
 // "reporting") so the notification bell shows what has been done.
 
-import { env } from "../env.js";
-import { recordEvent } from "../db.js";
-import { logger } from "../logger.js";
-import { getReportingSettings } from "../settings.js";
-import { DbScheduleSource, type ScheduleSource } from "./config.js";
-import { fetchAllReporting, refreshReportingAccessToken } from "./client.js";
-import { JsonLastRunStore, LocalFileStore, SharePointFileStore, type LastRunStore, type OutputStore } from "./storage.js";
-import { isSharePointConfigured } from "../sharepoint-client.js";
-import { mergeUnique } from "./dedupe.js";
-import { amsterdamNow, filenameFor, matchesToday } from "./dates.js";
-import type { CycleResult, EndpointRunResult, ScheduleEntry } from "./types.js";
+import { env } from "../env.ts";
+import { recordEvent } from "../db.ts";
+import { logger } from "../logger.ts";
+import { getReportingSettings } from "../settings.ts";
+import { DbScheduleSource, type ScheduleSource } from "./config.ts";
+import { fetchAllReporting, refreshReportingAccessToken } from "./client.ts";
+import { JsonLastRunStore, LocalFileStore, SharePointFileStore, type LastRunStore, type OutputStore } from "./storage.ts";
+import { isSharePointConfigured } from "../sharepoint-client.ts";
+import { mergeUnique } from "./dedupe.ts";
+import { amsterdamNow, filenameFor, matchesToday } from "./dates.ts";
+import type { CycleResult, EndpointRunResult, ScheduleEntry } from "./types.ts";
 
 export interface ReportingDeps {
   source?: ScheduleSource;

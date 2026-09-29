@@ -1,26 +1,38 @@
+# Dependencies
 node_modules/
+
+# Build output
 dist/
+frontend-dist/
+
+# Secrets and local config
+.tokens.json
 .env
+.env.*
+!.env.example
+
+# Documentation
+*.md
+*.postman_collection.json
+Trimble-Connect-*.json
+
+# Logs
+*.log
+logs/
+
+# Runtime state (SQLite + reporting scheduler output)
 *.db
-# SQLite sidecars — these were tracked, so a local WAL kept landing in commits
 *.db-wal
 *.db-shm
-logs/
-frontend-dist/
-/old**/
-scratch
-*.png
-*.har
-*.zip
-# Reporting scheduler output, tokens and last-run state
 data/reporting/
 data/reporting_tokens.json
 data/reporting_last_run.json
+
+# Reference material kept on disk but out of the repo
+*.zip
+*.png
+*.har
+scratch
 constructibles*.json
-
-# Reference material and leftovers kept on disk but out of the repo.
-# See _attic/README.md for what is in here and why.
 _attic/
-
-# Power BI connector source — not used in the repo
 TrimbleConnectPropertysets/

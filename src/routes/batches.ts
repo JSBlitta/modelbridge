@@ -1,10 +1,10 @@
 import { Hono } from "hono";
-import { apiGet, apiPatch, apiPost, fetchAllPages } from "../produuzit-client.js";
-import { boundedInt, isUuid } from "../lib/validate.js";
-import { GATE, issuePreviewToken, requirePreviewToken } from "../lib/push-gate.js";
-import { compareBatches } from "../lib/idempotency.js";
-import * as db from "../db.js";
-import { logger } from "../logger.js";
+import { apiGet, apiPatch, apiPost, fetchAllPages } from "../produuzit-client.ts";
+import { boundedInt, isUuid } from "../lib/validate.ts";
+import { GATE, issuePreviewToken, requirePreviewToken } from "../lib/push-gate.ts";
+import { compareBatches } from "../lib/idempotency.ts";
+import * as db from "../db.ts";
+import { logger } from "../logger.ts";
 
 const app = new Hono();
 

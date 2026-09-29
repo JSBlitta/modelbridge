@@ -1,7 +1,7 @@
 import { Hono } from "hono";
-import { apiGet, apiPostFormData } from "../produuzit-client.js";
-import { boundedInt, isUuid } from "../lib/validate.js";
-import { MAX_UPLOAD_BYTES, tooLarge } from "../lib/upload-limits.js";
+import { apiGet, apiPostFormData } from "../produuzit-client.ts";
+import { boundedInt, isUuid } from "../lib/validate.ts";
+import { MAX_UPLOAD_BYTES, tooLarge } from "../lib/upload-limits.ts";
 
 const app = new Hono();
 

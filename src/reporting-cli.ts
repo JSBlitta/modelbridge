@@ -5,10 +5,10 @@
 // (REPORTING_ENABLED=true) is not used.
 
 import "./env.js";
-import { env } from "./env.js";
-import { initLogger, logger } from "./logger.js";
-import { initDb } from "./db.js";
-import { runReportingCycle } from "./reporting/runner.js";
+import { env } from "./env.ts";
+import { initLogger, logger } from "./logger.ts";
+import { initDb } from "./db.ts";
+import { runReportingCycle } from "./reporting/runner.ts";
 
 initLogger(env.LOG_LEVEL, env.LOG_FILE);
 initDb();

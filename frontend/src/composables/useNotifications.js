@@ -19,10 +19,6 @@ export function useNotifications() {
     if (_toastHandler) _toastHandler({ severity, summary, detail, life })
   }
 
-  function markAllRead() {
-    notifications.value.forEach((n) => { n.read = true })
-  }
-
   function clearAll() {
     notifications.value = []
   }
@@ -55,5 +51,5 @@ export function useNotifications() {
     }
   }
 
-  return { notifications, unreadCount, notify, registerToaster, markAllRead, clearAll, hydrateFromServer }
+  return { notifications, unreadCount, notify, registerToaster, clearAll, hydrateFromServer }
 }
