@@ -35,6 +35,41 @@ export async function getProductionCounts(projectUuid: string): Promise<Map<stri
   return map;
 }
 
+// What the preview shows for one (batch, phase, design). The import OVERWRITES
+// Produuzit's count with `requested`; it never adds to it. The preview used to
+// speak in "to create = requested − existing" and called anything at or above
+// the requested number "identical", so a selection smaller than what Produuzit
+// already had previewed as "nothing to do" and then lowered the count. Both
+// preview routes build their rows here so they cannot drift apart again.
+export function previewCountRow(existing: number, requested: number, definitive: boolean) {
+  const status: "new" | "changed" | "identical" | "blocked" = definitive
+    ? "blocked"
+    : existing === requested
+      ? "identical"
+      : existing === 0
+        ? "new"
+        : "changed";
+  return {
+    count_requested: requested,
+    count_existing: existing,
+    // true when the import would set a lower number than Produuzit holds now,
+    // typically because only part of the model was selected.
+    lowers: status === "changed" && requested < existing,
+    status,
+  };
+}
+
+export function summarizeCountRows(rows: { status: string; lowers?: boolean; count_requested: number }[]) {
+  return {
+    total: rows.reduce((a, r) => a + (r.count_requested || 0), 0),
+    new: rows.filter((r) => r.status === "new").length,
+    changed: rows.filter((r) => r.status === "changed").length,
+    lowered: rows.filter((r) => r.lowers).length,
+    identical: rows.filter((r) => r.status === "identical").length,
+    blocked: rows.filter((r) => r.status === "blocked").length,
+  };
+}
+
 export class ConcurrentModificationError extends Error {
   constructor() {
     super(

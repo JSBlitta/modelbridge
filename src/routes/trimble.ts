@@ -30,6 +30,8 @@ import {
   ConcurrentModificationError,
   getProductionCounts,
   getProductionCountsSignature,
+  previewCountRow,
+  summarizeCountRows,
   upsertProductionCounts,
 } from "../lib/production-counts.ts";
 import { logger } from "../logger.ts";
@@ -642,40 +644,19 @@ app.post("/preview-import", async (c) => {
 
     const rowPreviews = [...countMap.values()].map((e) => {
       const existing = existingCounts.get(`${batchUuid}|${e.phase}|${e.design}`) ?? 0;
-      let status: "new" | "changed" | "identical" | "blocked" = "new";
-      let countToCreate = e.count;
-      if (dbState === "definitive") {
-        status = "blocked";
-        countToCreate = 0;
-      } else if (existing >= e.count) {
-        status = "identical";
-        countToCreate = 0;
-      } else if (existing > 0) {
-        status = "changed";
-        countToCreate = e.count - existing;
-      }
       return {
         design_name: e.design_name,
         design_uuid: e.design,
         phase: e.phase,
-        count_requested: e.count,
-        count_existing: existing,
-        count_to_create: countToCreate,
-        status,
+        ...previewCountRow(existing, e.count, dbState === "definitive"),
         changed_fields: [],
         proposed: null,
         existing: existing > 0 ? { count: existing } : null,
       };
     });
 
-    const summary = {
-      total: rowPreviews.reduce((a, r) => a + (r.count_requested || 0), 0),
-      new: rowPreviews.filter((r) => r.status === "new").reduce((a, r) => a + (r.count_to_create || 0), 0),
-      changed: rowPreviews.filter((r) => r.status === "changed").reduce((a, r) => a + (r.count_to_create || 0), 0),
-      identical: rowPreviews.filter((r) => r.status === "identical").length,
-      blocked: rowPreviews.filter((r) => r.status === "blocked").length,
-    };
-    logger.debug(`[trimble preview] batch ${bi}/${byBatch.size} "${batchName}": ${summary.new} new, ${summary.changed} changed, ${summary.identical} identical, ${summary.blocked} blocked`);
+    const summary = summarizeCountRows(rowPreviews);
+    logger.debug(`[trimble preview] batch ${bi}/${byBatch.size} "${batchName}": ${summary.new} new, ${summary.changed} changed (${summary.lowered} lowered), ${summary.identical} identical, ${summary.blocked} blocked`);
 
     batchPreviews.push({ batch_uuid: batchUuid, batch_name: batchName, local_state: dbState, blocked: dbState === "definitive", rows: rowPreviews, summary });
   }

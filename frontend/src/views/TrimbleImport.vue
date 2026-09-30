@@ -245,6 +245,7 @@
             <Tag :severity="bp.blocked ? 'danger' : 'secondary'" :value="bp.batch_name" />
             <span class="chip-new">{{ $t('trimble.newChip', { count: bp.summary.new }) }}</span>
             <span class="chip-changed">{{ $t('trimble.changedChip', { count: bp.summary.changed }) }}</span>
+            <span v-if="bp.summary.lowered" style="color:#b91c1c">{{ $t('trimble.loweredChip', { count: bp.summary.lowered }) }}</span>
             <span class="chip-identical" style="color:#9ca3af">{{ $t('trimble.identicalChip', { count: bp.summary.identical }) }}</span>
             <Tag v-if="bp.blocked" severity="danger" :value="$t('trimble.blockedChip')" />
           </div>
@@ -261,9 +262,9 @@
               </Column>
               <Column :header="$t('trimble.countLabel')" style="width:150px;">
                 <template #body="{ data }">
-                  <span v-if="data.count_requested > 1">
-                    {{ $t('trimble.countRequested', { count: data.count_requested }) }}
-                    <span v-if="data.count_to_create" class="text-new"> ({{ data.count_to_create }} {{ $t('trimble.toCreate') }})</span>
+                  <span v-if="data.count_requested != null">
+                    <template v-if="data.status === 'changed'">{{ data.count_existing }} &rarr; </template>{{ data.count_requested }}
+                    <span v-if="data.lowers" style="color:#b91c1c;"> ({{ $t('trimble.lowers') }})</span>
                   </span>
                   <span v-else style="color:#9ca3af;">—</span>
                 </template>
