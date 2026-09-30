@@ -23,6 +23,7 @@ import {
   trimbleGet,
 } from "../trimble-client.ts";
 import { apiGet, apiPatch, apiPost, fetchAllPages } from "../produuzit-client.ts";
+import { planOrderNumbers, summarizeOrderRows } from "../lib/order-numbers.ts";
 import * as db from "../db.ts";
 import { findSource, parseCount, normalizeCount } from "../lib/mapping.ts";
 import type { ColumnMapping } from "../lib/mapping.ts";
@@ -659,7 +660,15 @@ app.post("/preview-import", async (c) => {
     const summary = summarizeCountRows(rowPreviews);
     logger.debug(`[trimble preview] batch ${bi}/${byBatch.size} "${batchName}": ${summary.new} new, ${summary.kept} kept (differ), ${summary.identical} identical, ${summary.blocked} blocked`);
 
-    batchPreviews.push({ batch_uuid: batchUuid, batch_name: batchName, local_state: dbState, blocked: dbState === "definitive", rows: rowPreviews, summary });
+    // Order numbers per constructible, when an order-number property is mapped.
+    // A definitive batch is frozen for these too.
+    const orderRows = orderProp && dbState !== "definitive"
+      ? planBatchOrders(ents, asmByBatch.get(batchUuid) ?? [], designProp, orderProp, designsMap)
+      : [];
+    const orderSummary = summarizeOrderRows(orderRows);
+    logger.debug(`[trimble preview] batch "${batchName}" order numbers: ${orderSummary.assign} to assign, ${orderSummary.identical} identical, ${orderSummary.other} other, ${orderSummary.no_constructible} without constructible`);
+
+    batchPreviews.push({ batch_uuid: batchUuid, batch_name: batchName, local_state: dbState, blocked: dbState === "definitive", rows: rowPreviews, summary, order_rows: orderRows, order_summary: orderSummary });
   }
 
   logger.debug(`[trimble preview] DONE — ${byBatch.size} batches checked, ${unresolvedDesigns.size} unmatched designs, ${unresolvedBatches.size} unmatched batches`);
@@ -817,6 +826,33 @@ app.post("/import", async (c) => {
     }
   }
 
+  // Order numbers: re-read the constructibles now (not the preview's copy), plan
+  // with the same rules, and write only the "assign" rows. Constructibles that
+  // already carry a number are never touched, so a repeat run writes nothing.
+  if (orderProp) {
+    const current = (await fetchAllPages("/constructibles/assemblies/", { project: body.project_uuid, limit: 1000 })) as Record<string, unknown>[];
+    for (const [batchUuid, ents] of byBatch) {
+      if ((dbBatches.get(batchUuid)?.state ?? "provisional") === "definitive") continue;
+      const batchName = (batchById.get(batchUuid)?.name as string) ?? batchUuid;
+      const rows = planBatchOrders(ents, current.filter((a) => a.batch === batchUuid), designProp, orderProp, designsMap);
+      for (const r of rows) {
+        const base = { design_name: r.design_name, batch: batchName, order: r.order, assembly_uuid: r.assembly_uuid };
+        if (r.status === "assign") {
+          try {
+            await apiPatch(`/constructibles/assemblies/${r.assembly_uuid}/`, { client_order_id: r.order });
+            results.push({ ...base, status: "updated", reason: `Order number ${r.order} assigned` });
+          } catch (e) {
+            results.push({ ...base, status: "error", reason: `Could not assign order number ${r.order}: ${String(e)}` });
+          }
+        } else if (r.status === "no_constructible") {
+          results.push({ ...base, status: "skipped", reason: `No free constructible for order number ${r.order} (count too low, or Produuzit has not created them yet; run again)` });
+        } else if (r.status === "other") {
+          results.push({ ...base, status: "skipped", reason: `Constructible already has order number ${r.existing}, not in this selection; left as is` });
+        }
+      }
+    }
+  }
+
   const summary = {
     designs_created: results.filter((r) => r.status === "created").length,
     constructibles_created: results.filter((r) => r.status === "created").reduce((a, r) => a + (Number(r.count) || 0), 0),
@@ -939,6 +975,41 @@ export function trimbleGateInput(body: {
     include_production_counts: Boolean(body.include_production_counts),
     default_count: normalizeCount(body.default_count),
   };
+}
+
+// Order-number plan for one batch: the selection's order numbers per design,
+// matched against that batch's constructibles (see lib/order-numbers.ts).
+// Used by both preview and import so the push does exactly what was shown.
+function planBatchOrders(
+  ents: Record<string, unknown>[],
+  batchAssemblies: Record<string, unknown>[],
+  designProp: string | null,
+  orderProp: string,
+  designsMap: Parameters<typeof fuzzyDesignLookup>[0],
+) {
+  const ordersByDesign = new Map<string, { name: string; orders: string[] }>();
+  for (const e of ents) {
+    const dn = designProp ? extractProp(e, designProp) : "";
+    const design = fuzzyDesignLookup(designsMap, dn);
+    const order = extractProp(e, orderProp).trim();
+    if (!design || !order) continue;
+    const g = ordersByDesign.get(design) ?? { name: dn || design, orders: [] };
+    g.orders.push(order);
+    ordersByDesign.set(design, g);
+  }
+  const rows = [];
+  for (const [design, { name, orders }] of ordersByDesign) {
+    const assemblies = batchAssemblies
+      .filter((a) => a.design === design)
+      .map((a) => ({
+        uuid: String(a.uuid),
+        client_order_id: (a.client_order_id as string | null) ?? null,
+        priority: typeof a.priority === "number" ? a.priority : null,
+        created: (a.created as string | null) ?? null,
+      }));
+    for (const r of planOrderNumbers(orders, assemblies)) rows.push({ design_name: name, design_uuid: design, ...r });
+  }
+  return rows;
 }
 
 export function extractProp(entity: Record<string, unknown>, propPath: string): string {

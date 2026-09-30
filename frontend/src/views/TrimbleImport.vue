@@ -246,6 +246,7 @@
             <span class="chip-new">{{ $t('trimble.newChip', { count: bp.summary.new }) }}</span>
             <span class="chip-changed">{{ $t('trimble.keptChip', { count: bp.summary.kept }) }}</span>
                         <span class="chip-identical" style="color:#9ca3af">{{ $t('trimble.identicalChip', { count: bp.summary.identical }) }}</span>
+            <span v-if="bp.order_summary && (bp.order_summary.assign > 0 || bp.order_summary.identical > 0 || bp.order_summary.other > 0 || bp.order_summary.no_constructible > 0)" style="color:#2563eb">{{ $t('trimble.orderChip', bp.order_summary) }}</span>
             <Tag v-if="bp.blocked" severity="danger" :value="$t('trimble.blockedChip')" />
           </div>
           <div style="max-height:320px;overflow-y:auto;border:1px solid #e5e7eb;border-radius:6px;margin-top:0.75rem;">
@@ -272,6 +273,37 @@
                 <template #body="{ data }">
                   <span v-if="data.changed_fields?.length">{{ formatChanges(data) }}</span>
                   <span v-else style="color:#9ca3af;">—</span>
+                </template>
+              </Column>
+            </DataTable>
+          </div>
+          <div v-if="orderRows.length" style="font-weight:600;margin-top:0.75rem;">{{ $t('trimble.orderTitle') }}</div>
+          <div v-if="orderRows.length" style="max-height:320px;overflow-y:auto;border:1px solid #e5e7eb;border-radius:6px;margin-top:0.25rem;">
+            <DataTable :value="orderRows" size="small" striped-rows>
+              <Column field="design_name" :header="$t('trimble.design')" />
+              <Column :header="$t('trimble.orderNumber')">
+                <template #body="{ data }">
+                  <span v-if="data.order != null">{{ data.order }}</span>
+                  <span v-else style="color:#9ca3af;">—</span>
+                </template>
+              </Column>
+              <Column field="batch_name" :header="$t('trimble.batch')" />
+              <Column :header="$t('trimble.constructible')">
+                <template #body="{ data }">
+                  <span v-if="data.assembly_uuid != null">{{ data.assembly_uuid.slice(0, 8) }}</span>
+                  <span v-else style="color:#9ca3af;">—</span>
+                </template>
+              </Column>
+              <Column :header="$t('trimble.priority')">
+                <template #body="{ data }">
+                  <span v-if="data.priority != null">{{ data.priority }}</span>
+                  <span v-else style="color:#9ca3af;">—</span>
+                </template>
+              </Column>
+              <Column :header="$t('trimble.statusLabel')" style="width:140px;">
+                <template #body="{ data }">
+                  <Tag :severity="data.status==='assign'?'success':data.status==='identical'?'secondary':data.status==='other'?'warn':'danger'"
+                    :value="orderStatusLabel(data)" />
                 </template>
               </Column>
             </DataTable>
@@ -621,8 +653,18 @@ function toggleBatch(batchKey) {
 }
 
 const canExecute = computed(() =>
-  previewData.value?.batch_previews?.some(bp => !bp.blocked && bp.summary.new > 0)
+  previewData.value?.batch_previews?.some(bp => !bp.blocked && (bp.summary.new > 0 || (bp.order_summary?.assign ?? 0) > 0))
 )
+
+const orderRows = computed(() => {
+  const rows = []
+  for (const bp of previewData.value?.batch_previews || []) {
+    for (const row of bp.order_rows || []) {
+      rows.push({ ...row, batch_name: bp.batch_name })
+    }
+  }
+  return rows
+})
 
 const { mappingWarnings, previewRows } = useImportPreview({
   t, ns: 'trimble', columnMapping, previewData,
@@ -635,6 +677,14 @@ function statusLabel(status) {
   if (status === 'kept') return t('trimble.statusKept')
   if (status === 'blocked') return t('trimble.statusBlocked')
   return status
+}
+
+function orderStatusLabel(row) {
+  if (row.status === 'assign') return t('trimble.orderAssign')
+  if (row.status === 'identical') return t('trimble.orderIdentical')
+  if (row.status === 'other') return t('trimble.orderOther', { existing: row.existing })
+  if (row.status === 'no_constructible') return t('trimble.orderNoConstructible')
+  return row.status
 }
 
 function formatChanges(row) {
