@@ -1,7 +1,10 @@
 import Database from "better-sqlite3";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
+import { existsSync, mkdirSync } from "node:fs";
+import { env } from "./env.ts";
+import { logger } from "./logger.ts";
 
-const DB_PATH = resolve(process.cwd(), "state.db");
+const DB_PATH = resolve(process.cwd(), env.DB_PATH);
 let _db: Database.Database | null = null;
 
 // The schema is created when the connection opens, not by a separate call.
@@ -11,6 +14,11 @@ let _db: Database.Database | null = null;
 // on a fresh state.db that was "no such table: settings".
 function db(): Database.Database {
   if (!_db) {
+    // Said at info because a fresh file where an existing one was expected
+    // (service started from another folder) is otherwise invisible.
+    const fresh = !existsSync(DB_PATH);
+    logger.info(`[db] ${fresh ? "creating new" : "opening"} ${DB_PATH}`);
+    if (fresh) mkdirSync(dirname(DB_PATH), { recursive: true });
     _db = new Database(DB_PATH);
     _db.pragma("journal_mode = WAL");
     createSchema(_db);

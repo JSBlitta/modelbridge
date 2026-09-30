@@ -11,8 +11,12 @@ function loadDotenv(): void {
     const eq = trimmed.indexOf("=");
     if (eq < 0) continue;
     const key = trimmed.slice(0, eq).trim();
-    // Strip one pair of surrounding quotes: LOG_LEVEL="debug" must mean debug.
-    const val = trimmed.slice(eq + 1).trim().replace(/^(['"])(.*)\1$/, "$2");
+    // A quoted value is taken literally minus its quotes (LOG_LEVEL="debug" is
+    // debug). An unquoted one loses a trailing " # comment": the example file
+    // once had `PRODUUZIT_API_ACCOUNT_ID=   # optional`, which became the ID.
+    const raw = trimmed.slice(eq + 1).trim();
+    const quoted = raw.match(/^(['"])(.*)\1$/);
+    const val = quoted ? quoted[2] : raw.replace(/(^|\s+)#.*$/, "").trim();
     if (!(key in process.env)) process.env[key] = val;
   }
 }
@@ -55,7 +59,10 @@ export const env = {
   // A per-request entity_text_filter overrides this.
   TRIMBLE_ENTITY_TEXT_FILTER: optional("TRIMBLE_ENTITY_TEXT_FILTER"),
 
-  // Logging: error | warn | info | debug (default: info)
+  // SQLite state file; relative paths resolve against the working directory.
+  DB_PATH: optional("DB_PATH", "state.db"),
+
+  // Logging: error | warn | info | debug | trace (default: info)
   LOG_LEVEL: optional("LOG_LEVEL", "info"),
   // Optional log file — when set, all log lines are also appended here
   LOG_FILE: optional("LOG_FILE", ""),

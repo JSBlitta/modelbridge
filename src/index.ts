@@ -6,7 +6,7 @@ import { serveStatic } from "@hono/node-server/serve-static";
 import { logger as honoLogger } from "hono/logger";
 import { env } from "./env.ts";
 import { loadConfig } from "./config.ts";
-import { initLogger, logger } from "./logger.ts";
+import { logger } from "./logger.ts";
 import { initDb, pruneExpiredSessions, pruneExpiredPreviewTokens } from "./db.ts";
 import { requireSession } from "./middleware/session.ts";
 
@@ -61,7 +61,6 @@ app.get("/assets/*", serveStatic({ root: "./frontend-dist" }));
 app.get("/*", serveStatic({ root: "./frontend-dist", path: "index.html" }));
 
 loadConfig();
-initLogger(env.LOG_LEVEL, env.LOG_FILE);
 initDb();
 pruneExpiredSessions();
 setInterval(pruneExpiredSessions, 60 * 60 * 1000);
