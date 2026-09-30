@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { createModelApi } from './model.js';
 import type { HttpClient } from '../http/client.js';
 import type { RegionEndpoints } from '../types/index.js';
-import { loadFixture } from '../test/fixtures.js';
+import { hasFixtures, loadFixture } from '../test/fixtures.js';
 
 const endpoints: RegionEndpoints = {
   Core: 'https://app21.connect.trimble.com/tc/api/2.0/',
@@ -157,7 +157,7 @@ describe('createModelApi', () => {
 });
 
 describe('createModelApi fixture verification', () => {
-  it('parses the real model entities response', async () => {
+  it.skipIf(!hasFixtures)('parses the real model entities response', async () => {
     const { get, client } = createMockClient();
     const fixture = loadFixture('model models modelid entities qparams pset psets.json') as {
       items: Array<Record<string, unknown>>;

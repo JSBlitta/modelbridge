@@ -37,6 +37,12 @@ if errorlevel 1 (
     exit /b 1
 )
 
+:: Unpacking a release over this folder never deletes files, so move out any
+:: code file this release no longer contains (see scripts\prune-stale.ts).
+echo      Checking for files left over from earlier releases...
+call node_modules\.bin\tsx scripts\prune-stale.ts
+if errorlevel 1 ( echo ERROR: could not move leftover files out of src. & exit /b 1 )
+
 :: Install frontend deps
 echo [3/6] Installing frontend dependencies...
 cd frontend

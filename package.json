@@ -14,7 +14,7 @@
     "trimble-connect": "tsx src/trimble/cli.ts",
     "typecheck": "tsc --noEmit",
     "test": "npm run test:node && npm run test:vitest",
-    "test:node": "node --experimental-strip-types --experimental-test-module-mocks --test src/*.test.ts src/middleware/*.test.ts",
+    "test:node": "tsx --experimental-test-module-mocks --test \"src/*.test.ts\" \"src/middleware/*.test.ts\"",
     "test:vitest": "vitest run"
   },
   "dependencies": {

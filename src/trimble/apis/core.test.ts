@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { createCoreApi } from './core.js';
 import type { HttpClient } from '../http/client.js';
 import type { RegionEndpoints } from '../types/index.js';
-import { loadFixture } from '../test/fixtures.js';
+import { hasFixtures, loadFixture } from '../test/fixtures.js';
 
 const endpoints: RegionEndpoints = {
   Core: 'https://app21.connect.trimble.com/tc/api/2.0/',
@@ -118,7 +118,7 @@ describe('createCoreApi', () => {
 });
 
 describe('createCoreApi fixture verification', () => {
-  it('parses the real projects response', async () => {
+  it.skipIf(!hasFixtures)('parses the real projects response', async () => {
     const { get, client } = createMockClient();
     const coreProjects = loadFixture('core projects.json') as Array<Record<string, unknown>>;
     get.mockResolvedValueOnce(coreProjects);
@@ -136,7 +136,7 @@ describe('createCoreApi fixture verification', () => {
     });
   });
 
-  it('parses the real folder items response', async () => {
+  it.skipIf(!hasFixtures)('parses the real folder items response', async () => {
     const { get, client } = createMockClient();
     const coreFolderItems = loadFixture('core folders-bypath qparam path projectnaam projectid.json') as Array<Record<string, unknown>>;
     get.mockResolvedValueOnce(coreFolderItems);
@@ -148,7 +148,7 @@ describe('createCoreApi fixture verification', () => {
     expect(items[0].type).toBe('Folder');
   });
 
-  it('parses the real releases response', async () => {
+  it.skipIf(!hasFixtures)('parses the real releases response', async () => {
     const { get, client } = createMockClient();
     const coreReleases = loadFixture('core projectid releases.json') as Array<Record<string, unknown>>;
     get.mockResolvedValueOnce(coreReleases);
@@ -160,7 +160,7 @@ describe('createCoreApi fixture verification', () => {
     expect(releases[0].projectId).toBe('NSsMIBkk2vM');
   });
 
-  it('parses the real single release-file response', async () => {
+  it.skipIf(!hasFixtures)('parses the real single release-file response', async () => {
     const { get, client } = createMockClient();
     const coreReleaseFiles = loadFixture('core releases releaseid files.json') as Record<string, unknown>;
     get.mockResolvedValueOnce(coreReleaseFiles);
@@ -176,7 +176,7 @@ describe('createCoreApi fixture verification', () => {
     });
   });
 
-  it('passes through the real search response unchanged', async () => {
+  it.skipIf(!hasFixtures)('passes through the real search response unchanged', async () => {
     const { get, client } = createMockClient();
     const coreSearch = loadFixture('core search qparam name.json') as unknown[];
     get.mockResolvedValueOnce(coreSearch);

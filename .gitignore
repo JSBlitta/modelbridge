@@ -36,3 +36,7 @@ scratch
 constructibles*.json
 _attic/
 TrimbleConnectPropertysets/
+
+# written by scripts/pack-release.ts, shipped only inside the release 7z
+release-manifest.txt
+.release-filelist

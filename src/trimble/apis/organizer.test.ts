@@ -3,7 +3,7 @@ import { createOrganizerApi } from './organizer.js';
 import type { HttpClient } from '../http/client.js';
 import type { RegionEndpoints } from '../types/index.js';
 import { NotFoundError } from '../http/errors.js';
-import { loadFixture } from '../test/fixtures.js';
+import { hasFixtures, loadFixture } from '../test/fixtures.js';
 
 const endpoints: RegionEndpoints = {
   Core: 'https://app21.connect.trimble.com/tc/api/2.0/',
@@ -165,7 +165,7 @@ describe('createOrganizerApi', () => {
 });
 
 describe('createOrganizerApi fixture verification', () => {
-  it('parses the real ProjectContext PSetLibs node', async () => {
+  it.skipIf(!hasFixtures)('parses the real ProjectContext PSetLibs node', async () => {
     const { get, client } = createMockClient();
     const fixture = loadFixture('organiser forrest forest-projectid-data trees projectcontext psetlibs.json') as {
       links: string[];

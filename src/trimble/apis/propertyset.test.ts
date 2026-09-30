@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { createPropertysetApi } from './propertyset.js';
 import type { HttpClient } from '../http/client.js';
 import type { RegionEndpoints } from '../types/index.js';
-import { loadFixture } from '../test/fixtures.js';
+import { hasFixtures, loadFixture } from '../test/fixtures.js';
 
 const endpoints: RegionEndpoints = {
   Core: 'https://app21.connect.trimble.com/tc/api/2.0/',
@@ -86,7 +86,7 @@ describe('createPropertysetApi', () => {
 });
 
 describe('createPropertysetApi fixture verification', () => {
-  it('parses the real library definitions response', async () => {
+  it.skipIf(!hasFixtures)('parses the real library definitions response', async () => {
     const { get, client } = createMockClient();
     const fixture = loadFixture('propertyset libs libid defs.json') as { items: Array<Record<string, unknown>> };
     get.mockResolvedValueOnce(fixture);
@@ -104,7 +104,7 @@ describe('createPropertysetApi fixture verification', () => {
     });
   });
 
-  it('parses the real psets-from-definition response', async () => {
+  it.skipIf(!hasFixtures)('parses the real psets-from-definition response', async () => {
     const { get, client } = createMockClient();
     const fixture = loadFixture('propertyset libs libid defs defid psets.json') as {
       items: Array<Record<string, unknown>>;
