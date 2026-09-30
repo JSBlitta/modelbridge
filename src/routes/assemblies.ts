@@ -11,6 +11,7 @@ import {
   getProductionCountsSignature,
   previewCountRow,
   summarizeCountRows,
+  countResults,
   upsertProductionCounts,
 } from "../lib/production-counts.ts";
 import { GATE, issuePreviewToken, requirePreviewToken } from "../lib/push-gate.ts";
@@ -461,11 +462,8 @@ app.post("/import", async (c) => {
     results.push({ status: "skipped", reason: "Production counts not requested" });
   } else if (countMap.size) {
     try {
-      await upsertProductionCounts(body.project_uuid, [...countMap.values()], countsSignature ?? undefined);
-      for (const e of countMap.values()) {
-        const bn = (batchById.get(e.batch)?.name as string) ?? e.batch;
-        results.push({ design_name: e.design_name, batch: bn, phase: e.phase, status: "created", count: e.count });
-      }
+      const { kept } = await upsertProductionCounts(body.project_uuid, [...countMap.values()], countsSignature ?? undefined);
+      results.push(...countResults(countMap.values(), kept, batchById));
     } catch (e) {
       if (e instanceof ConcurrentModificationError) {
         return c.json({ error: e.message, code: "CONCURRENT_MODIFICATION" }, 409);

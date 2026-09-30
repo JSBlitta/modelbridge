@@ -244,9 +244,8 @@
             class="batch-preview-row">
             <Tag :severity="bp.blocked ? 'danger' : 'secondary'" :value="bp.batch_name" />
             <span class="chip-new">{{ $t('trimble.newChip', { count: bp.summary.new }) }}</span>
-            <span class="chip-changed">{{ $t('trimble.changedChip', { count: bp.summary.changed }) }}</span>
-            <span v-if="bp.summary.lowered" style="color:#b91c1c">{{ $t('trimble.loweredChip', { count: bp.summary.lowered }) }}</span>
-            <span class="chip-identical" style="color:#9ca3af">{{ $t('trimble.identicalChip', { count: bp.summary.identical }) }}</span>
+            <span class="chip-changed">{{ $t('trimble.keptChip', { count: bp.summary.kept }) }}</span>
+                        <span class="chip-identical" style="color:#9ca3af">{{ $t('trimble.identicalChip', { count: bp.summary.identical }) }}</span>
             <Tag v-if="bp.blocked" severity="danger" :value="$t('trimble.blockedChip')" />
           </div>
           <div style="max-height:320px;overflow-y:auto;border:1px solid #e5e7eb;border-radius:6px;margin-top:0.75rem;">
@@ -256,15 +255,15 @@
               <Column field="batch_name" :header="$t('trimble.batch')" />
               <Column :header="$t('trimble.statusLabel')" style="width:110px;">
                 <template #body="{ data }">
-                  <Tag :severity="data.status==='new'?'success':data.status==='changed'?'warn':data.status==='identical'?'secondary':'danger'"
+                  <Tag :severity="data.status==='new'?'success':data.status==='kept'?'info':data.status==='changed'?'warn':data.status==='identical'?'secondary':'danger'"
                     :value="statusLabel(data.status)" />
                 </template>
               </Column>
               <Column :header="$t('trimble.countLabel')" style="width:150px;">
                 <template #body="{ data }">
                   <span v-if="data.count_requested != null">
-                    <template v-if="data.status === 'changed'">{{ data.count_existing }} &rarr; </template>{{ data.count_requested }}
-                    <span v-if="data.lowers" style="color:#b91c1c;"> ({{ $t('trimble.lowers') }})</span>
+                    <template v-if="data.status === 'new'">{{ data.count_requested }}</template><template v-else>{{ data.count_existing }}</template>
+                    <span v-if="data.status === 'kept'" style="color:#6b7280;"> ({{ $t('trimble.keptHint', { count: data.count_requested }) }})</span>
                   </span>
                   <span v-else style="color:#9ca3af;">—</span>
                 </template>
@@ -622,7 +621,7 @@ function toggleBatch(batchKey) {
 }
 
 const canExecute = computed(() =>
-  previewData.value?.batch_previews?.some(bp => !bp.blocked && (bp.summary.new > 0 || bp.summary.changed > 0))
+  previewData.value?.batch_previews?.some(bp => !bp.blocked && bp.summary.new > 0)
 )
 
 const { mappingWarnings, previewRows } = useImportPreview({
@@ -633,6 +632,7 @@ function statusLabel(status) {
   if (status === 'new') return t('trimble.statusNew')
   if (status === 'changed') return t('trimble.statusChanged')
   if (status === 'identical') return t('trimble.statusIdentical')
+  if (status === 'kept') return t('trimble.statusKept')
   if (status === 'blocked') return t('trimble.statusBlocked')
   return status
 }

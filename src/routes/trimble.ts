@@ -32,6 +32,7 @@ import {
   getProductionCountsSignature,
   previewCountRow,
   summarizeCountRows,
+  countResults,
   upsertProductionCounts,
 } from "../lib/production-counts.ts";
 import { logger } from "../logger.ts";
@@ -656,7 +657,7 @@ app.post("/preview-import", async (c) => {
     });
 
     const summary = summarizeCountRows(rowPreviews);
-    logger.debug(`[trimble preview] batch ${bi}/${byBatch.size} "${batchName}": ${summary.new} new, ${summary.changed} changed (${summary.lowered} lowered), ${summary.identical} identical, ${summary.blocked} blocked`);
+    logger.debug(`[trimble preview] batch ${bi}/${byBatch.size} "${batchName}": ${summary.new} new, ${summary.kept} kept (differ), ${summary.identical} identical, ${summary.blocked} blocked`);
 
     batchPreviews.push({ batch_uuid: batchUuid, batch_name: batchName, local_state: dbState, blocked: dbState === "definitive", rows: rowPreviews, summary });
   }
@@ -806,11 +807,8 @@ app.post("/import", async (c) => {
     results.push({ status: "skipped", reason: "Production counts not requested" });
   } else if (countMap.size) {
     try {
-      await upsertProductionCounts(body.project_uuid, [...countMap.values()], countsSignature ?? undefined);
-      for (const e of countMap.values()) {
-        const bn = (batchById.get(e.batch)?.name as string) ?? e.batch;
-        results.push({ design_name: e.design_name, batch: bn, phase: e.phase, design: e.design, status: "created", count: e.count });
-      }
+      const { kept } = await upsertProductionCounts(body.project_uuid, [...countMap.values()], countsSignature ?? undefined);
+      results.push(...countResults(countMap.values(), kept, batchById));
     } catch (e) {
       if (e instanceof ConcurrentModificationError) {
         return c.json({ error: e.message, code: "CONCURRENT_MODIFICATION" }, 409);

@@ -225,9 +225,8 @@
             <div v-for="bp in previewData.batch_previews" :key="bp.batch_uuid" class="batch-preview-row">
               <Tag :severity="bp.blocked?'danger':'secondary'" :value="bp.batch_name" />
               <span style="color:#15803d;">{{ $t('unified.batchNewChip', { count: bp.summary.new }) }}</span>
-              <span style="color:#b45309;">{{ $t('unified.batchChangedChip', { count: bp.summary.changed }) }}</span>
-              <span v-if="bp.summary.lowered" style="color:#b91c1c;">{{ $t('unified.loweredChip', { count: bp.summary.lowered }) }}</span>
-              <span class="text-identical">{{ $t('unified.batchIdenticalChip', { count: bp.summary.identical }) }}</span>
+              <span style="color:#b45309;">{{ $t('unified.keptChip', { count: bp.summary.kept }) }}</span>
+                            <span class="text-identical">{{ $t('unified.batchIdenticalChip', { count: bp.summary.identical }) }}</span>
               <Tag v-if="bp.blocked" severity="danger" :value="$t('compactFlow.definitiveBlocked')" />
             </div>
 
@@ -238,15 +237,15 @@
                 <Column field="batch_name" :header="$t('unified.batch')" />
                 <Column :header="$t('unified.status')" style="width:110px;">
                   <template #body="{ data }">
-                    <Tag :severity="data.status==='new'?'success':data.status==='changed'?'warn':data.status==='identical'?'secondary':'danger'"
+                    <Tag :severity="data.status==='new'?'success':data.status==='kept'?'info':data.status==='changed'?'warn':data.status==='identical'?'secondary':'danger'"
                       :value="statusLabel(data.status)" />
                   </template>
                 </Column>
                 <Column :header="$t('unified.countLabel')" style="width:150px;">
                   <template #body="{ data }">
                     <span v-if="data.count_requested != null">
-                      <template v-if="data.status === 'changed'">{{ data.count_existing }} &rarr; </template>{{ data.count_requested }}
-                      <span v-if="data.lowers" style="color:#b91c1c;"> ({{ $t('unified.lowers') }})</span>
+                      <template v-if="data.status === 'new'">{{ data.count_requested }}</template><template v-else>{{ data.count_existing }}</template>
+                      <span v-if="data.status === 'kept'" style="color:#6b7280;"> ({{ $t('unified.keptHint', { count: data.count_requested }) }})</span>
                     </span>
                     <span v-else style="color:#9ca3af;">—</span>
                   </template>
@@ -385,7 +384,7 @@ const { mappingWarnings, previewRows } = useImportPreview({
 const totalNew = computed(() => previewData.value?.batch_previews?.reduce((a, b) => a + b.summary.new, 0) ?? 0)
 const totalChanged = computed(() => isUuidMode.value
   ? (previewData.value?.row_previews?.filter(r => r.status === 'changed').length ?? 0)
-  : (previewData.value?.batch_previews?.reduce((a, b) => a + b.summary.changed, 0) ?? 0))
+  : 0) // counts are write-once: nothing in a batch preview is "changed"
 const totalIdentical = computed(() => isUuidMode.value
   ? (previewData.value?.row_previews?.filter(r => r.status === 'identical').length ?? 0)
   : (previewData.value?.batch_previews?.reduce((a, b) => a + b.summary.identical, 0) ?? 0))
@@ -395,7 +394,7 @@ const totalBlocked = computed(() => isUuidMode.value
 
 const canExecute = computed(() => isUuidMode.value
   ? (previewData.value && !previewData.value.has_errors && totalChanged.value > 0)
-  : (previewData.value?.batch_previews?.some(bp => !bp.blocked && (bp.summary.new > 0 || bp.summary.changed > 0))))
+  : (previewData.value?.batch_previews?.some(bp => !bp.blocked && bp.summary.new > 0)))
 
 function refreshProjects() { fetchProjects(true) }
 
@@ -515,6 +514,7 @@ function statusLabel(status) {
   if (status === 'new') return t('unified.statusNew')
   if (status === 'changed') return t('unified.statusChanged')
   if (status === 'identical') return t('unified.statusIdentical')
+  if (status === 'kept') return t('unified.statusKept')
   return status
 }
 

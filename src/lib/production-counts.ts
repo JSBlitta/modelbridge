@@ -35,39 +35,56 @@ export async function getProductionCounts(projectUuid: string): Promise<Map<stri
   return map;
 }
 
-// What the preview shows for one (batch, phase, design). The import OVERWRITES
-// Produuzit's count with `requested`; it never adds to it. The preview used to
-// speak in "to create = requested − existing" and called anything at or above
-// the requested number "identical", so a selection smaller than what Produuzit
-// already had previewed as "nothing to do" and then lowered the count. Both
-// preview routes build their rows here so they cannot drift apart again.
+// A production count is written ONCE: only for a (batch, phase, design) that
+// has no count in Produuzit yet. An existing count is never changed, whatever
+// the file says. meta.quantities is not in Produuzit's API spec, so what a
+// changed count triggers in the backend is unknown; correcting one is done in
+// Produuzit itself. This is also what makes a second run a no-op.
+//
+// What the preview shows for one (batch, phase, design). Both preview routes
+// build their rows here, and upsertProductionCounts applies the same rule.
 export function previewCountRow(existing: number, requested: number, definitive: boolean) {
-  const status: "new" | "changed" | "identical" | "blocked" = definitive
+  const status: "new" | "identical" | "kept" | "blocked" = definitive
     ? "blocked"
-    : existing === requested
-      ? "identical"
-      : existing === 0
-        ? "new"
-        : "changed";
-  return {
-    count_requested: requested,
-    count_existing: existing,
-    // true when the import would set a lower number than Produuzit holds now,
-    // typically because only part of the model was selected.
-    lowers: status === "changed" && requested < existing,
-    status,
-  };
+    : existing === 0
+      ? "new"
+      : existing === requested
+        ? "identical"
+        : "kept"; // exists with a different number; left as it is
+  return { count_requested: requested, count_existing: existing, status };
 }
 
-export function summarizeCountRows(rows: { status: string; lowers?: boolean; count_requested: number }[]) {
+export function summarizeCountRows(rows: { status: string; count_requested: number }[]) {
   return {
     total: rows.reduce((a, r) => a + (r.count_requested || 0), 0),
     new: rows.filter((r) => r.status === "new").length,
-    changed: rows.filter((r) => r.status === "changed").length,
-    lowered: rows.filter((r) => r.lowers).length,
+    kept: rows.filter((r) => r.status === "kept").length,
     identical: rows.filter((r) => r.status === "identical").length,
     blocked: rows.filter((r) => r.status === "blocked").length,
   };
+}
+
+// Import result rows: "created" for counts written now, "skipped" for counts
+// Produuzit already had (and that were therefore left alone).
+export function countResults(
+  entries: Iterable<ProductionCountEntry & { design_name: string }>,
+  kept: (ProductionCountEntry & { existing: number })[],
+  batchById: Map<string, Record<string, unknown>>,
+): Record<string, unknown>[] {
+  const keptByKey = new Map(kept.map((k) => [`${k.batch}|${k.phase}|${k.design}`, k.existing]));
+  return [...entries].map((e) => {
+    const base = { design_name: e.design_name, batch: (batchById.get(e.batch)?.name as string) ?? e.batch, phase: e.phase, design: e.design };
+    const existing = keptByKey.get(`${e.batch}|${e.phase}|${e.design}`);
+    if (existing === undefined) return { ...base, status: "created", count: e.count };
+    return {
+      ...base,
+      status: "skipped",
+      count: existing,
+      reason: existing === e.count
+        ? "Count already set"
+        : `Count already set to ${existing} in Produuzit (selection says ${e.count}); not changed`,
+    };
+  });
 }
 
 export class ConcurrentModificationError extends Error {
@@ -97,8 +114,10 @@ export async function upsertProductionCounts(
   // a read-modify-write of the whole project object, so without this a
   // concurrent import silently discarded the other one's counts.
   expectedSignature?: string,
-): Promise<void> {
+): Promise<{ written: ProductionCountEntry[]; kept: (ProductionCountEntry & { existing: number })[] }> {
   logger.debug(`[production-counts] upsert project=${projectUuid} entries=${entries.length}`);
+  const written: ProductionCountEntry[] = [];
+  const kept: (ProductionCountEntry & { existing: number })[] = [];
 
   const project = (await apiGet(`/company/projects/${projectUuid}/`)) as Record<string, any>;
   const meta = (project.meta ?? {}) as Record<string, any>;
@@ -123,12 +142,24 @@ export async function upsertProductionCounts(
   for (const e of entries) {
     const k = `${e.batch}|${e.phase}|${e.design}`;
     const idx = indexByKey.get(k);
-    if (idx !== undefined) {
+    const existing = idx === undefined ? 0 : Number(batchCounts[idx].count ?? 0);
+    if (existing > 0) {
+      kept.push({ ...e, existing }); // write-once: see previewCountRow
+    } else if (idx !== undefined) {
       batchCounts[idx].count = e.count;
+      written.push(e);
     } else {
       indexByKey.set(k, batchCounts.length);
       batchCounts.push({ batch: e.batch, count: e.count, phase: e.phase, design: e.design });
+      written.push(e);
     }
+  }
+
+  // Nothing new: leave the project object alone entirely, so a repeated run
+  // makes no write at all.
+  if (!written.length) {
+    logger.info(`[production-counts] nothing to write for project=${projectUuid} (${kept.length} already set)`);
+    return { written, kept };
   }
 
   // Recompute phase-level totals from batch counts (one entry per phase × design)
@@ -152,5 +183,6 @@ export async function upsertProductionCounts(
   );
 
   await apiPut(`/company/projects/${projectUuid}/`, project);
-  logger.info(`[production-counts] wrote ${entries.length} count(s) to project=${projectUuid}`);
+  logger.info(`[production-counts] wrote ${written.length} new count(s) to project=${projectUuid}, left ${kept.length} existing`);
+  return { written, kept };
 }
