@@ -108,3 +108,27 @@ test("client_meta without a client order ID cannot be tied to a constructible an
   const preview = await post("/preview-import", body([...selection, element("", "Z")]));
   assert.equal(preview.client_meta_unattributed, 1);
 });
+
+test("free constructibles that already carry an element's client_meta get that element's order ID", async () => {
+  // Produuzit has the client_meta but no client order IDs, one position rotated
+  // against the priority order. Pairing by position would report three differing
+  // values and write three order IDs onto the wrong constructibles.
+  assemblies = [
+    { uuid: "a1", batch: "b1", design: "d1", client_order_id: null, priority: 1, client_meta: { uid_element: "K-3", gevel: "W" } },
+    { uuid: "a2", batch: "b1", design: "d1", client_order_id: null, priority: 2, client_meta: { uid_element: "K-1", gevel: "Z" } },
+    { uuid: "a3", batch: "b1", design: "d1", client_order_id: null, priority: 3, client_meta: { uid_element: "K-2", gevel: "O" } },
+  ];
+  const [bp] = (await post("/preview-import", body(selection))).batch_previews;
+  assert.deepEqual(bp.order_rows.map((r: any) => [r.order, r.assembly_uuid, r.status, r.meta.map((m: any) => m.status).join(",")]), [
+    ["K-1", "a2", "assign", "identical,identical"],
+    ["K-2", "a3", "assign", "identical,identical"],
+    ["K-3", "a1", "assign", "identical,identical"],
+  ]);
+  assert.deepEqual(bp.order_summary, { assign: 3, identical: 0, other: 0, no_constructible: 0, meta_add: 0, meta_differs: 0 });
+
+  patches.length = 0;
+  await post("/import", body(selection));
+  assert.deepEqual(patches.map((p) => [p.path.split("/").at(-2), p.body]), [
+    ["a2", { client_order_id: "K-1" }], ["a3", { client_order_id: "K-2" }], ["a1", { client_order_id: "K-3" }],
+  ]);
+});

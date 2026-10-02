@@ -1027,8 +1027,10 @@ function countUnattributedMeta(entities: Record<string, unknown>[], orderProp: s
 // Plan for one batch: the selection's client order IDs per design, matched
 // against that batch's constructibles (see lib/order-numbers.ts), plus the
 // client_meta of each element compared with the constructible that carries, or
-// is about to get, its client order ID. Used by both preview and import so the
-// push does exactly what was shown.
+// is about to get, its client order ID. A free constructible whose client_meta
+// already matches an element is paired with that element, so values Produuzit
+// already holds are recognised instead of reported as differing. Used by both
+// preview and import so the push does exactly what was shown.
 export function planBatchOrders(
   ents: Record<string, unknown>[],
   batchAssemblies: Record<string, unknown>[],
@@ -1059,7 +1061,14 @@ export function planBatchOrders(
       priority: typeof a.priority === "number" ? a.priority : null,
       created: (a.created as string | null) ?? null,
     }));
-    for (const r of planOrderNumbers(orders, assemblies)) {
+    // Affinity: how many mapped keys already hold the element's value; none when any differs.
+    const affinity = (order: string, a: { uuid: string }) => {
+      const entity = entityByOrder.get(order);
+      if (!entity || !metaProps.length) return 0;
+      const meta = planClientMeta(clientMetaOf(entity, metaProps), rawByUuid.get(a.uuid)?.client_meta);
+      return meta.some((m) => m.status === "differs") ? 0 : meta.filter((m) => m.status === "identical").length;
+    };
+    for (const r of planOrderNumbers(orders, assemblies, affinity)) {
       const entity = r.order ? entityByOrder.get(r.order) : undefined;
       const existingMeta = r.assembly_uuid ? rawByUuid.get(r.assembly_uuid)?.client_meta : undefined;
       const meta: MetaRow[] = entity && r.assembly_uuid && metaProps.length

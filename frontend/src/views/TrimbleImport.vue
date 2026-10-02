@@ -615,7 +615,7 @@ const orderColumns = computed(() => [
   { field: 'constructible', header: t('trimble.constructible') },
   { field: 'priority', header: t('trimble.priority') },
   { field: 'meta_text', header: t('trimble.clientMeta') },
-  { field: 'status_label', header: t('trimble.statusLabel'), style: 'width:140px;' },
+  { field: 'status_label', header: t('trimble.orderStatus'), style: 'width:170px;' },
 ])
 
 const selectedEntities = computed(() =>

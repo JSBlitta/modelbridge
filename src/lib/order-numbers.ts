@@ -10,8 +10,10 @@
 //      registration, so a second run finds everything identical and writes
 //      nothing.
 //   2. The remaining order numbers, in natural order (EL-2 before EL-10), go to
-//      the constructibles that have no number yet, ordered by their priority
-//      when it is set (lowest first), then by creation time.
+//      the constructibles that have no number yet. A constructible that already
+//      agrees with the element behind a number (it carries that element's
+//      client_meta) gets that number; the rest are handed out by priority when
+//      it is set (lowest first), then by creation time.
 //   3. A constructible with a number that is not in the selection is never
 //      overwritten; it is reported as "other" so a person decides.
 //   4. Order numbers left over when the free constructibles run out are
@@ -40,7 +42,14 @@ const hasNumber = (a: AssemblyLite) => String(a.client_order_id ?? "").trim() !=
 const priorityOf = (a: AssemblyLite) =>
   typeof a.priority === "number" && Number.isFinite(a.priority) ? a.priority : null;
 
-export function planOrderNumbers(orders: string[], assemblies: AssemblyLite[]): OrderPlanRow[] {
+// `affinity` scores how strongly a free constructible already belongs to the
+// element behind an order number (0: not at all). Without it the pairing is by
+// position only.
+export function planOrderNumbers(
+  orders: string[],
+  assemblies: AssemblyLite[],
+  affinity?: (order: string, assembly: AssemblyLite) => number,
+): OrderPlanRow[] {
   const wanted = [...new Set(orders.map((o) => o.trim()).filter(Boolean))];
   const byNumber = new Map<string, AssemblyLite>();
   for (const a of assemblies) if (hasNumber(a)) byNumber.set(String(a.client_order_id).trim(), a);
@@ -60,8 +69,26 @@ export function planOrderNumbers(orders: string[], assemblies: AssemblyLite[]): 
     return String(x.created ?? "").localeCompare(String(y.created ?? "")) || x.uuid.localeCompare(y.uuid);
   });
 
-  remaining.forEach((o, i) => {
-    const a = free[i];
+  // Strongest pairs first, ties by order number then priority. Greedy, not a
+  // maximum matching: enough while one key (the order ID copy) identifies the element.
+  const claimed = new Map<string, AssemblyLite>();
+  const taken = new Set<string>();
+  if (affinity) {
+    const pairs = remaining
+      .flatMap((o, oi) => free.map((f, fi) => ({ o, f, oi, fi, score: affinity(o, f) })))
+      .filter((p) => p.score > 0)
+      .sort((x, y) => y.score - x.score || x.oi - y.oi || x.fi - y.fi);
+    for (const { o, f } of pairs) {
+      if (claimed.has(o) || taken.has(f.uuid)) continue;
+      claimed.set(o, f);
+      taken.add(f.uuid);
+    }
+  }
+  const unclaimed = free.filter((f) => !taken.has(f.uuid));
+  let next = 0;
+
+  remaining.forEach((o) => {
+    const a = claimed.get(o) ?? unclaimed[next++];
     rows.push(a
       ? { status: "assign", order: o, assembly_uuid: a.uuid, existing: null, priority: priorityOf(a) }
       : { status: "no_constructible", order: o, assembly_uuid: null, existing: null, priority: null });

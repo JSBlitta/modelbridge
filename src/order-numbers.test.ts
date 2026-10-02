@@ -42,3 +42,23 @@ test("an existing foreign number is never overwritten; surplus numbers are repor
   assert.equal(rows.find((r) => r.status === "other")!.assembly_uuid, "a1");
   assert.equal(rows.find((r) => r.status === "assign")!.assembly_uuid, "a2");
 });
+
+test("a free constructible that already agrees with an element gets that element's number", () => {
+  // Rotated by one: positional pairing would put every number on the wrong constructible.
+  const carries: Record<string, string> = { a1: "C.55", a2: "C.06", a3: "C.09" };
+  const agrees = (order: string, a: AssemblyLite) => (carries[a.uuid] === order ? 1 : 0);
+  const free = [asm("a1", { priority: 7 }), asm("a2", { priority: 8 }), asm("a3", { priority: 9 }), asm("a4", { priority: 10 })];
+  const rows = planOrderNumbers(["C.06", "C.09", "C.20", "C.55"], free, agrees);
+  assert.deepEqual(rows.map((r) => [r.order, r.assembly_uuid, r.status]), [
+    ["C.06", "a2", "assign"], ["C.09", "a3", "assign"], ["C.20", "a4", "assign"], ["C.55", "a1", "assign"],
+  ]);
+  // Nothing agrees: plain priority order, as before.
+  assert.deepEqual(planOrderNumbers(["C.06", "C.09"], free.slice(0, 2), () => 0).map((r) => r.assembly_uuid), ["a1", "a2"]);
+});
+
+test("a stronger agreement is not lost to a weaker one that comes first", () => {
+  // a1 half agrees with both numbers, a2 fully agrees with N1 only.
+  const score = (order: string, a: AssemblyLite) => (a.uuid === "a1" ? 1 : order === "N1" ? 2 : 0);
+  const rows = planOrderNumbers(["N1", "N2"], [asm("a1", { priority: 1 }), asm("a2", { priority: 2 })], score);
+  assert.deepEqual(rows.map((r) => [r.order, r.assembly_uuid]), [["N1", "a2"], ["N2", "a1"]]);
+});
