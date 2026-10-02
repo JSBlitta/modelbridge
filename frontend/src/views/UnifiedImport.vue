@@ -74,6 +74,7 @@
         </div>
 
         <div v-if="createProjectResults.length" class="mt-sm">
+          <!-- Plain DataTable: only the Trimble flow uses components/SortFilterTable.vue (sortable, filter per column). Switch to it if this view is ever rewritten. -->
           <DataTable :value="createProjectResults" size="small">
             <Column field="project_key" :header="$t('unified.project')" />
             <Column field="status" :header="$t('unified.status')">
@@ -172,6 +173,7 @@
             </Message>
 
             <div style="max-height:300px;overflow-y:auto;border:1px solid #e5e7eb;border-radius:6px;">
+              <!-- Plain DataTable: only the Trimble flow uses components/SortFilterTable.vue (sortable, filter per column). Switch to it if this view is ever rewritten. -->
               <DataTable :value="previewData.row_previews" size="small">
                 <Column field="uuid" header="UUID">
                   <template #body="{ data }">
@@ -231,6 +233,7 @@
             </div>
 
             <div style="max-height:320px;overflow-y:auto;border:1px solid #e5e7eb;border-radius:6px;margin-top:0.75rem;">
+              <!-- Plain DataTable: only the Trimble flow uses components/SortFilterTable.vue (sortable, filter per column). Switch to it if this view is ever rewritten. -->
               <DataTable :value="previewRows" size="small" striped-rows>
                 <Column field="design_name" :header="$t('unified.design')" />
                 <Column field="client_order_id" :header="$t('unified.orderPrefix')" />
@@ -277,6 +280,7 @@
             <span class="text-identical">{{ importResults.filter(r=>r.status==='skipped').length }} {{ $t('unified.skipped') }}</span>
             <span class="text-blocked">{{ importResults.filter(r=>r.status==='error'||r.status==='blocked').length }} {{ $t('unified.errors') }}</span>
           </div>
+          <!-- Plain DataTable: only the Trimble flow uses components/SortFilterTable.vue (sortable, filter per column). Switch to it if this view is ever rewritten. -->
           <DataTable v-if="importResults.some(r=>r.status==='error'||r.status==='blocked')"
             :value="importResults.filter(r=>r.status==='error'||r.status==='blocked')" size="small" style="margin-top:0.5rem;">
             <Column field="uuid" header="UUID" v-if="isUuidMode">

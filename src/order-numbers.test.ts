@@ -2,7 +2,7 @@
 // Run: npm run test:node
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { planOrderNumbers, summarizeOrderRows, type AssemblyLite } from "./lib/order-numbers.ts";
+import { planOrderNumbers, summarizeOrderRows, planClientMeta, clientMetaToWrite, type AssemblyLite } from "./lib/order-numbers.ts";
 
 const asm = (uuid: string, extra: Partial<AssemblyLite> = {}): AssemblyLite => ({ uuid, created: `2026-09-0${uuid.slice(-1)}`, ...extra });
 
@@ -25,6 +25,15 @@ test("a second run over the result is all identical: nothing to write", () => {
   }
   const again = planOrderNumbers(["X2", "X1"], assemblies);
   assert.deepEqual(summarizeOrderRows(again), { assign: 0, identical: 2, other: 0, no_constructible: 0 });
+});
+
+test("client_meta: a missing or blank key is added, an existing one is never overwritten", () => {
+  const rows = planClientMeta({ gevel: "Z", verdieping: "2", uid: "K-1", leeg: " " }, { gevel: "N", verdieping: 2, uid: "" });
+  assert.deepEqual(rows.map((r) => [r.key, r.status, r.existing]), [["gevel", "differs", "N"], ["verdieping", "identical", "2"], ["uid", "add", null]]);
+  assert.deepEqual(clientMetaToWrite(rows, { gevel: "N", verdieping: 2, uid: "" }), { gevel: "N", verdieping: 2, uid: "K-1" });
+  // Nothing to add: no write at all. Not a key-value object: left alone.
+  assert.equal(clientMetaToWrite(planClientMeta({ gevel: "N" }, { gevel: "N" }), { gevel: "N" }), null);
+  assert.deepEqual(planClientMeta({ gevel: "Z" }, "free text").map((r) => r.status), ["differs"]);
 });
 
 test("an existing foreign number is never overwritten; surplus numbers are reported", () => {

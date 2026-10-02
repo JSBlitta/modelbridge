@@ -49,6 +49,7 @@
     <Card v-if="files.length" class="mb-card">
       <template #title>{{ $t('pdfUpload.filesToUpload') }} ({{ files.length }})</template>
       <template #content>
+        <!-- Plain DataTable: only the Trimble flow uses components/SortFilterTable.vue (sortable, filter per column). Switch to it if this view is ever rewritten. -->
         <DataTable :value="files" size="small" striped-rows>
           <Column field="name" :header="$t('pdfUpload.filename')" />
           <Column :header="$t('pdfUpload.status')">

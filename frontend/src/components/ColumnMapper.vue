@@ -92,11 +92,6 @@ const targetOptions = computed(() => {
     { name: 'phase', label: 'Phase' },
     { name: 'project', label: 'Project' },
     { name: 'stdlib', label: 'Standard Library' },
-    { name: 'client_meta', label: t('columnMapper.clientMetaJson') },
-    { name: 'client_meta.gevel', label: t('columnMapper.clientMeta_gevel') },
-    { name: 'client_meta.verdieping', label: t('columnMapper.clientMeta_verdieping') },
-    { name: 'client_meta.levering_montage', label: t('columnMapper.clientMeta_levering') },
-    { name: 'client_meta.uid_element', label: t('columnMapper.clientMeta_uid') },
     { name: '__new_meta__', label: t('columnMapper.newMetaKey') },
   ]
   // Add any auto-mapped targets not in the standard list

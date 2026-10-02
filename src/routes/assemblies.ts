@@ -112,8 +112,10 @@ app.post("/parse-csv", async (c) => {
   const read = await readUploadedText(c);
   if (read instanceof Response) return read;
 
-  const cfg = getConfig();
-  return c.json(parseAssemblyCsv(read.text, cfg.synonyms, cfg.client_meta_defaults));
+  // client_meta auto-suggest is switched off: a client_meta key is entered by
+  // hand through '+ New client_meta key'. Pass cfg.client_meta_defaults instead
+  // of {} to switch it back on.
+  return c.json(parseAssemblyCsv(read.text, getConfig().synonyms, {}));
 });
 
 // Load project context (designs + batches) for the column mapper

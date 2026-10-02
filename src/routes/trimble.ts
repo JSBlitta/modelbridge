@@ -23,9 +23,9 @@ import {
   trimbleGet,
 } from "../trimble-client.ts";
 import { apiGet, apiPatch, apiPost, fetchAllPages } from "../produuzit-client.ts";
-import { planOrderNumbers, summarizeOrderRows } from "../lib/order-numbers.ts";
+import { planOrderNumbers, summarizeOrderRows, planClientMeta, clientMetaToWrite, type MetaRow } from "../lib/order-numbers.ts";
 import * as db from "../db.ts";
-import { findSource, parseCount, normalizeCount } from "../lib/mapping.ts";
+import { findSource, targetsOf, parseCount, normalizeCount } from "../lib/mapping.ts";
 import type { ColumnMapping } from "../lib/mapping.ts";
 import {
   ConcurrentModificationError,
@@ -540,6 +540,7 @@ app.post("/preview-import", async (c) => {
   const orderProp = resolveProp(body.column_mapping, "client_order_id");
   const countProp = resolveProp(body.column_mapping, "count");
   const phaseProp = resolveProp(body.column_mapping, "phase");
+  const metaProps = clientMetaProps(body.column_mapping);
 
   let entities = body.entities;
   if (body.unique_only) {
@@ -629,7 +630,10 @@ app.post("/preview-import", async (c) => {
     const batchName = (batchInfo.name as string) ?? batchUuid;
     const batchPhase = String(batchInfo.phase ?? "").trim();
 
-    const countMap = new Map<string, { design: string; design_name: string; phase: string; count: number }>();
+    // Produuzit stores one count per (phase, design), so the status is decided on
+    // the design total; the preview still lists every element on its own row.
+    const designTotals = new Map<string, number>();
+    const elements: { key: string; design: string; design_name: string; phase: string; client_order_id: string | null; count: number }[] = [];
     for (const entity of ents) {
       const dn = designProp ? extractProp(entity, designProp) : "";
       const designUuid = fuzzyDesignLookup(designsMap, dn) ?? null;
@@ -639,34 +643,43 @@ app.post("/preview-import", async (c) => {
       const phase = entityPhase || batchPhase;
       const count = countProp ? parseCount(extractProp(entity, countProp), defaultCount) : defaultCount;
       const key = `${phase}|${designUuid}`;
-      const entry = countMap.get(key);
-      if (entry) entry.count += count;
-      else countMap.set(key, { design: designUuid, design_name: dn || designUuid, phase, count });
+      designTotals.set(key, (designTotals.get(key) ?? 0) + count);
+      const order = orderProp ? extractProp(entity, orderProp).trim() : "";
+      elements.push({ key, design: designUuid, design_name: dn || designUuid, phase, client_order_id: order || null, count });
     }
 
-    const rowPreviews = [...countMap.values()].map((e) => {
+    const rowPreviews = elements.map((e) => {
       const existing = existingCounts.get(`${batchUuid}|${e.phase}|${e.design}`) ?? 0;
       return {
         design_name: e.design_name,
         design_uuid: e.design,
         phase: e.phase,
-        ...previewCountRow(existing, e.count, dbState === "definitive"),
+        client_order_id: e.client_order_id,
+        count: e.count,
+        ...previewCountRow(existing, designTotals.get(e.key) ?? e.count, dbState === "definitive"),
         changed_fields: [],
         proposed: null,
         existing: existing > 0 ? { count: existing } : null,
       };
     });
 
-    const summary = summarizeCountRows(rowPreviews);
+    // Per element: total is the pieces in this selection, the rest counts rows.
+    const summary = summarizeCountRows(rowPreviews.map((r) => ({ status: r.status, count_requested: r.count })));
     logger.debug(`[trimble preview] batch ${bi}/${byBatch.size} "${batchName}": ${summary.new} new, ${summary.kept} kept (differ), ${summary.identical} identical, ${summary.blocked} blocked`);
 
-    // Order numbers per constructible, when an order-number property is mapped.
+    // Client order IDs per constructible, when a property is mapped to it.
     // A definitive batch is frozen for these too.
     const orderRows = orderProp && dbState !== "definitive"
-      ? planBatchOrders(ents, asmByBatch.get(batchUuid) ?? [], designProp, orderProp, designsMap)
+      ? planBatchOrders(ents, asmByBatch.get(batchUuid) ?? [], designProp, orderProp, designsMap, metaProps)
+          .map(({ meta_write: _write, ...row }) => row)
       : [];
-    const orderSummary = summarizeOrderRows(orderRows);
-    logger.debug(`[trimble preview] batch "${batchName}" order numbers: ${orderSummary.assign} to assign, ${orderSummary.identical} identical, ${orderSummary.other} other, ${orderSummary.no_constructible} without constructible`);
+    const metaRows = orderRows.flatMap((r) => r.meta);
+    const orderSummary = {
+      ...summarizeOrderRows(orderRows),
+      meta_add: metaRows.filter((m) => m.status === "add").length,
+      meta_differs: metaRows.filter((m) => m.status === "differs").length,
+    };
+    logger.debug(`[trimble preview] batch "${batchName}" client order IDs: ${orderSummary.assign} to assign, ${orderSummary.identical} identical, ${orderSummary.other} other, ${orderSummary.no_constructible} without constructible; client_meta: ${orderSummary.meta_add} to add, ${orderSummary.meta_differs} differing`);
 
     batchPreviews.push({ batch_uuid: batchUuid, batch_name: batchName, local_state: dbState, blocked: dbState === "definitive", rows: rowPreviews, summary, order_rows: orderRows, order_summary: orderSummary });
   }
@@ -678,6 +691,7 @@ app.post("/preview-import", async (c) => {
     unresolved_batches: [...unresolvedBatches].sort(),
     unresolved_designs: [...unresolvedDesigns].sort(),
     unresolved_phases: [...unresolvedPhases].sort(),
+    client_meta_unattributed: countUnattributedMeta(entities, orderProp, metaProps),
     production_counts_included: includeCounts,
     default_count: defaultCount,
     preview_token: issuePreviewToken(GATE.trimbleImport, trimbleGateInput(body)),
@@ -719,6 +733,7 @@ app.post("/import", async (c) => {
   const orderProp = resolveProp(body.column_mapping, "client_order_id");
   const countProp = resolveProp(body.column_mapping, "count");
   const phaseProp = resolveProp(body.column_mapping, "phase");
+  const metaProps = clientMetaProps(body.column_mapping);
 
   let entities = body.entities;
   if (body.unique_only) {
@@ -826,28 +841,36 @@ app.post("/import", async (c) => {
     }
   }
 
-  // Order numbers: re-read the constructibles now (not the preview's copy), plan
-  // with the same rules, and write only the "assign" rows. Constructibles that
-  // already carry a number are never touched, so a repeat run writes nothing.
+  // Client order IDs and client_meta: re-read the constructibles now (not the
+  // preview's copy), plan with the same rules, and write only what Produuzit
+  // does not have yet: the "assign" numbers and the missing client_meta keys.
+  // Existing values are never touched, so a repeat run writes nothing.
   if (orderProp) {
     const current = (await fetchAllPages("/constructibles/assemblies/", { project: body.project_uuid, limit: 1000 })) as Record<string, unknown>[];
     for (const [batchUuid, ents] of byBatch) {
       if ((dbBatches.get(batchUuid)?.state ?? "provisional") === "definitive") continue;
       const batchName = (batchById.get(batchUuid)?.name as string) ?? batchUuid;
-      const rows = planBatchOrders(ents, current.filter((a) => a.batch === batchUuid), designProp, orderProp, designsMap);
+      const rows = planBatchOrders(ents, current.filter((a) => a.batch === batchUuid), designProp, orderProp, designsMap, metaProps);
       for (const r of rows) {
-        const base = { design_name: r.design_name, batch: batchName, order: r.order, assembly_uuid: r.assembly_uuid };
-        if (r.status === "assign") {
+        const base = { design_name: r.design_name, batch: batchName, client_order_id: r.order, assembly_uuid: r.assembly_uuid };
+        const patch: Record<string, unknown> = {};
+        const done: string[] = [];
+        if (r.status === "assign") { patch.client_order_id = r.order; done.push(`Client order ID ${r.order} assigned`); }
+        if (r.meta_write) { patch.client_meta = r.meta_write; done.push(`client_meta set: ${r.meta.filter((m) => m.status === "add").map((m) => m.key).join(", ")}`); }
+        if (done.length) {
           try {
-            await apiPatch(`/constructibles/assemblies/${r.assembly_uuid}/`, { client_order_id: r.order });
-            results.push({ ...base, status: "updated", reason: `Order number ${r.order} assigned` });
+            await apiPatch(`/constructibles/assemblies/${r.assembly_uuid}/`, patch);
+            results.push({ ...base, status: "updated", reason: done.join("; ") });
           } catch (e) {
-            results.push({ ...base, status: "error", reason: `Could not assign order number ${r.order}: ${String(e)}` });
+            results.push({ ...base, status: "error", reason: `Could not write to constructible (${done.join("; ")}): ${String(e)}` });
           }
         } else if (r.status === "no_constructible") {
-          results.push({ ...base, status: "skipped", reason: `No free constructible for order number ${r.order} (count too low, or Produuzit has not created them yet; run again)` });
+          results.push({ ...base, status: "skipped", reason: `No free constructible for client order ID ${r.order} (count too low, or Produuzit has not created them yet; run again)` });
         } else if (r.status === "other") {
-          results.push({ ...base, status: "skipped", reason: `Constructible already has order number ${r.existing}, not in this selection; left as is` });
+          results.push({ ...base, status: "skipped", reason: `Constructible already has client order ID ${r.existing}, not in this selection; left as is` });
+        }
+        for (const m of r.meta.filter((x) => x.status === "differs")) {
+          results.push({ ...base, status: "skipped", reason: `client_meta.${m.key} is already "${m.existing}" in Produuzit (selection says "${m.proposed}"); not changed` });
         }
       }
     }
@@ -977,37 +1000,73 @@ export function trimbleGateInput(body: {
   };
 }
 
-// Order-number plan for one batch: the selection's order numbers per design,
-// matched against that batch's constructibles (see lib/order-numbers.ts).
-// Used by both preview and import so the push does exactly what was shown.
-function planBatchOrders(
+// The `client_meta.<key>` targets of a mapping, as [key, source property].
+function clientMetaProps(mapping: ColumnMapping): [string, string][] {
+  const out: [string, string][] = [];
+  for (const [source, t] of Object.entries(mapping)) {
+    for (const target of targetsOf(t)) {
+      if (target.startsWith("client_meta.")) out.push([target.slice("client_meta.".length), source]);
+    }
+  }
+  return out;
+}
+
+function clientMetaOf(entity: Record<string, unknown>, metaProps: [string, string][]): Record<string, string> {
+  return Object.fromEntries(metaProps.map(([key, prop]) => [key, extractProp(entity, prop)]));
+}
+
+// Elements that carry client_meta values but no client order ID: there is
+// nothing to tie them to one constructible, so their client_meta is not pushed.
+function countUnattributedMeta(entities: Record<string, unknown>[], orderProp: string, metaProps: [string, string][]): number {
+  if (!metaProps.length) return 0;
+  return entities.filter((e) =>
+    !(orderProp && extractProp(e, orderProp).trim())
+    && Object.values(clientMetaOf(e, metaProps)).some((v) => v.trim() !== "")).length;
+}
+
+// Plan for one batch: the selection's client order IDs per design, matched
+// against that batch's constructibles (see lib/order-numbers.ts), plus the
+// client_meta of each element compared with the constructible that carries, or
+// is about to get, its client order ID. Used by both preview and import so the
+// push does exactly what was shown.
+export function planBatchOrders(
   ents: Record<string, unknown>[],
   batchAssemblies: Record<string, unknown>[],
   designProp: string | null,
   orderProp: string,
   designsMap: Parameters<typeof fuzzyDesignLookup>[0],
+  metaProps: [string, string][] = [],
 ) {
-  const ordersByDesign = new Map<string, { name: string; orders: string[] }>();
+  type Group = { name: string; orders: string[]; entityByOrder: Map<string, Record<string, unknown>> };
+  const ordersByDesign = new Map<string, Group>();
   for (const e of ents) {
     const dn = designProp ? extractProp(e, designProp) : "";
     const design = fuzzyDesignLookup(designsMap, dn);
     const order = extractProp(e, orderProp).trim();
     if (!design || !order) continue;
-    const g = ordersByDesign.get(design) ?? { name: dn || design, orders: [] };
+    const g: Group = ordersByDesign.get(design) ?? { name: dn || design, orders: [], entityByOrder: new Map() };
     g.orders.push(order);
+    if (!g.entityByOrder.has(order)) g.entityByOrder.set(order, e);
     ordersByDesign.set(design, g);
   }
   const rows = [];
-  for (const [design, { name, orders }] of ordersByDesign) {
-    const assemblies = batchAssemblies
-      .filter((a) => a.design === design)
-      .map((a) => ({
-        uuid: String(a.uuid),
-        client_order_id: (a.client_order_id as string | null) ?? null,
-        priority: typeof a.priority === "number" ? a.priority : null,
-        created: (a.created as string | null) ?? null,
-      }));
-    for (const r of planOrderNumbers(orders, assemblies)) rows.push({ design_name: name, design_uuid: design, ...r });
+  for (const [design, { name, orders, entityByOrder }] of ordersByDesign) {
+    const ofDesign = batchAssemblies.filter((a) => a.design === design);
+    const rawByUuid = new Map(ofDesign.map((a) => [String(a.uuid), a]));
+    const assemblies = ofDesign.map((a) => ({
+      uuid: String(a.uuid),
+      client_order_id: (a.client_order_id as string | null) ?? null,
+      priority: typeof a.priority === "number" ? a.priority : null,
+      created: (a.created as string | null) ?? null,
+    }));
+    for (const r of planOrderNumbers(orders, assemblies)) {
+      const entity = r.order ? entityByOrder.get(r.order) : undefined;
+      const existingMeta = r.assembly_uuid ? rawByUuid.get(r.assembly_uuid)?.client_meta : undefined;
+      const meta: MetaRow[] = entity && r.assembly_uuid && metaProps.length
+        ? planClientMeta(clientMetaOf(entity, metaProps), existingMeta)
+        : [];
+      rows.push({ design_name: name, design_uuid: design, ...r, meta, meta_write: clientMetaToWrite(meta, existingMeta) });
+    }
   }
   return rows;
 }

@@ -36,6 +36,7 @@
         <Message v-if="!assemblies.length && !loadingAssemblies" severity="info" :closable="false" size="small">
           {{ $t('assemblyUpdate.noAssemblies') }}
         </Message>
+        <!-- Plain DataTable: only the Trimble flow uses components/SortFilterTable.vue (sortable, filter per column). Switch to it if this view is ever rewritten. -->
         <DataTable
           v-if="assemblies.length"
           :value="assemblies"
@@ -77,6 +78,7 @@
     </Card>
 
     <Dialog v-model:visible="showReview" :header="$t('assemblyUpdate.reviewChanges')" :style="{width:'70vw'}" modal>
+      <!-- Plain DataTable: only the Trimble flow uses components/SortFilterTable.vue (sortable, filter per column). Switch to it if this view is ever rewritten. -->
       <DataTable :value="changedRows" size="small">
         <Column field="design" :header="$t('assemblyUpdate.design')" />
         <Column field="scheduled_prod_date" :header="$t('assemblyUpdate.schedDate')" />
@@ -92,6 +94,7 @@
     <Card v-if="updateResults.length" class="mb-card">
       <template #title>{{ $t('assemblyUpdate.updateResults') }}</template>
       <template #content>
+        <!-- Plain DataTable: only the Trimble flow uses components/SortFilterTable.vue (sortable, filter per column). Switch to it if this view is ever rewritten. -->
         <DataTable :value="updateResults" size="small">
           <Column field="design" :header="$t('assemblyUpdate.design')" />
           <Column field="status" :header="$t('assemblyUpdate.status')">

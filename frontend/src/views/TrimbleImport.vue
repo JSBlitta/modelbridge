@@ -177,24 +177,20 @@
           </div>
         </div>
 
-        <DataTable v-if="previewEntities.length" :value="previewEntities" size="small" striped-rows scrollable scroll-height="400px"
-          removable-sort sort-mode="multiple"
-          :global-filter="entityFilter" :global-filter-fields="displayProps" filter-display="menu" global-filter-match-mode="contains">
+        <SortFilterTable
+          v-if="previewEntities.length"
+          :rows="entityRows"
+          :columns="entityColumns"
+          scrollable
+          scroll-height="400px"
+        >
           <template #header>
-            <div style="display:flex;gap:0.5rem;align-items:center;">
-              <InputText v-model="entityFilter" :placeholder="$t('trimble.filterEntities')" size="small" style="width:220px;" />
-              <InputText v-model="propFilter" :placeholder="$t('trimble.filterColumns')" size="small" style="width:180px;" />
-            </div>
+            <InputText v-model="propFilter" :placeholder="$t('trimble.filterColumns')" size="small" style="width:180px;" />
           </template>
-          <Column :header="$t('trimble.selectAllEntities')" style="width:3rem;">
-            <template #body="{ data }">
-              <Checkbox :model-value="selectedEntityIndices.has(entityIndex(data))" :binary="true" @change="toggleEntity(entityIndex(data))" />
-            </template>
-          </Column>
-          <Column v-for="prop in displayProps" :key="prop" :field="prop" :header="prop.split('.').pop()" style="min-width:120px;" sortable>
-            <template #body="{ data }">{{ extractProp(data, prop) }}</template>
-          </Column>
-        </DataTable>
+          <template #__select="{ data }">
+            <Checkbox :model-value="selectedEntityIndices.has(entityIndex(data))" :binary="true" @change="toggleEntity(entityIndex(data))" />
+          </template>
+        </SortFilterTable>
         <div v-if="!previewEntities.length && !fetchingEntities" class="text-dim">{{ $t('trimble.clickFetch') }}</div>
       </template>
     </Card>
@@ -246,67 +242,50 @@
             <span class="chip-new">{{ $t('trimble.newChip', { count: bp.summary.new }) }}</span>
             <span class="chip-changed">{{ $t('trimble.keptChip', { count: bp.summary.kept }) }}</span>
                         <span class="chip-identical" style="color:#9ca3af">{{ $t('trimble.identicalChip', { count: bp.summary.identical }) }}</span>
-            <span v-if="bp.order_summary && (bp.order_summary.assign > 0 || bp.order_summary.identical > 0 || bp.order_summary.other > 0 || bp.order_summary.no_constructible > 0)" style="color:#2563eb">{{ $t('trimble.orderChip', bp.order_summary) }}</span>
+            <span v-if="bp.order_summary && (bp.order_summary.assign > 0 || bp.order_summary.identical > 0 || bp.order_summary.other > 0 || bp.order_summary.no_constructible > 0 || bp.order_summary.meta_add > 0 || bp.order_summary.meta_differs > 0)" style="color:#2563eb">{{ $t('trimble.orderChip', bp.order_summary) }}</span>
             <Tag v-if="bp.blocked" severity="danger" :value="$t('trimble.blockedChip')" />
           </div>
-          <div style="max-height:320px;overflow-y:auto;border:1px solid #e5e7eb;border-radius:6px;margin-top:0.75rem;">
-            <DataTable :value="previewRows" size="small" striped-rows>
-              <Column field="design_name" :header="$t('trimble.design')" />
-              <Column field="client_order_id" :header="$t('trimble.orderId')" />
-              <Column field="batch_name" :header="$t('trimble.batch')" />
-              <Column :header="$t('trimble.statusLabel')" style="width:110px;">
-                <template #body="{ data }">
-                  <Tag :severity="data.status==='new'?'success':data.status==='kept'?'info':data.status==='changed'?'warn':data.status==='identical'?'secondary':'danger'"
-                    :value="statusLabel(data.status)" />
-                </template>
-              </Column>
-              <Column :header="$t('trimble.countLabel')" style="width:150px;">
-                <template #body="{ data }">
-                  <span v-if="data.count_requested != null">
-                    <template v-if="data.status === 'new'">{{ data.count_requested }}</template><template v-else>{{ data.count_existing }}</template>
-                    <span v-if="data.status === 'kept'" style="color:#6b7280;"> ({{ $t('trimble.keptHint', { count: data.count_requested }) }})</span>
-                  </span>
-                  <span v-else style="color:#9ca3af;">—</span>
-                </template>
-              </Column>
-              <Column :header="$t('trimble.changes')">
-                <template #body="{ data }">
-                  <span v-if="data.changed_fields?.length">{{ formatChanges(data) }}</span>
-                  <span v-else style="color:#9ca3af;">—</span>
-                </template>
-              </Column>
-            </DataTable>
+          <div style="border:1px solid #e5e7eb;border-radius:6px;margin-top:0.75rem;">
+            <SortFilterTable
+              :rows="countTableRows"
+              :columns="countColumns"
+              scrollable
+              scroll-height="320px"
+            >
+              <template #status_label="{ data }">
+                <Tag :severity="data.status==='new'?'success':data.status==='kept'?'info':data.status==='changed'?'warn':data.status==='identical'?'secondary':'danger'"
+                  :value="statusLabel(data.status)" />
+              </template>
+            </SortFilterTable>
           </div>
+          <Message v-if="metaDiffersCount > 0" severity="warn" :closable="false" size="small" style="margin-top:0.5rem;">
+            {{ $t('trimble.metaDiffersNote', { count: metaDiffersCount }) }}
+          </Message>
+          <Message v-if="previewData.client_meta_unattributed > 0" severity="warn" :closable="false" size="small" style="margin-top:0.5rem;">
+            {{ $t('trimble.metaUnattributed', { count: previewData.client_meta_unattributed }) }}
+          </Message>
           <div v-if="orderRows.length" style="font-weight:600;margin-top:0.75rem;">{{ $t('trimble.orderTitle') }}</div>
-          <div v-if="orderRows.length" style="max-height:320px;overflow-y:auto;border:1px solid #e5e7eb;border-radius:6px;margin-top:0.25rem;">
-            <DataTable :value="orderRows" size="small" striped-rows>
-              <Column field="design_name" :header="$t('trimble.design')" />
-              <Column :header="$t('trimble.orderNumber')">
-                <template #body="{ data }">
-                  <span v-if="data.order != null">{{ data.order }}</span>
-                  <span v-else style="color:#9ca3af;">—</span>
-                </template>
-              </Column>
-              <Column field="batch_name" :header="$t('trimble.batch')" />
-              <Column :header="$t('trimble.constructible')">
-                <template #body="{ data }">
-                  <span v-if="data.assembly_uuid != null">{{ data.assembly_uuid.slice(0, 8) }}</span>
-                  <span v-else style="color:#9ca3af;">—</span>
-                </template>
-              </Column>
-              <Column :header="$t('trimble.priority')">
-                <template #body="{ data }">
-                  <span v-if="data.priority != null">{{ data.priority }}</span>
-                  <span v-else style="color:#9ca3af;">—</span>
-                </template>
-              </Column>
-              <Column :header="$t('trimble.statusLabel')" style="width:140px;">
-                <template #body="{ data }">
-                  <Tag :severity="data.status==='assign'?'success':data.status==='identical'?'secondary':data.status==='other'?'warn':'danger'"
-                    :value="orderStatusLabel(data)" />
-                </template>
-              </Column>
-            </DataTable>
+          <div v-if="orderRows.length" style="border:1px solid #e5e7eb;border-radius:6px;margin-top:0.25rem;">
+            <SortFilterTable
+              :rows="orderTableRows"
+              :columns="orderColumns"
+              scrollable
+              scroll-height="320px"
+            >
+              <template #status_label="{ data }">
+                <Tag :severity="data.status==='assign'?'success':data.status==='identical'?'secondary':data.status==='other'?'warn':'danger'"
+                  :value="orderStatusLabel(data)" />
+              </template>
+              <template #meta_text="{ data }">
+                <span v-if="!data.meta?.length" style="color:#9ca3af;">—</span>
+                <div v-for="m in data.meta" :key="m.key" style="font-size:0.82rem;">
+                  <code>{{ m.key }}</code>: {{ m.proposed }}
+                  <Tag v-if="m.status === 'add'" severity="success" :value="$t('trimble.metaAdd')" size="small" />
+                  <Tag v-else-if="m.status === 'identical'" severity="secondary" :value="$t('trimble.metaIdentical')" size="small" />
+                  <Tag v-else-if="m.status === 'differs'" severity="warn" :value="$t('trimble.metaDiffers', { existing: m.existing })" size="small" />
+                </div>
+              </template>
+            </SortFilterTable>
           </div>
           <Message v-if="!canExecute" severity="secondary" :closable="false" size="small" style="margin-top:0.5rem;">
             {{ $t('trimble.nothingToPushDetail') }}
@@ -335,10 +314,12 @@
           <Message v-else severity="error" :closable="false" size="small">
             {{ $t('trimble.designsCreatePartial', { created: designCreateCreatedCount, failed: designCreateFailedCount }) }}
           </Message>
-          <DataTable v-if="designCreateFailedCount" :value="designCreateFailedRows" size="small" style="margin-top:0.5rem;">
-            <Column field="design_name" :header="$t('trimble.design')" />
-            <Column field="reason" :header="$t('trimble.reason')" />
-          </DataTable>
+          <SortFilterTable
+            v-if="designCreateFailedCount"
+            :rows="designCreateFailedRows"
+            :columns="[{ field: 'design_name', header: t('trimble.design') }, { field: 'reason', header: t('trimble.reason') }]"
+            style="margin-top:0.5rem;"
+          />
         </div>
       </template>
     </Card>
@@ -363,10 +344,12 @@
           <Message v-else severity="error" :closable="false" size="small">
             {{ $t('trimble.phasesCreatePartial', { created: phaseCreateCreatedCount, failed: phaseCreateFailedCount }) }}
           </Message>
-          <DataTable v-if="phaseCreateFailedCount" :value="phaseCreateFailedRows" size="small" style="margin-top:0.5rem;">
-            <Column field="phase" :header="$t('trimble.phase')" />
-            <Column field="reason" :header="$t('trimble.reason')" />
-          </DataTable>
+          <SortFilterTable
+            v-if="phaseCreateFailedCount"
+            :rows="phaseCreateFailedRows"
+            :columns="[{ field: 'phase', header: t('trimble.phase') }, { field: 'reason', header: t('trimble.reason') }]"
+            style="margin-top:0.5rem;"
+          />
         </div>
       </template>
     </Card>
@@ -404,13 +387,17 @@
           <span v-if="importSummary.blocked" class="chip-blocked">{{ importSummary.blocked }} {{ $t('trimble.blocked') }}</span>
           <span v-if="importSummary.error" class="chip-blocked">{{ importSummary.error }} {{ $t('trimble.errors') }}</span>
         </div>
-        <DataTable v-if="importResults.some(r => r.status === 'error' || r.status === 'blocked')"
-          :value="importResults.filter(r => r.status === 'error' || r.status === 'blocked')" size="small" style="margin-top:0.5rem;">
-          <Column field="design_name" :header="$t('trimble.design')" />
-          <Column field="client_order_id" :header="$t('trimble.orderId')" />
-          <Column field="batch" :header="$t('trimble.batch')" />
-          <Column field="reason" :header="$t('trimble.reason')" />
-        </DataTable>
+        <SortFilterTable
+          v-if="importResults.some(r => r.status === 'error' || r.status === 'blocked')"
+          :rows="importResults.filter(r => r.status === 'error' || r.status === 'blocked')"
+          :columns="[
+            { field: 'design_name', header: t('trimble.design') },
+            { field: 'client_order_id', header: t('trimble.orderId') },
+            { field: 'batch', header: t('trimble.batch') },
+            { field: 'reason', header: t('trimble.reason') },
+          ]"
+          style="margin-top:0.5rem;"
+        />
       </template>
     </Card>
   </div>
@@ -424,6 +411,7 @@ const { t } = useI18n()
 const route = useRoute()
 import { api, apiErrorMessage } from '../api.js'
 import ColumnMapper from '../components/ColumnMapper.vue'
+import SortFilterTable from '../components/SortFilterTable.vue'
 import PushGate from '../components/PushGate.vue'
 import { usePushGate } from '../composables/usePushGate.js'
 import { useImportPreview } from '../composables/useImportPreview.js'
@@ -590,14 +578,45 @@ const entityBatchGroups = computed(() => {
 
 const selectedCount = computed(() => selectedEntityIndices.value.size)
 
-// Entity table filter/sort state
-const entityFilter = ref('')
+// Entity table column filter state
 const propFilter = ref('')
 const displayProps = computed(() => {
   const q = propFilter.value.trim().toLowerCase()
   const props = q ? allSelectedProps.value.filter(p => p.toLowerCase().includes(q)) : allSelectedProps.value
   return props.slice(0, 12)
 })
+
+const entityColumns = computed(() => [
+  { field: '__select', header: '', sortable: false, filter: false, style: 'width:3rem;' },
+  ...displayProps.value.map(p => ({ field: p, header: p.split('.').pop(), style: 'min-width:120px;' })),
+])
+
+const entityRows = computed(() => previewEntities.value.map((e, i) => {
+  const row = {}
+  for (const p of displayProps.value) setNested(row, p, extractProp(e, p))
+  row.__entity = e
+  row.__index = i
+  return row
+}))
+
+const countColumns = computed(() => [
+  { field: 'design_name', header: t('trimble.design') },
+  { field: 'client_order_id', header: t('trimble.orderId') },
+  { field: 'batch_name', header: t('trimble.batch') },
+  { field: 'status_label', header: t('trimble.statusLabel'), style: 'width:110px;' },
+  { field: 'count_text', header: t('trimble.countLabel') },
+  { field: 'changes_text', header: t('trimble.changes') },
+])
+
+const orderColumns = computed(() => [
+  { field: 'design_name', header: t('trimble.design') },
+  { field: 'order', header: t('trimble.orderId') },
+  { field: 'batch_name', header: t('trimble.batch') },
+  { field: 'constructible', header: t('trimble.constructible') },
+  { field: 'priority', header: t('trimble.priority') },
+  { field: 'meta_text', header: t('trimble.clientMeta') },
+  { field: 'status_label', header: t('trimble.statusLabel'), style: 'width:140px;' },
+])
 
 const selectedEntities = computed(() =>
   previewEntities.value.filter((_, i) => selectedEntityIndices.value.has(i))
@@ -613,6 +632,7 @@ const entityIndexMap = computed(() => {
 })
 
 function entityIndex(entity) {
+  if (entity && '__index' in entity) return entity.__index
   return entityIndexMap.value.get(entity) ?? -1
 }
 
@@ -653,7 +673,11 @@ function toggleBatch(batchKey) {
 }
 
 const canExecute = computed(() =>
-  previewData.value?.batch_previews?.some(bp => !bp.blocked && (bp.summary.new > 0 || (bp.order_summary?.assign ?? 0) > 0))
+  previewData.value?.batch_previews?.some(bp => !bp.blocked && (
+    bp.summary.new > 0 ||
+    (bp.order_summary?.assign ?? 0) > 0 ||
+    (bp.order_summary?.meta_add ?? 0) > 0
+  ))
 )
 
 const orderRows = computed(() => {
@@ -665,6 +689,26 @@ const orderRows = computed(() => {
   }
   return rows
 })
+
+const countTableRows = computed(() => previewRows.value.map(r => ({
+  ...r,
+  status_label: statusLabel(r.status),
+  count_text: r.status === 'kept'
+    ? String(r.count ?? r.count_requested ?? '') + ` (${t('trimble.keptHint', { count: r.count_requested, existing: r.count_existing })})`
+    : String(r.count ?? r.count_requested ?? ''),
+  changes_text: r.changed_fields?.length ? formatChanges(r) : '',
+})))
+
+const orderTableRows = computed(() => orderRows.value.map(r => ({
+  ...r,
+  constructible: r.assembly_uuid ? r.assembly_uuid.slice(0, 8) : '',
+  status_label: orderStatusLabel(r),
+  meta_text: (r.meta || []).map(m => m.key + ': ' + m.proposed).join(' | '),
+})))
+
+const metaDiffersCount = computed(() =>
+  previewData.value?.batch_previews?.reduce((sum, bp) => sum + (bp.order_summary?.meta_differs ?? 0), 0) ?? 0
+)
 
 const { mappingWarnings, previewRows } = useImportPreview({
   t, ns: 'trimble', columnMapping, previewData,
@@ -977,6 +1021,17 @@ function onSuperprojectChange() {
 function onMappingUpdated(m) { columnMapping.value = m }
 
 function flattenEntity(e) { const f = {}; for (const p of allSelectedProps.value) f[p] = extractProp(e, p); return f }
+
+function setNested(obj, path, value) {
+  const parts = String(path).split('.')
+  let cur = obj
+  for (let i = 0; i < parts.length - 1; i++) {
+    const p = parts[i]
+    if (!cur[p] || typeof cur[p] !== 'object') cur[p] = {}
+    cur = cur[p]
+  }
+  cur[parts[parts.length - 1]] = value
+}
 
 function extractProp(entity, propPathStr) {
   if (!propPathStr) return ''

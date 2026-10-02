@@ -64,6 +64,7 @@
     <Card v-if="selectedProject" class="mb-card">
       <template #title>Batches</template>
       <template #content>
+        <!-- Plain DataTable: only the Trimble flow uses components/SortFilterTable.vue (sortable, filter per column). Switch to it if this view is ever rewritten. -->
         <DataTable :value="mergedBatches" size="small" striped-rows selection-mode="multiple" v-model:selection="selectedBatches">
           <Column selection-mode="multiple" style="width:3rem" />
           <Column field="name" :header="$t('batchManager.name')" />
@@ -133,6 +134,7 @@
           <span v-if="!projectStdlibs.length" style="color:#9ca3af;font-size:0.8rem;">No standard libraries linked to this project.</span>
         </div>
         <div v-if="previewRows.length">
+          <!-- Plain DataTable: only the Trimble flow uses components/SortFilterTable.vue (sortable, filter per column). Switch to it if this view is ever rewritten. -->
           <DataTable :value="previewRows" size="small">
             <Column field="name" :header="$t('batchManager.name')" />
             <Column field="phase" :header="$t('batchManager.phaseCol')" />
@@ -219,6 +221,7 @@
             <span style="color:#15803d;font-weight:600;">{{ countImportResults.filter(r=>r.status==='updated').length }} updated</span>
             <span style="color:#dc2626;font-weight:600;">{{ countImportResults.filter(r=>r.status==='error').length }} errors</span>
           </div>
+          <!-- Plain DataTable: only the Trimble flow uses components/SortFilterTable.vue (sortable, filter per column). Switch to it if this view is ever rewritten. -->
           <DataTable v-if="countImportResults.some(r=>r.status==='error')"
             :value="countImportResults.filter(r=>r.status==='error')" size="small">
             <Column field="design_name" :header="$t('batchManager.design')" />

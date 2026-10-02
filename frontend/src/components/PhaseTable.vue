@@ -1,5 +1,6 @@
 <template>
   <div class="phase-table">
+    <!-- Plain DataTable: only the Trimble flow uses components/SortFilterTable.vue (sortable, filter per column). Switch to it if this view is ever rewritten. -->
     <DataTable :value="flatRows" edit-mode="cell" @cell-edit-complete="onCellEdit" striped-rows size="small">
       <Column field="project_key" :header="$t('phaseTable.projectCode')" style="min-width:130px" />
       <Column field="superproject" :header="$t('phaseTable.superproject')" style="min-width:110px" />

@@ -80,3 +80,44 @@ export function summarizeOrderRows(rows: { status: OrderRowStatus }[]) {
   const n = (s: OrderRowStatus) => rows.filter((r) => r.status === s).length;
   return { assign: n("assign"), identical: n("identical"), other: n("other"), no_constructible: n("no_constructible") };
 }
+
+// client_meta on a constructible, compared per key against what the selection
+// says. Same rule as the order numbers: a key Produuzit does not have yet is
+// added ("add"), a key it has is never overwritten ("differs" is reported so a
+// person decides).
+
+export type MetaStatus = "add" | "identical" | "differs";
+
+export interface MetaRow {
+  key: string;
+  proposed: string;
+  existing: string | null;  // Produuzit's current value, null when the key is missing
+  status: MetaStatus;
+}
+
+const isBlank = (v: unknown) => v == null || (typeof v === "string" && v.trim() === "");
+const show = (v: unknown) => (typeof v === "object" ? JSON.stringify(v) : String(v).trim());
+
+export function planClientMeta(desired: Record<string, string>, existing: unknown): MetaRow[] {
+  const wanted = Object.entries(desired).map(([k, v]) => [k, String(v ?? "").trim()] as const).filter(([, v]) => v !== "");
+  // Something that is not a key-value object (a bare string, an array) cannot be
+  // merged into without replacing it, so every key counts as differing.
+  if (!isBlank(existing) && (typeof existing !== "object" || Array.isArray(existing))) {
+    return wanted.map(([key, proposed]) => ({ key, proposed, existing: show(existing), status: "differs" }));
+  }
+  const have = (existing ?? {}) as Record<string, unknown>;
+  return wanted.map(([key, proposed]) => {
+    const cur = have[key];
+    if (isBlank(cur)) return { key, proposed, existing: null, status: "add" };
+    return { key, proposed, existing: show(cur), status: show(cur) === proposed ? "identical" : "differs" };
+  });
+}
+
+// The client_meta to PATCH: Produuzit's own object with the "add" keys laid on
+// top, so keys from other sources survive whether Produuzit merges or replaces.
+// Null when there is nothing to add.
+export function clientMetaToWrite(rows: MetaRow[], existing: unknown): Record<string, unknown> | null {
+  const adds = rows.filter((r) => r.status === "add");
+  if (!adds.length) return null;
+  return { ...((existing ?? {}) as Record<string, unknown>), ...Object.fromEntries(adds.map((r) => [r.key, r.proposed])) };
+}

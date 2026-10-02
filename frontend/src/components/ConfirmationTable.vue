@@ -1,5 +1,6 @@
 <template>
   <div class="confirmation-table">
+    <!-- Plain DataTable: only the Trimble flow uses components/SortFilterTable.vue (sortable, filter per column). Switch to it if this view is ever rewritten. -->
     <DataTable :value="rows" :row-class="rowClass" striped-rows size="small">
       <Column v-for="col in columns" :key="col.field" :field="col.field" :header="col.header" />
       <Column :field="statusField" :header="$t('confirmationTable.status')">
