@@ -156,8 +156,10 @@ async function getFolderAcl(folderId: string): Promise<{ acl: Acl; inheritance: 
         inheritance: typeof raw.inheritance === 'boolean' ? raw.inheritance : null,
       };
     }
-  } catch {
-    /* no explicit ACL yet */
+  } catch (e) {
+    // Only a 404 means "no explicit ACL yet". Any other failure has to stop the
+    // write: merging into an ACL we could not read would drop every grant on it.
+    if (!/: 404$/.test(errMsg(e))) throw e;
   }
   return { acl: {}, inheritance: null };
 }
