@@ -667,6 +667,59 @@ export async function trimblePost(url: string, body: unknown): Promise<unknown> 
   }
 }
 
+// PATCH/DELETE are needed for the group + folder-permission endpoints (Core API
+// v2). Same auth/refresh/event-log shape as trimblePost, but tolerant of empty
+// (204) responses, which those endpoints return.
+async function trimbleWrite(method: "PATCH" | "DELETE", url: string, body?: unknown): Promise<unknown> {
+  const slot = current();
+  const h: Record<string, string> = {};
+  if (body !== undefined) h["Content-Type"] = "application/json";
+  if (slot.access) h.Authorization = `Bearer ${slot.access}`;
+  const started = Date.now();
+
+  try {
+    const init = (): RequestInit => ({
+      method,
+      headers: h,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+    let res = await fetch(url, init());
+    if (res.status === 401 && slot.refresh) {
+      const refreshed = await refreshAccessToken(slot);
+      if (refreshed) {
+        h.Authorization = `Bearer ${refreshed}`;
+        res = await fetch(url, init());
+      }
+    }
+    if (!res.ok) {
+      const detail = await res.text().catch(() => "");
+      recordEvent({ category: "trimble", level: "error", summary: `${method} ${url}`, detail: `${res.status} · ${Date.now() - started}ms` });
+      throw new Error(`Trimble ${method} ${url}: ${res.status}${detail ? ` ${detail.slice(0, 200)}` : ""}`);
+    }
+    const text = await res.text();
+    recordEvent({ category: "trimble", level: "info", summary: `${method} ${url}`, detail: `${res.status} · ${Date.now() - started}ms` });
+    if (!text) return null;
+    try {
+      return JSON.parse(text) as unknown;
+    } catch {
+      return text;
+    }
+  } catch (e) {
+    if (e instanceof Error && !e.message.startsWith(`Trimble ${method}`)) {
+      recordEvent({ category: "trimble", level: "error", summary: `${method} ${url}`, detail: e.message });
+    }
+    throw e;
+  }
+}
+
+export function trimblePatch(url: string, body: unknown): Promise<unknown> {
+  return trimbleWrite("PATCH", url, body);
+}
+
+export function trimbleDelete(url: string, body?: unknown): Promise<unknown> {
+  return trimbleWrite("DELETE", url, body);
+}
+
 export async function fetchAllTrimblePages(
   url: string,
   pageSize = 1000,

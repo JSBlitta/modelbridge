@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import * as db from "../db.ts";
 import { getRedactedSettings, saveSettings } from "../settings.ts";
 import { requireAdmin } from "../middleware/session.ts";
+import groupPresets from "./group-presets.ts";
 
 // Admin-only API. The session cookie identifies the user; an admin is a session
 // whose username is in the `admin_usernames` setting. Everything else in the
@@ -11,6 +12,9 @@ const app = new Hono();
 
 // requireSession has already run app-wide; this only adds the admin check.
 app.use("*", requireAdmin);
+
+// Group-preset management and application — admin only, like everything here.
+app.route("/group-presets", groupPresets);
 
 // --- Settings ---
 

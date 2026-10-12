@@ -3,6 +3,8 @@ import { dirname, resolve } from "node:path";
 import { existsSync, mkdirSync } from "node:fs";
 import { env } from "./env.ts";
 import { logger } from "./logger.ts";
+import { normalizeLevel } from "./lib/group-preset-rules.ts";
+import type { MatchType, PermissionLevel } from "./lib/group-preset-rules.ts";
 
 const DB_PATH = resolve(process.cwd(), env.DB_PATH);
 let _db: Database.Database | null = null;
@@ -168,6 +170,48 @@ function createSchema(d: Database.Database): void {
       updated_at TEXT NOT NULL
     )
   `);
+  // --- Group presets: reusable templates for defining Trimble user groups
+  // and folder permissions in a project (admin page only). ---
+  d.exec(`
+    CREATE TABLE IF NOT EXISTS group_presets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL UNIQUE,
+      description TEXT NOT NULL DEFAULT '',
+      default_permission TEXT NOT NULL DEFAULT 'READ',
+      apply_permissions_default INTEGER NOT NULL DEFAULT 1,
+      auto_invite_default INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    )
+  `);
+  d.exec(`
+    CREATE TABLE IF NOT EXISTS group_preset_groups (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      preset_id INTEGER NOT NULL,
+      name TEXT NOT NULL,
+      position INTEGER NOT NULL DEFAULT 0
+    )
+  `);
+  d.exec(`
+    CREATE TABLE IF NOT EXISTS group_preset_members (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      group_id INTEGER NOT NULL,
+      email TEXT NOT NULL,
+      auto_invite INTEGER,
+      role TEXT NOT NULL DEFAULT 'USER',
+      position INTEGER NOT NULL DEFAULT 0
+    )
+  `);
+  d.exec(`
+    CREATE TABLE IF NOT EXISTS group_preset_rules (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      group_id INTEGER NOT NULL,
+      match_type TEXT NOT NULL DEFAULT 'PATH',
+      pattern TEXT NOT NULL,
+      level TEXT,
+      position INTEGER NOT NULL DEFAULT 0
+    )
+  `);
   ensureEventsTable();
   d.exec(`
     CREATE INDEX IF NOT EXISTS idx_sessions_expires ON sessions(expires_at);
@@ -178,6 +222,9 @@ function createSchema(d: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_trimble_models_project ON trimble_models(project_id);
     CREATE INDEX IF NOT EXISTS idx_trimble_libraries_project ON trimble_libraries(project_id);
     CREATE INDEX IF NOT EXISTS idx_trimble_model_libraries_project ON trimble_model_libraries(project_id);
+    CREATE INDEX IF NOT EXISTS idx_group_preset_groups_preset ON group_preset_groups(preset_id);
+    CREATE INDEX IF NOT EXISTS idx_group_preset_members_group ON group_preset_members(group_id);
+    CREATE INDEX IF NOT EXISTS idx_group_preset_rules_group ON group_preset_rules(group_id);
   `);
 }
 
@@ -809,4 +856,216 @@ export function getTrimbleCacheStats(): TrimbleCacheStats {
     if (t) stamps.push(t);
   }
   return { ...counts, last_refreshed_at: stamps.sort().at(-1) ?? null };
+}
+
+// --- Group presets ---------------------------------------------------------
+//
+// A preset is a reusable template: one or more Trimble user groups, each with
+// members (e-mail addresses) and folder permission rules. Presets are stored
+// locally and applied to a Trimble project from the admin page.
+
+export interface GroupPresetMemberInput {
+  email: string;
+  /** null/undefined = inherit the preset default at apply time. */
+  auto_invite?: boolean | null;
+  role?: 'USER' | 'ADMIN';
+}
+
+export interface GroupPresetRuleInput {
+  match_type?: MatchType;
+  pattern: string;
+  /** null/undefined = inherit the preset default permission. */
+  level?: PermissionLevel | null;
+}
+
+export interface GroupPresetGroupInput {
+  name: string;
+  members?: GroupPresetMemberInput[];
+  rules?: GroupPresetRuleInput[];
+}
+
+export interface GroupPresetInput {
+  name: string;
+  description?: string;
+  default_permission?: PermissionLevel;
+  apply_permissions_default?: boolean;
+  auto_invite_default?: boolean;
+  groups?: GroupPresetGroupInput[];
+}
+
+export interface GroupPresetMember {
+  email: string;
+  auto_invite: boolean | null;
+  role: 'USER' | 'ADMIN';
+}
+
+export interface GroupPresetRule {
+  match_type: MatchType;
+  pattern: string;
+  level: PermissionLevel | null;
+}
+
+export interface GroupPresetGroup {
+  name: string;
+  members: GroupPresetMember[];
+  rules: GroupPresetRule[];
+}
+
+export interface GroupPreset {
+  id: number;
+  name: string;
+  description: string;
+  default_permission: PermissionLevel;
+  apply_permissions_default: boolean;
+  auto_invite_default: boolean;
+  groups: GroupPresetGroup[];
+}
+
+function rowToGroupPreset(row: Record<string, unknown>): GroupPreset {
+  const id = row.id as number;
+  const groupRows = prep(
+    "SELECT * FROM group_preset_groups WHERE preset_id = ? ORDER BY position, id",
+  ).all(id) as Record<string, unknown>[];
+
+  const groups: GroupPresetGroup[] = groupRows.map((g) => {
+    const gid = g.id as number;
+    const members = (prep(
+      "SELECT email, auto_invite, role FROM group_preset_members WHERE group_id = ? ORDER BY position, id",
+    ).all(gid) as Record<string, unknown>[]).map((m) => ({
+      email: String(m.email),
+      auto_invite:
+        m.auto_invite === null || m.auto_invite === undefined ? null : Boolean(m.auto_invite),
+      role: (String(m.role).toUpperCase() === "ADMIN" ? "ADMIN" : "USER") as 'USER' | 'ADMIN',
+    }));
+    const rules = (prep(
+      "SELECT match_type, pattern, level FROM group_preset_rules WHERE group_id = ? ORDER BY position, id",
+    ).all(gid) as Record<string, unknown>[]).map((r) => ({
+      match_type: (String(r.match_type).toUpperCase() === "REGEX" ? "REGEX" : "PATH") as MatchType,
+      pattern: String(r.pattern),
+      level: r.level === null || r.level === undefined ? null : normalizeLevel(r.level),
+    }));
+    return { name: String(g.name), members, rules };
+  });
+
+  return {
+    id,
+    name: String(row.name),
+    description: String(row.description ?? ""),
+    default_permission: normalizeLevel(row.default_permission ?? "READ"),
+    apply_permissions_default: Boolean(row.apply_permissions_default),
+    auto_invite_default: Boolean(row.auto_invite_default),
+    groups,
+  };
+}
+
+export function listGroupPresets(): GroupPreset[] {
+  const rows = prep("SELECT * FROM group_presets ORDER BY name").all() as Record<string, unknown>[];
+  return rows.map(rowToGroupPreset);
+}
+
+export function getGroupPreset(id: number): GroupPreset | null {
+  const row = prep("SELECT * FROM group_presets WHERE id = ?").get(id) as
+    | Record<string, unknown>
+    | undefined;
+  return row ? rowToGroupPreset(row) : null;
+}
+
+function replacePresetChildren(
+  d: Database.Database,
+  presetId: number,
+  groups: GroupPresetGroupInput[],
+): void {
+  d.prepare(
+    "DELETE FROM group_preset_members WHERE group_id IN (SELECT id FROM group_preset_groups WHERE preset_id = ?)",
+  ).run(presetId);
+  d.prepare(
+    "DELETE FROM group_preset_rules WHERE group_id IN (SELECT id FROM group_preset_groups WHERE preset_id = ?)",
+  ).run(presetId);
+  d.prepare("DELETE FROM group_preset_groups WHERE preset_id = ?").run(presetId);
+
+  const insGroup = d.prepare(
+    "INSERT INTO group_preset_groups (preset_id, name, position) VALUES (?, ?, ?)",
+  );
+  const insMember = d.prepare(
+    "INSERT INTO group_preset_members (group_id, email, auto_invite, role, position) VALUES (?, ?, ?, ?, ?)",
+  );
+  const insRule = d.prepare(
+    "INSERT INTO group_preset_rules (group_id, match_type, pattern, level, position) VALUES (?, ?, ?, ?, ?)",
+  );
+
+  groups.forEach((g, gi) => {
+    const info = insGroup.run(presetId, g.name, gi);
+    const gid = Number(info.lastInsertRowid);
+    (g.members ?? []).forEach((m, mi) => {
+      const auto = m.auto_invite === null || m.auto_invite === undefined ? null : m.auto_invite ? 1 : 0;
+      insMember.run(gid, String(m.email).trim(), auto, m.role === "ADMIN" ? "ADMIN" : "USER", mi);
+    });
+    (g.rules ?? []).forEach((r, ri) => {
+      insRule.run(gid, r.match_type === "REGEX" ? "REGEX" : "PATH", r.pattern, r.level ?? null, ri);
+    });
+  });
+}
+
+export function createGroupPreset(input: GroupPresetInput): number {
+  const d = db();
+  const now = new Date().toISOString();
+  const tx = d.transaction((): number => {
+    const info = d
+      .prepare(
+        `INSERT INTO group_presets
+           (name, description, default_permission, apply_permissions_default, auto_invite_default, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        input.name.trim(),
+        input.description ?? "",
+        input.default_permission ?? "READ",
+        input.apply_permissions_default === false ? 0 : 1,
+        input.auto_invite_default === false ? 0 : 1,
+        now,
+        now,
+      );
+    const id = Number(info.lastInsertRowid);
+    replacePresetChildren(d, id, input.groups ?? []);
+    return id;
+  });
+  return tx();
+}
+
+export function updateGroupPreset(id: number, input: GroupPresetInput): void {
+  const d = db();
+  const now = new Date().toISOString();
+  const tx = d.transaction((): void => {
+    d.prepare(
+      `UPDATE group_presets
+         SET name = ?, description = ?, default_permission = ?,
+             apply_permissions_default = ?, auto_invite_default = ?, updated_at = ?
+       WHERE id = ?`,
+    ).run(
+      input.name.trim(),
+      input.description ?? "",
+      input.default_permission ?? "READ",
+      input.apply_permissions_default === false ? 0 : 1,
+      input.auto_invite_default === false ? 0 : 1,
+      now,
+      id,
+    );
+    replacePresetChildren(d, id, input.groups ?? []);
+  });
+  tx();
+}
+
+export function deleteGroupPreset(id: number): void {
+  const d = db();
+  const tx = d.transaction((): void => {
+    d.prepare(
+      "DELETE FROM group_preset_members WHERE group_id IN (SELECT id FROM group_preset_groups WHERE preset_id = ?)",
+    ).run(id);
+    d.prepare(
+      "DELETE FROM group_preset_rules WHERE group_id IN (SELECT id FROM group_preset_groups WHERE preset_id = ?)",
+    ).run(id);
+    d.prepare("DELETE FROM group_preset_groups WHERE preset_id = ?").run(id);
+    d.prepare("DELETE FROM group_presets WHERE id = ?").run(id);
+  });
+  tx();
 }
