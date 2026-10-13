@@ -12,7 +12,7 @@
 
     <!-- 2. CONFIRM + 3. PUSH — only exist once a check has been run for the
          current inputs. Change any input and this whole block disappears. -->
-    <div v-if="gate.checked" class="push-gate__confirm">
+    <div v-if="gate.checked && showPush" class="push-gate__confirm">
       <div class="push-gate__row">
         <Checkbox v-model="gate.confirmed" :binary="true" :input-id="confirmId" />
         <label :for="confirmId" class="push-gate__label">{{ confirmLabel }}</label>
@@ -53,6 +53,8 @@ defineProps({
   pushIcon: { type: String, default: 'pi pi-cloud-upload' },
   severity: { type: String, default: 'warning' },
   showCheck: { type: Boolean, default: true },
+  // False when a check found nothing to push: there is nothing to confirm.
+  showPush: { type: Boolean, default: true },
   checkDisabled: { type: Boolean, default: false },
 })
 

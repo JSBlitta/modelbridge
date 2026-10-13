@@ -10,7 +10,25 @@
     </Message>
 
     <template v-else>
-      <Card class="mb-card">
+      <div class="admin-tabs" role="tablist">
+        <button
+          v-for="x in tabs"
+          :key="x"
+          type="button"
+          role="tab"
+          class="admin-tab"
+          :class="{ active: tab === x }"
+          :aria-selected="tab === x"
+          :data-test="`tab-${x}`"
+          @click="setTab(x)">
+          {{ $t(x === 'groups' ? 'admin.tabGroupPresets' : 'admin.tabSettings') }}
+        </button>
+      </div>
+
+      <!-- Mounted on first visit, then kept: switching tabs loses no unsaved edit. -->
+      <KeepAlive><GroupPresets v-if="tab === 'groups'" /></KeepAlive>
+
+      <Card v-show="tab === 'settings'" class="mb-card">
         <template #title>{{ $t('admin.settings') }}</template>
         <template #content>
           <div class="field">
@@ -62,7 +80,7 @@
         </template>
       </Card>
 
-      <Card class="mb-card">
+      <Card v-show="tab === 'settings'" class="mb-card">
         <template #title>{{ $t('admin.trimbleCache') }}</template>
         <template #content>
           <p class="cache-hint">{{ $t('admin.trimbleCacheHint') }}</p>
@@ -82,7 +100,7 @@
         </template>
       </Card>
 
-      <Card>
+      <Card v-show="tab === 'settings'">
         <template #title>{{ $t('admin.schedule') }}</template>
         <template #content>
           <table class="schedule-table">
@@ -124,13 +142,22 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute, useRouter } from 'vue-router'
 import { api } from '../api.js'
 import { useNotifications } from '../composables/useNotifications.js'
+import GroupPresets from '../components/GroupPresets.vue'
 
 const { t } = useI18n()
 const { notify } = useNotifications()
+
+// The tab lives in the URL (/admin?tab=groups) so a reload stays where it was.
+const route = useRoute()
+const router = useRouter()
+const tabs = ['settings', 'groups']
+const tab = computed(() => (route.query.tab === 'groups' ? 'groups' : 'settings'))
+const setTab = (x) => router.replace({ query: x === 'groups' ? { tab: x } : {} })
 
 const forbidden = ref(false)
 const adminsText = ref('')
@@ -280,6 +307,10 @@ async function saveSchedule() {
 .page-header { margin-bottom: 1.25rem; }
 .page-title { margin: 0; }
 .page-subtitle { color: #6b7280; font-size: 0.9rem; margin-top: 0.25rem; }
+.admin-tabs { display: flex; gap: 0.25rem; border-bottom: 1px solid #e5e7eb; margin-bottom: 1rem; }
+.admin-tab { background: none; border: 0; border-bottom: 2px solid transparent; padding: 0.5rem 0.9rem; font: inherit; font-weight: 600; color: #6b7280; cursor: pointer; }
+.admin-tab.active { color: #111827; border-bottom-color: #e40520; }
+.admin-tab:focus-visible { outline: 2px solid #6366f1; outline-offset: -2px; }
 .mb-card { margin-bottom: 1rem; }
 .section-title { font-size: 0.9rem; font-weight: 600; color: #4b5563; margin: 1rem 0 0.5rem; }
 .field { margin-bottom: 0.75rem; }
