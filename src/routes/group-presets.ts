@@ -5,8 +5,9 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import * as db from '../db.ts';
 import type { GroupPreset, GroupPresetInput } from '../db.ts';
-import { applyPreset, fetchFolderTree, previewPreset } from '../group-presets.ts';
+import { buildPlan, executePlan, fetchFolderTree, planGateInput } from '../group-presets.ts';
 import type { PermissionLevel } from '../lib/group-preset-rules.ts';
+import { GATE, issuePreviewToken, requirePreviewToken } from '../lib/push-gate.ts';
 import { runAsUser } from '../trimble-client.ts';
 
 const app = new Hono();
@@ -35,14 +36,24 @@ const groupSchema = z.object({
   rules: z.array(ruleSchema).optional(),
 });
 
-const presetSchema = z.object({
-  name: z.string().min(1).max(200),
-  description: z.string().max(2000).optional(),
-  default_permission: level.optional(),
-  apply_permissions_default: z.boolean().optional(),
-  auto_invite_default: z.boolean().optional(),
-  groups: z.array(groupSchema).optional(),
-});
+const presetSchema = z
+  .object({
+    name: z.string().min(1).max(200),
+    description: z.string().max(2000).optional(),
+    default_permission: level.optional(),
+    apply_permissions_default: z.boolean().optional(),
+    auto_invite_default: z.boolean().optional(),
+    groups: z.array(groupSchema).optional(),
+  })
+  // Groups are found in Trimble by name. Two with one name would be created
+  // twice on the first apply and reused as one on the next.
+  .refine(
+    (p) => {
+      const names = (p.groups ?? []).map((g) => g.name.trim().toLowerCase());
+      return new Set(names).size === names.length;
+    },
+    { message: 'Group names must be unique within a preset' },
+  );
 
 const runSchema = z.object({
   project_id: z.string().min(1),
@@ -50,8 +61,14 @@ const runSchema = z.object({
   preset: presetSchema.optional(),
   apply_permissions: z.boolean().optional(),
   auto_invite: z.boolean().optional(),
-  replace_acl: z.boolean().optional(),
+  preview_token: z.string().optional(),
 });
+
+/** A zod error as one line instead of its JSON dump. */
+function msg(e: unknown): string {
+  if (e instanceof z.ZodError) return e.issues.map((i) => [i.path.join('.'), i.message].filter(Boolean).join(': ')).join('; ');
+  return e instanceof Error ? e.message : String(e);
+}
 
 function parsePreset(body: unknown): GroupPresetInput {
   return presetSchema.parse(body) as GroupPresetInput;
@@ -95,7 +112,7 @@ app.post('/', async (c) => {
     const id = db.createGroupPreset(input);
     return c.json({ ok: true, id });
   } catch (e) {
-    return c.json({ error: e instanceof Error ? e.message : String(e) }, 400);
+    return c.json({ error: msg(e) }, 400);
   }
 });
 
@@ -107,7 +124,7 @@ app.put('/:id', async (c) => {
     db.updateGroupPreset(id, input);
     return c.json({ ok: true, id });
   } catch (e) {
-    return c.json({ error: e instanceof Error ? e.message : String(e) }, 400);
+    return c.json({ error: msg(e) }, 400);
   }
 });
 
@@ -126,29 +143,42 @@ app.get('/projects/:projectId/folders', async (c) => {
   try {
     return c.json(await fetchFolderTree(c.req.param('projectId')));
   } catch (e) {
-    return c.json({ error: e instanceof Error ? e.message : String(e) }, 502);
+    return c.json({ error: msg(e) }, 502);
   }
 });
 
-// --- Preview & apply ---
+// --- Check & apply ---
+//
+// Same contract as the Produuzit pushes (lib/push-gate.ts): the check hands out
+// a single-use token, the apply refuses to run without it. Here the token is
+// bound to the plan itself, so it also stops an apply when the project changed
+// in Trimble after the check.
+
+async function planFor(body: z.infer<typeof runSchema>, preset: GroupPreset) {
+  return buildPlan(body.project_id, preset, {
+    applyPermissions: body.apply_permissions ?? preset.apply_permissions_default,
+    autoInvite: body.auto_invite ?? preset.auto_invite_default,
+  });
+}
 
 app.post('/preview', async (c) => {
   let body: z.infer<typeof runSchema>;
   try {
     body = runSchema.parse(await c.req.json());
   } catch (e) {
-    return c.json({ error: e instanceof Error ? e.message : String(e) }, 400);
+    return c.json({ error: msg(e) }, 400);
   }
   const preset = presetFromRun(body);
   if (!preset) return c.json({ error: 'Unknown preset' }, 404);
   try {
-    const resolution = await previewPreset(body.project_id, preset, {
-      applyPermissions: body.apply_permissions ?? preset.apply_permissions_default,
-      autoInvite: body.auto_invite ?? preset.auto_invite_default,
-    });
-    return c.json(resolution);
+    const plan = await planFor(body, preset);
+    // No token while something blocks: the apply cannot be reached.
+    const preview_token = plan.blockers.length
+      ? undefined
+      : issuePreviewToken(GATE.groupPresetApply, planGateInput(plan));
+    return c.json({ ...plan, preview_token });
   } catch (e) {
-    return c.json({ error: e instanceof Error ? e.message : String(e) }, 502);
+    return c.json({ error: msg(e) }, 502);
   }
 });
 
@@ -157,19 +187,21 @@ app.post('/apply', async (c) => {
   try {
     body = runSchema.parse(await c.req.json());
   } catch (e) {
-    return c.json({ error: e instanceof Error ? e.message : String(e) }, 400);
+    return c.json({ error: msg(e) }, 400);
   }
   const preset = presetFromRun(body);
   if (!preset) return c.json({ error: 'Unknown preset' }, 404);
   try {
-    const report = await applyPreset(body.project_id, preset, {
-      applyPermissions: body.apply_permissions ?? preset.apply_permissions_default,
-      autoInvite: body.auto_invite ?? preset.auto_invite_default,
-      replaceAcl: body.replace_acl ?? false,
-    });
-    return c.json(report);
+    // Reads only up to here; the first write happens in executePlan.
+    const plan = await planFor(body, preset);
+    if (plan.blockers.length) {
+      return c.json({ error: 'The check found problems. Resolve them and run the check again.', code: 'PREVIEW_REQUIRED' }, 409);
+    }
+    const blocked = requirePreviewToken(c, GATE.groupPresetApply, body.preview_token, planGateInput(plan));
+    if (blocked) return blocked;
+    return c.json(await executePlan(plan, preset.name));
   } catch (e) {
-    return c.json({ error: e instanceof Error ? e.message : String(e) }, 502);
+    return c.json({ error: msg(e) }, 502);
   }
 });
 

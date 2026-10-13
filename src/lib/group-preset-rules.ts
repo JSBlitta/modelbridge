@@ -16,6 +16,11 @@ export const PERMISSION_LEVELS: readonly PermissionLevel[] = ['READ', 'FULL_ACCE
 /** The Trimble Core API pseudo-subject that means "every project member". */
 export const ALL_MEMBERS_SUBJECT = 'tc-groups:*';
 
+/** How a user group is named in a folder ACL (Core API: `tc-groups:<groupId>`). */
+export function groupSubject(groupId: string): string {
+  return `tc-groups:${groupId}`;
+}
+
 export interface FolderRef {
   id: string;
   name: string;
@@ -89,17 +94,6 @@ export function normalizeAcl(input: unknown): Acl {
   return pruneEmpty(out);
 }
 
-/** Build an ACL from scratch: later assignments win, one level per subject. */
-export function aclFromAssignments(assignments: Assignment[]): Acl {
-  const out: Acl = {};
-  for (const { subjectId, level } of assignments) {
-    const id = String(subjectId ?? '').trim();
-    if (!id) continue;
-    moveSubject(out, id, level);
-  }
-  return pruneEmpty(out);
-}
-
 /** Merge assignments into an existing ACL, leaving untouched subjects as-is. */
 export function mergeAssignments(current: Acl, assignments: Assignment[]): Acl {
   const out = normalizeAcl(current);
@@ -109,6 +103,18 @@ export function mergeAssignments(current: Acl, assignments: Assignment[]): Acl {
     moveSubject(out, id, level);
   }
   return pruneEmpty(out);
+}
+
+/** The subjects of one level, sorted: Trimble does not promise an order. */
+export function subjectsAt(acl: Acl, level: PermissionLevel): string[] {
+  return [...(acl[level] ?? [])].sort();
+}
+
+/** Same subjects at the same levels, in any order. */
+export function sameAcl(a: Acl, b: Acl): boolean {
+  return PERMISSION_LEVELS.every(
+    (level) => subjectsAt(a, level).join('\n') === subjectsAt(b, level).join('\n'),
+  );
 }
 
 function moveSubject(acl: Acl, id: string, level: PermissionLevel): void {

@@ -605,10 +605,14 @@ function refreshAccessToken(slot: TrimbleTokens): Promise<string | null> {
   return slot.refreshing;
 }
 
-export async function trimbleGet(url: string, params?: Record<string, string>): Promise<unknown> {
+export async function trimbleGet(
+  url: string,
+  params?: Record<string, string>,
+  headers?: Record<string, string>,
+): Promise<unknown> {
   const qs = params ? `?${new URLSearchParams(params)}` : "";
   const slot = current();
-  const h: Record<string, string> = {};
+  const h: Record<string, string> = { ...headers };
   if (slot.access) h.Authorization = `Bearer ${slot.access}`;
   const started = Date.now();
 
@@ -636,41 +640,10 @@ export async function trimbleGet(url: string, params?: Record<string, string>): 
   }
 }
 
-export async function trimblePost(url: string, body: unknown): Promise<unknown> {
-  const slot = current();
-  const h: Record<string, string> = { "Content-Type": "application/json" };
-  if (slot.access) h.Authorization = `Bearer ${slot.access}`;
-  const started = Date.now();
-
-  try {
-    const init = (): RequestInit => ({ method: "POST", headers: h, body: JSON.stringify(body) });
-    let res = await fetch(url, init());
-    if (res.status === 401 && slot.refresh) {
-      const refreshed = await refreshAccessToken(slot);
-      if (refreshed) {
-        h.Authorization = `Bearer ${refreshed}`;
-        res = await fetch(url, init());
-      }
-    }
-    if (!res.ok) {
-      recordEvent({ category: "trimble", level: "error", summary: `POST ${url}`, detail: `${res.status} · ${Date.now() - started}ms` });
-      throw new Error(`Trimble POST ${url}: ${res.status}`);
-    }
-    const json = await res.json();
-    recordEvent({ category: "trimble", level: "info", summary: `POST ${url}`, detail: `${res.status} · ${Date.now() - started}ms` });
-    return json;
-  } catch (e) {
-    if (e instanceof Error && !e.message.startsWith("Trimble POST")) {
-      recordEvent({ category: "trimble", level: "error", summary: `POST ${url}`, detail: e.message });
-    }
-    throw e;
-  }
-}
-
-// PATCH/DELETE are needed for the group + folder-permission endpoints (Core API
-// v2). Same auth/refresh/event-log shape as trimblePost, but tolerant of empty
-// (204) responses, which those endpoints return.
-async function trimbleWrite(method: "PATCH" | "DELETE", url: string, body?: unknown): Promise<unknown> {
+// Writes to the Core API v2 (groups, members, folder permissions). Same
+// auth/refresh/event-log shape as trimbleGet. A success with an empty body (204)
+// is not an error: it returns null.
+async function trimbleWrite(method: "POST" | "PATCH", url: string, body?: unknown): Promise<unknown> {
   const slot = current();
   const h: Record<string, string> = {};
   if (body !== undefined) h["Content-Type"] = "application/json";
@@ -712,12 +685,12 @@ async function trimbleWrite(method: "PATCH" | "DELETE", url: string, body?: unkn
   }
 }
 
-export function trimblePatch(url: string, body: unknown): Promise<unknown> {
-  return trimbleWrite("PATCH", url, body);
+export function trimblePost(url: string, body: unknown): Promise<unknown> {
+  return trimbleWrite("POST", url, body);
 }
 
-export function trimbleDelete(url: string, body?: unknown): Promise<unknown> {
-  return trimbleWrite("DELETE", url, body);
+export function trimblePatch(url: string, body: unknown): Promise<unknown> {
+  return trimbleWrite("PATCH", url, body);
 }
 
 export async function fetchAllTrimblePages(

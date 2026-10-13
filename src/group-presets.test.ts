@@ -1,12 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  aclFromAssignments,
   expandTokens,
+  groupSubject,
   matchFolders,
   mergeAssignments,
   normalizeAcl,
   normalizeLevel,
+  sameAcl,
   type FolderRef,
 } from "./lib/group-preset-rules.ts";
 
@@ -79,10 +80,10 @@ test("mergeAssignments moves a subject between levels and keeps others", () => {
   assert.deepEqual(merged, { READ: ["old"], FULL_ACCESS: ["u2", "u1"] });
 });
 
-test("aclFromAssignments ignores the previous ACL (replace mode)", () => {
-  const acl = aclFromAssignments([
-    { subjectId: "u1", level: "FULL_ACCESS" },
-    { subjectId: "u1", level: "READ" },
-  ]);
-  assert.deepEqual(acl, { READ: ["u1"] });
+test("sameAcl ignores order and empty levels, not levels or subjects", () => {
+  const acl = { READ: ["a", "b"], FULL_ACCESS: [groupSubject("g1")] };
+  assert.equal(groupSubject("g1"), "tc-groups:g1");
+  assert.ok(sameAcl(acl, { FULL_ACCESS: ["tc-groups:g1"], READ: ["b", "a"], NO_ACCESS: [] }));
+  assert.ok(!sameAcl(acl, { READ: ["a"], FULL_ACCESS: ["tc-groups:g1"] }));
+  assert.ok(!sameAcl(acl, { READ: ["a", "b", "tc-groups:g1"] }));
 });

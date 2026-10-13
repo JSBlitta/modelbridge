@@ -23,6 +23,7 @@ export const GATE = {
   trimbleImport: "trimble:import",
   assemblyImport: "assembly:import",
   batchCreate: "batch:create",
+  groupPresetApply: "group-preset:apply",
 } as const;
 
 export type GateScope = (typeof GATE)[keyof typeof GATE];
