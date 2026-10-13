@@ -1,0 +1,5 @@
+include:
+  - component: gitlab.rootweave.link/vibes/codemap-ci/codemap@1.0.0
+    inputs:
+      stage: test
+      post_mr_comment: true
