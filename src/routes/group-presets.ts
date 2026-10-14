@@ -134,10 +134,7 @@ app.delete('/:id', (c) => {
 });
 
 // --- Project helpers (for the apply panel) ---
-
-app.get('/projects', (c) => {
-  return c.json(db.getTrimbleProjects().map((p) => ({ project_id: p.project_id, name: p.name })));
-});
+// The project list comes from /api/trimble/projects, the import page's own route.
 
 app.get('/projects/:projectId/folders', async (c) => {
   try {

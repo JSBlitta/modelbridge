@@ -109,6 +109,12 @@
       <template #content>
         <p class="text-dim">{{ $t('groupPresets.applyHint') }}</p>
 
+        <!-- The same Trimble connection as the import page; connecting here comes back here. -->
+        <Message v-if="connected === false || needsLogin(gate.error)" severity="warn" :closable="false" data-test="connect">
+          {{ $t('groupPresets.notConnected') }}
+          <Button :label="$t('trimble.openLogin')" icon="pi pi-external-link" size="small" text :loading="connecting" data-test="connect-button" @click="connect" />
+        </Message>
+
         <Message v-if="!draft?.id || dirty" severity="info" :closable="false" size="small">
           {{ $t('groupPresets.saveFirst') }}
         </Message>
@@ -121,12 +127,12 @@
                 input-id="gp-project"
                 :options="projects"
                 option-label="name"
-                option-value="project_id"
+                option-value="id"
                 filter
                 :placeholder="$t('groupPresets.chooseProject')"
                 class="wide"
                 data-test="project-select" />
-              <p v-if="projectsLoaded && !projects.length" class="text-dim">{{ $t('groupPresets.noProjects') }}</p>
+              <p v-if="projectsListed && !projects.length" class="text-dim">{{ $t('groupPresets.noProjects') }}</p>
             </div>
           </div>
           <div class="checkbox-row">
@@ -146,7 +152,6 @@
             :confirm-label="$t('groupPresets.confirm', { project: plan?.project_name ?? '', count: plan?.changes ?? 0 })"
             :push-label="$t('groupPresets.apply')"
             push-icon="pi pi-users" />
-          <p v-if="/: 401/.test(gate.error)" class="text-dim">{{ $t('groupPresets.notConnected') }}</p>
         </template>
 
         <!-- The plan: what an apply would do, as read from Trimble just now. -->
@@ -228,7 +233,7 @@
 import { computed, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useConfirm } from 'primevue/useconfirm'
-import { api } from '../api.js'
+import { api, apiErrorMessage } from '../api.js'
 import { useNotifications } from '../composables/useNotifications.js'
 import { usePushGate } from '../composables/usePushGate.js'
 import PushGate from './PushGate.vue'
@@ -359,7 +364,9 @@ function removePreset() {
 // --- Apply -----------------------------------------------------------------
 
 const projects = ref([])
-const projectsLoaded = ref(false)
+const projectsListed = ref(false) // Trimble answered the list, possibly empty
+const connected = ref(null)
+const connecting = ref(false)
 const projectId = ref(null)
 const applyPermissions = ref(true)
 const autoInvite = ref(true)
@@ -405,16 +412,40 @@ watch(
   },
 )
 
+// Trimble said no to this user's token, or to refreshing it.
+const needsLogin = (message) => /: 401|token exchange failed/.test(message ?? '')
+
+// The connection is the user's own, kept on the server, so the import page and
+// this tab share it. The project list is the import page's too.
+async function loadProjects() {
+  connected.value = Boolean((await api.get('/api/trimble/auth/status')).data?.authenticated)
+  if (!connected.value) return
+  try {
+    const d = (await api.get('/api/trimble/projects')).data
+    projects.value = Array.isArray(d) ? d : d?.results ?? []
+    projectsListed.value = true
+  } catch (e) {
+    if (needsLogin(apiErrorMessage(e))) connected.value = false
+  }
+}
+
+async function connect() {
+  connecting.value = true
+  try {
+    window.location.href = (await api.get('/api/trimble/auth/start', { params: { return: 'admin' } })).data.url
+  } finally {
+    connecting.value = false
+  }
+}
+
 const keptCount = (f) => Object.values(f.current ?? {}).reduce((n, list) => n + list.length, 0)
 
 onMounted(async () => {
   try {
     await loadPresets()
-    projects.value = (await api.get(`${BASE}/projects`)).data ?? []
+    await loadProjects()
   } catch {
     /* 403 is handled by the admin page around this tab */
-  } finally {
-    projectsLoaded.value = true
   }
 })
 </script>

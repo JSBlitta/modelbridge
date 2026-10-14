@@ -25,6 +25,10 @@ mock.module(new URL("./db.ts", import.meta.url).href, {
     setTrimbleRefreshToken() {},
     listGroupPresets: () => [],
     getGroupPreset: () => null,
+    // The import page's project route caches; here nothing is cached yet.
+    getTrimbleCache: () => null,
+    setTrimbleCache() {},
+    upsertTrimbleProjects() {},
     createPreviewToken: (token: string, fingerprint: string) => tokens.set(token, fingerprint),
     // Real contract: single use, null means "matched and consumed".
     consumePreviewToken(token: string | undefined, fingerprint: string) {
@@ -39,7 +43,10 @@ mock.module(new URL("./db.ts", import.meta.url).href, {
 
 mock.module(new URL("./settings.ts", import.meta.url).href, {
   namedExports: {
-    isAdmin: (username: string) => username === "alice",
+    isAdmin: (username: string) => username !== "bob",
+    getSettings: () => ({}),
+    getStoredRefreshToken: () => "",
+    storeRefreshToken() {},
     getRedactedSettings: () => ({}),
     saveSettings() {},
   },
@@ -83,12 +90,15 @@ async function fakeTrimble(input: string, init?: RequestInit): Promise<Response>
   const method = init?.method ?? "GET";
   const headers = (init?.headers ?? {}) as Record<string, string>;
   seen.push({ method, path, auth: String(headers.Authorization) });
+  // Trimble's sign-in hands out a token named after the code it was given.
+  if (url.hostname === "id.trimble.com") return json({ access_token: `T-${new URLSearchParams(String(init?.body)).get("code")}` });
   const body = init?.body ? JSON.parse(String(init.body)) : undefined;
 
   const failed = trimble.fail(method, path);
   if (failed) return new Response("boom", { status: failed });
 
   let m: RegExpMatchArray | null;
+  if (path.startsWith("projects?")) return json([{ id: "P1", name: "Proj" }]);
   if (path === "users/me") return json({ id: "a1", email: "alice@x.nl" });
   if (path === "projects/P1") return json({ id: "P1", rootId: "root", name: "Proj" });
 
@@ -139,9 +149,10 @@ before(async () => {
   // Mirrors src/index.ts: the app-wide session gate, then the real admin app.
   app = new Hono();
   app.use("/api/*", requireSession);
+  app.route("/api/trimble", (await import("./routes/trimble.ts")).default);
   app.route("/api/admin", (await import("./routes/admin.ts")).default);
 
-  for (const username of ["alice", "bob"]) {
+  for (const username of ["alice", "bob", "carol", "dave"]) {
     sessions.set(`sess-${username}`, { id: `sess-${username}`, username, expires_at: "2999-01-01T00:00:00Z" });
   }
   tc.runAsUser("alice", () => tc.setManualToken("A-ACCESS", null));
@@ -199,6 +210,45 @@ test("a write carries the caller's token and accepts an empty answer", async () 
   );
   assert.equal(out, null);
   assert.deepEqual(seen, [{ method: "PATCH", path: "folders/fs/f1/permissions", auth: "Bearer A-ACCESS" }]);
+});
+
+// --- One Trimble connection for both pages ----------------------------------
+
+// The OAuth round trip as the browser makes it: start on a page, come back from
+// Trimble without a session cookie. Returns where the browser is sent next.
+async function connect(user: string, code: string, page?: string): Promise<string | null> {
+  const start = await get(`/api/trimble/auth/start${page ? `?return=${encodeURIComponent(page)}` : ""}`, user);
+  const state = new URL(((await start.json()) as { url: string }).url).searchParams.get("state");
+  const back = await app.request(`/api/trimble/auth/callback?code=${code}&state=${state}`);
+  assert.equal(back.status, 302);
+  return back.headers.get("location");
+}
+
+test("a connection made on the import page serves the group-preset check", async () => {
+  assert.equal(await connect("carol", "C1"), "/trimble?auth=success");
+  const res = await app.request(BASE + "/preview", {
+    method: "POST",
+    headers: { cookie: "session_id=sess-carol", "content-type": "application/json" },
+    body: JSON.stringify({ project_id: "P1", preset: PRESET }),
+  });
+  assert.equal(res.status, 200);
+  const calls = seen.filter((s) => s.path !== "/oauth/token");
+  assert.ok(calls.length > 3);
+  assert.deepEqual([...new Set(calls.map((s) => s.auth))], ["Bearer T-C1"]);
+});
+
+test("a connection made on the admin page returns there and serves the import page", async () => {
+  assert.equal(await connect("dave", "D1", "admin"), "/admin?tab=groups&auth=success");
+  assert.deepEqual(await (await get("/api/trimble/auth/status", "dave")).json(), { authenticated: true });
+  seen.length = 0;
+  assert.equal((await get("/api/trimble/projects", "dave")).status, 200);
+  assert.deepEqual(seen.map((s) => s.auth), ["Bearer T-D1"]);
+});
+
+test("the callback sends the browser only to a page it knows", async () => {
+  for (const page of ["https://evil.example/", "//evil.example", "__proto__", "constructor", ""]) {
+    assert.equal(await connect("dave", "D2", page), "/trimble?auth=success", page);
+  }
 });
 
 // --- The check gates the apply -------------------------------------------------

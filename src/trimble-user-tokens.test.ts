@@ -74,7 +74,7 @@ test("concurrent 401s for one user spend the refresh token once", async () => {
 
 test("the OAuth state resolves to the user who started the flow", () => {
   const url = tc.getCallbackUrls()[0];
-  const { state } = tc.runAsUser("frank", () => tc.beginOAuth(url));
-  assert.deepEqual(tc.redeemOAuthState(state), { redirectUri: url, username: "frank" });
+  const { state } = tc.runAsUser("frank", () => tc.beginOAuth(url, "/admin?tab=groups&auth=success"));
+  assert.deepEqual(tc.redeemOAuthState(state), { redirectUri: url, username: "frank", returnTo: "/admin?tab=groups&auth=success" });
   assert.equal(tc.redeemOAuthState(state), null, "single use");
 });

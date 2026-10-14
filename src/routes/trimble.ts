@@ -60,6 +60,13 @@ app.use("/*", async (c, next) => {
 
 // --- Auth routes ---
 
+// Where the browser lands after connecting. A page asks by name; the callback
+// only ever redirects to one of these, never to a URL taken from a request.
+const RETURN_PAGES = new Map([
+  ["trimble", "/trimble?auth=success"],
+  ["admin", "/admin?tab=groups&auth=success"],
+]);
+
 app.get("/auth/status", (c) => c.json({ authenticated: isAuthenticated() }));
 
 app.get("/auth/urls", (c) => {
@@ -79,7 +86,7 @@ app.get("/auth/start", (c) => {
   if (!callbackUrl) {
     return c.json({ error: "No Trimble callback URL is configured (TRIMBLE_CALLBACK_URLS)" }, 500);
   }
-  const { url } = beginOAuth(callbackUrl);
+  const { url } = beginOAuth(callbackUrl, RETURN_PAGES.get(c.req.query("return") ?? ""));
   return c.json({ url, callback_url: callbackUrl });
 });
 
@@ -114,7 +121,7 @@ app.get("/auth/callback", async (c) => {
       markOAuthCompleted(String(e));
       return c.json({ error: String(e) }, 400);
     }
-    return c.redirect("/trimble?auth=success");
+    return c.redirect(flow.returnTo ?? RETURN_PAGES.get("trimble")!);
   });
 });
 

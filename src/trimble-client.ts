@@ -127,12 +127,14 @@ const OAUTH_SCOPE = "oauth:trimble-state";
 // session cookie; the state is the only thing that says whose flow it was.
 // ponytail: in-memory, so a restart mid-consent makes that one attempt fail
 // ("start again"); move into preview_tokens if that ever matters.
-const oauthOwners = new Map<string, string>();
+// returnTo is where the browser goes after the callback; the caller passes only
+// values it chose itself, never one from a request.
+const oauthOwners = new Map<string, { username: string; returnTo?: string }>();
 
-export function beginOAuth(callbackUrl: string): { state: string; url: string } {
+export function beginOAuth(callbackUrl: string, returnTo?: string): { state: string; url: string } {
   const state = randomUUID();
   createPreviewToken(state, callbackKey(callbackUrl), OAUTH_SCOPE);
-  oauthOwners.set(state, current().username);
+  oauthOwners.set(state, { username: current().username, returnTo });
   return { state, url: buildAuthorizeUrl(callbackUrl, state) };
 }
 
@@ -140,14 +142,15 @@ export function beginOAuth(callbackUrl: string): { state: string; url: string } 
 // user who started it, or null when it is missing, unknown, expired or already
 // spent. The store deletes on first read, so the configured URLs are tried in
 // turn until one matches.
-export function redeemOAuthState(state: string | undefined): { redirectUri: string; username: string } | null {
+export function redeemOAuthState(
+  state: string | undefined,
+): { redirectUri: string; username: string; returnTo?: string } | null {
   if (!state) return null;
-  const username = oauthOwners.get(state);
+  const owner = oauthOwners.get(state);
   oauthOwners.delete(state);
   for (const candidate of getCallbackUrls()) {
     if (consumePreviewToken(state, callbackKey(candidate), OAUTH_SCOPE) === null) {
-      // The CLI owns its flows as "" (no user), so test for undefined, not falsy.
-      return username === undefined ? null : { redirectUri: candidate, username };
+      return owner ? { redirectUri: candidate, ...owner } : null;
     }
   }
   return null;
