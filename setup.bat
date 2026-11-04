@@ -15,8 +15,13 @@ if errorlevel 1 (
 )
 set NODEMAJOR=0
 for /f "tokens=1 delims=." %%v in ('node -p "process.versions.node"') do set NODEMAJOR=%%v
-if %NODEMAJOR% LSS 20 (
-    echo ERROR: Node 20 or newer is required. Found:
+:: better-sqlite3 ships prebuilt Windows binaries only for these majors. Any
+:: other version falls back to compiling from source, which needs Python and
+:: Visual Studio build tools and fails on a plain machine.
+set NODEOK=0
+for %%m in (22 24 25 26) do if "%NODEMAJOR%"=="%%m" set NODEOK=1
+if "%NODEOK%"=="0" (
+    echo ERROR: Node 22, 24, 25 or 26 is required ^(prebuilt better-sqlite3^). Found:
     node -v
     exit /b 1
 )

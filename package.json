@@ -19,7 +19,7 @@
   },
   "dependencies": {
     "@hono/node-server": "^1.13.0",
-    "better-sqlite3": "^11.7.0",
+    "better-sqlite3": "^12.11.1",
     "hono": "^4.6.0",
     "yaml": "^2.6.0",
     "zod": "^3.22.4"
@@ -32,6 +32,6 @@
     "vitest": "^1.2.0"
   },
   "engines": {
-    "node": ">=20.0.0"
+    "node": ">=22.0.0"
   }
 }
