@@ -148,8 +148,15 @@ app.patch("/state", async (c) => {
 app.post("/add-for-projects", async (c) => {
   const body = await c.req.json<{
     phase: string;
-    batch_defs: { project_key: string; batch_number: string | number; phase: string; stdlibs?: string[] }[];
+    // project_uuid, when the caller knows it, wins over the name lookup: a project
+    // named after a superproject column that differs from the key's number would
+    // otherwise not resolve.
+    batch_defs: { project_key: string; project_uuid?: string; batch_number: string | number; phase: string; stdlibs?: string[] }[];
+    // Phases to ensure even when no batch in the file uses them.
+    phase_defs?: { project_key: string; project_uuid?: string; phase: string }[];
   }>();
+  const batchDefs = Array.isArray(body.batch_defs) ? body.batch_defs : [];
+  const phaseDefs = Array.isArray(body.phase_defs) ? body.phase_defs : [];
 
   // Resolve project_key -> uuid by name
   const allProjects = (await fetchAllPages("/company/projects/")) as Record<string, unknown>[];
@@ -164,7 +171,7 @@ app.post("/add-for-projects", async (c) => {
 
   // Resolve stdlib names to UUIDs
   const allStdlibNames = new Set<string>();
-  for (const b of body.batch_defs) {
+  for (const b of batchDefs) {
     if (b.stdlibs?.length) for (const s of b.stdlibs) allStdlibNames.add(s);
   }
   const stdlibNameToUuid = new Map<string, string>();
@@ -191,40 +198,63 @@ app.post("/add-for-projects", async (c) => {
   const phasesEnsured = new Set<string>();
 
   const results: Record<string, unknown>[] = [];
-  for (const b of body.batch_defs) {
-    const projectUuid = nameToUuid.get(b.project_key);
+  const resolveUuid = (d: { project_key: string; project_uuid?: string }) =>
+    (d.project_uuid && isUuid(d.project_uuid) ? d.project_uuid : undefined) ?? nameToUuid.get(String(d.project_key ?? "").trim());
+
+  // Ensure a phase exists on a project, once per project+phase pair. Returns false on failure.
+  async function ensurePhase(projectUuid: string, projectKey: string, phase: string): Promise<boolean> {
+    const phaseKey = `${projectUuid}|${phase.toLowerCase()}`;
+    if (phasesEnsured.has(phaseKey)) return true;
+    phasesEnsured.add(phaseKey);
+    try {
+      let project = projectCache.get(projectUuid);
+      if (!project) {
+        project = (await apiGet(`/company/projects/${projectUuid}/`)) as Record<string, unknown>;
+        projectCache.set(projectUuid, project);
+      }
+      const existingPhases = (project.phases ?? []) as string[];
+      if (!existingPhases.some((ep) => String(ep).trim().toLowerCase() === phase.toLowerCase())) {
+        const updatedPhases = [...existingPhases, phase];
+        await apiPatch(`/company/projects/${projectUuid}/`, { phases: updatedPhases });
+        project.phases = updatedPhases;
+        results.push({ project_key: projectKey, phase, status: "phase_created" });
+      }
+      return true;
+    } catch (e) {
+      logger.warn(`[batches/add-for-projects] phase check failed for ${projectKey}:`, e);
+      results.push({
+        project_key: projectKey,
+        phase,
+        status: "error",
+        error: `Could not ensure phase "${phase}": ${e instanceof Error ? e.message : String(e)}`,
+      });
+      return false;
+    }
+  }
+
+  for (const d of phaseDefs) {
+    const phase = String(d.phase ?? "").trim();
+    const projectUuid = resolveUuid(d);
+    if (!phase) { results.push({ project_key: d.project_key, status: "error", error: "Phase is empty" }); continue; }
+    if (!projectUuid) { results.push({ project_key: d.project_key, phase, status: "error", error: "Project not found: " + d.project_key }); continue; }
+    await ensurePhase(projectUuid, d.project_key, phase);
+  }
+
+  for (const b of batchDefs) {
+    const projectUuid = resolveUuid(b);
     if (!projectUuid) {
       results.push({ project_key: b.project_key, batch_number: b.batch_number, status: "error", error: "Project not found: " + b.project_key });
       continue;
     }
-
-    // Ensure phase exists on the project (once per project+phase pair)
-    const phaseKey = `${projectUuid}|${b.phase.trim().toLowerCase()}`;
-    if (!phasesEnsured.has(phaseKey)) {
-      phasesEnsured.add(phaseKey);
-      try {
-        let project = projectCache.get(projectUuid);
-        if (!project) {
-          project = (await apiGet(`/company/projects/${projectUuid}/`)) as Record<string, unknown>;
-          projectCache.set(projectUuid, project);
-        }
-        const existingPhases = (project.phases ?? []) as string[];
-        const phaseNormalized = b.phase.trim().toLowerCase();
-        if (!existingPhases.some((ep) => String(ep).trim().toLowerCase() === phaseNormalized)) {
-          const updatedPhases = [...existingPhases, b.phase];
-          await apiPatch(`/company/projects/${projectUuid}/`, { phases: updatedPhases });
-          project.phases = updatedPhases;
-          results.push({ project_key: b.project_key, phase: b.phase, status: "phase_created" });
-        }
-      } catch (e) {
-        logger.warn(`[batches/add-for-projects] phase check failed for ${b.project_key}:`, e);
-        results.push({
-          project_key: b.project_key,
-          phase: b.phase,
-          status: "error",
-          error: `Could not ensure phase "${b.phase}": ${e instanceof Error ? e.message : String(e)}`,
-        });
-      }
+    // A batch always belongs to a phase; an empty one would create a phase named "".
+    b.phase = String(b.phase ?? "").trim();
+    if (!b.phase) {
+      results.push({ project_key: b.project_key, batch_number: b.batch_number, status: "error", error: "Phase is empty" });
+      continue;
+    }
+    if (!(await ensurePhase(projectUuid, b.project_key, b.phase))) {
+      results.push({ project_key: b.project_key, batch_number: b.batch_number, status: "error", error: `Phase "${b.phase}" could not be ensured` });
+      continue;
     }
 
     // Check if batch already exists for THIS phase (not just any phase)

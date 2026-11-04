@@ -238,6 +238,7 @@
 import { ref, computed } from 'vue'
 import { api } from '../api.js'
 import { useProduuzitProjects } from '../composables/useProduuzitProjects.js'
+import ColumnMapper from '../components/ColumnMapper.vue'
 import { useConfirm } from 'primevue/useconfirm'
 
 const confirm = useConfirm()

@@ -411,6 +411,7 @@ const { t } = useI18n()
 const route = useRoute()
 import { api, apiErrorMessage } from '../api.js'
 import ColumnMapper from '../components/ColumnMapper.vue'
+import ConfirmedButton from '../components/ConfirmedButton.vue'
 import SortFilterTable from '../components/SortFilterTable.vue'
 import PushGate from '../components/PushGate.vue'
 import { usePushGate } from '../composables/usePushGate.js'

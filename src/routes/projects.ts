@@ -13,7 +13,20 @@ interface ProjectDef {
   suggested_suffix: string;
   phase: string;
   client_name?: string | null;
-  batch_numbers?: string[];
+  // Every phase the CSV names for this project; `phase` is the first of them.
+  phases?: string[];
+  batch_specs?: { number: string | number; phase: string }[];
+}
+
+const norm = (s: unknown) => String(s ?? "").trim().toLowerCase();
+
+function phasesOf(p: ProjectDef): string[] {
+  const seen = new Map<string, string>();
+  for (const ph of [p.phase, ...(p.phases ?? []), ...(p.batch_specs ?? []).map((b) => b.phase)]) {
+    const v = String(ph ?? "").trim();
+    if (v && !seen.has(v.toLowerCase())) seen.set(v.toLowerCase(), v);
+  }
+  return [...seen.values()];
 }
 
 function buildFullName(p: ProjectDef): string {
@@ -103,45 +116,48 @@ app.post("/find-or-create", async (c) => {
     const existing = byName.get(lookupName) ?? byName.get(fullName);
     const superprojectFound = p.superproject ? knownSuperprojects.has(p.superproject) : null;
 
+    const wanted = phasesOf(p);
+    const specs = p.batch_specs ?? [];
+    const specPhase = (spec: { phase: string }) => (spec.phase || p.phase || "").trim();
+
     if (!existing) {
+      // Nothing of a new project exists yet: every phase and batch is missing.
       return {
         project_key: p.project_key,
         status: "new",
         existing: null,
         superproject_found: superprojectFound,
         phase_exists: null as boolean | null,
+        phases_missing: wanted,
         batches_found: [] as string[],
-        batches_missing: (p.batch_numbers ?? []) as string[],
+        batches_missing: specs.map((s) => String(s.number)),
       };
     }
 
-    const existingPhases = (existing.phases ?? []) as string[];
-    const phaseExists = p.phase
-      ? existingPhases.some((ep) => String(ep).trim().toLowerCase() === p.phase.trim().toLowerCase())
-      : null;
+    const existingPhases = new Set(((existing.phases ?? []) as unknown[]).map(norm));
+    const phaseExists = p.phase ? existingPhases.has(norm(p.phase)) : null;
+    const phasesMissing = wanted.filter((ph) => !existingPhases.has(norm(ph)));
 
-    let batchesFound: string[] = [];
-    let batchesMissing: string[] = [];
-
-    // Batches are always children of a phase — if the phase doesn't exist,
-    // the batches can't exist yet either, regardless of name matches.
+    const batchesFound: string[] = [];
+    const batchesMissing: string[] = [];
     const uuid = existing.uuid as string | undefined;
-    const specs = (p as any).batch_specs as { number: string | number; phase: string }[] | undefined;
-    if (uuid && specs?.length && phaseExists !== false) {
-      try {
-        // Enumerate every page: a hard limit here reported existing batches as
-        // missing past the cap, which caused duplicate creation.
-        const allBatches = (await fetchAllPages("/constructibles/batches/", { project: uuid })) as Record<string, unknown>[];
-        for (const spec of specs) {
-          const phaseNorm = (spec.phase || p.phase).trim().toLowerCase();
-          const exists = allBatches.some(
-            (b) => String(b.name ?? "").trim() === String(spec.number) && String(b.phase ?? "").trim().toLowerCase() === phaseNorm
-          );
-          if (exists) batchesFound.push(String(spec.number));
-          else batchesMissing.push(String(spec.number));
+    if (uuid && specs.length) {
+      // A batch whose phase does not exist yet cannot exist either.
+      const inExistingPhase = specs.filter((s) => existingPhases.has(norm(specPhase(s))));
+      for (const s of specs) if (!inExistingPhase.includes(s)) batchesMissing.push(String(s.number));
+      if (inExistingPhase.length) {
+        try {
+          // Enumerate every page: a hard limit here reported existing batches as
+          // missing past the cap, which caused duplicate creation.
+          const allBatches = (await fetchAllPages("/constructibles/batches/", { project: uuid })) as Record<string, unknown>[];
+          for (const s of inExistingPhase) {
+            const exists = allBatches.some((b) => String(b.name ?? "").trim() === String(s.number) && norm(b.phase) === norm(specPhase(s)));
+            (exists ? batchesFound : batchesMissing).push(String(s.number));
+          }
+        } catch {
+          // Unknown counts as missing: creation re-checks per batch and skips existing ones.
+          for (const s of inExistingPhase) batchesMissing.push(String(s.number));
         }
-      } catch {
-        // Batch check failed — treat all as missing (will be created or skipped if they already exist)
       }
     }
 
@@ -151,6 +167,7 @@ app.post("/find-or-create", async (c) => {
       existing,
       superproject_found: superprojectFound,
       phase_exists: phaseExists,
+      phases_missing: phasesMissing,
       batches_found: batchesFound,
       batches_missing: batchesMissing,
     };
@@ -185,7 +202,7 @@ app.post("/create", async (c) => {
       super_project: p.superproject,
       client_name: p.client_name || clientNameDefault,
       project_number: projectNumber,
-      phases: [p.phase],
+      phases: phasesOf(p),
       standard_library: false,
       linked_stdlibs: [],
     };

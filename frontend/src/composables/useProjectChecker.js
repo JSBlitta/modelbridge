@@ -21,6 +21,7 @@ export function useProjectChecker() {
         description: p.description,
         suggested_suffix: p.suggested_suffix,
         phase: p.suggested_phase || '',
+        phases: [...new Set([p.suggested_phase, ...(p.batches || []).map(b => b.phase)].filter(Boolean))],
         batch_specs: (p.batches || []).map(b => ({
           number: b.number,
           phase: b.phase || p.suggested_phase || '',
@@ -39,6 +40,8 @@ export function useProjectChecker() {
           status: r.status,
           superproject_found: r.superproject_found,
           phase_exists: r.phase_exists,
+          project_uuid: r.existing?.uuid || null,
+          phases_missing: r.phases_missing || [],
           batches_found: r.batches_found || [],
           batches_missing: r.batches_missing || [],
         }

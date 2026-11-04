@@ -51,25 +51,31 @@
           </div>
         </div>
 
-        <div v-if="checkDone && newProjectCount > 0" style="margin-top:1rem;">
-          <Message severity="warn" :closable="false" size="small">
+        <div v-if="checkDone && hasAnythingToCreate" style="margin-top:1rem;">
+          <Message v-if="newProjectCount" severity="warn" :closable="false" size="small">
             {{ $t('unified.newProjects', { count: newProjectCount }) }}
           </Message>
-          <ConfirmationTable
+          <ConfirmationTable v-if="newProjectCount"
             :rows="confirmProjectRows"
-            :columns="[{field:'project_key',header:$t('unified.project')},{field:'superproject',header:$t('unified.superproject')},{field:'suggested_phase',header:$t('unified.phase')}]"
+            :columns="[{field:'project_key',header:$t('unified.project')},{field:'superproject',header:$t('unified.superproject')},{field:'phases_label',header:$t('unified.phase')}]"
             status-field="status"
             :show-actions="false"
             class="mt-sm"
             />
+          <Message v-if="foundProjectCount && (missingPhaseCount || missingBatchCount)" severity="info" :closable="false" size="small" class="mt-sm">
+            {{ $t('unified.foundProjectInfo', { count: foundProjectCount }) }}
+          </Message>
+          <Message v-if="rowsWithoutPhase.length" severity="error" :closable="false" size="small" class="mt-sm">
+            {{ $t('unified.phaseMissingFor', { projects: rowsWithoutPhase.join(', ') }) }}
+          </Message>
           <ConfirmedButton
-            :label="$t('unified.createProjectsBtn')"
+            :label="$t('unified.createAllBtn')"
             icon="pi pi-plus"
-            :confirm-label="$t('unified.confirmCreateProjects', { count: newProjectCount })"
+            :confirm-label="$t('unified.confirmCreateItems', { items: createItemsLabel })"
             btn-class="btn-create"
-            :reset-key="newProjectCount + '|' + (phaseSuggestions?.length ?? 0)"
-            :loading="creatingProjects"
-            @action="createProjects"
+            :reset-key="createItemsLabel"
+            :loading="creatingAll"
+            @action="createAll"
             style="margin-top:0.5rem;" />
         </div>
 
@@ -77,28 +83,14 @@
           <!-- Plain DataTable: only the Trimble flow uses components/SortFilterTable.vue (sortable, filter per column). Switch to it if this view is ever rewritten. -->
           <DataTable :value="createProjectResults" size="small">
             <Column field="project_key" :header="$t('unified.project')" />
+            <Column field="item" :header="$t('unified.item')" />
             <Column field="status" :header="$t('unified.status')">
               <template #body="{ data }">
-                <Tag :severity="data.status==='created'?'success':data.status==='error'?'danger':'secondary'" :value="data.status" />
+                <Tag :severity="data.status==='error'?'danger':data.status==='already_exists'?'secondary':'success'" :value="data.status" />
               </template>
             </Column>
             <Column field="error" :header="$t('unified.error')" />
           </DataTable>
-        </div>
-
-        <div v-if="checkDone && foundProjectCount > 0 && hasMissingItems" style="margin-top:1rem;">
-          <Message severity="info" :closable="false" size="small">
-            {{ $t('unified.foundProjectInfo', { count: foundProjectCount }) }}
-          </Message>
-          <ConfirmedButton
-            :label="$t('unified.createPhaseBatchesBtn')"
-            icon="pi pi-plus-circle"
-            :confirm-label="$t('unified.confirmCreateItems', { items: createItemsLabel })"
-            btn-class="btn-create"
-            :reset-key="createItemsLabel"
-            :loading="addingPhasesBatches"
-            @action="addPhasesAndBatches"
-            style="margin-top:0.5rem;" />
         </div>
       </template>
     </Card>
@@ -311,6 +303,7 @@ import { useNotifications } from '../composables/useNotifications.js'
 const { notify } = useNotifications()
 import PhaseTable from '../components/PhaseTable.vue'
 import ConfirmationTable from '../components/ConfirmationTable.vue'
+import ConfirmedButton from '../components/ConfirmedButton.vue'
 import PushGate from '../components/PushGate.vue'
 import { usePushGate } from '../composables/usePushGate.js'
 import { useImportPreview } from '../composables/useImportPreview.js'
@@ -326,9 +319,8 @@ const phaseSuggestions = ref([])
 const superParseError = ref('')
 const superNoProjects = ref(false)
 const { checking, checkDone, checkProjects } = useProjectChecker()
-const creatingProjects = ref(false)
+const creatingAll = ref(false)
 const createProjectResults = ref([])
-const addingPhasesBatches = ref(false)
 
 // Assembly CSV
 const parseResult = ref(null)
@@ -343,20 +335,29 @@ const importResults = ref([])
 const includeProductionCounts = ref(false)
 const defaultCount = ref(1)
 
+const phasesOf = (p) => [...new Set([p.suggested_phase, ...(p.batches || []).map(b => b.phase)].filter(Boolean))]
 const newProjectCount = computed(() => phaseSuggestions.value.filter(r => r.status === 'new').length)
 const foundProjectCount = computed(() => phaseSuggestions.value.filter(r => r.status === 'found').length)
-const confirmProjectRows = computed(() => phaseSuggestions.value.filter(r => r.status === 'new'))
+const confirmProjectRows = computed(() => phaseSuggestions.value
+  .filter(r => r.status === 'new')
+  .map(r => ({ ...r, phases_label: phasesOf(r).join(', ') })))
+// A project (or batch) without a phase cannot be created: Produuzit batches live in a phase.
+const rowsWithoutPhase = computed(() => phaseSuggestions.value
+  .filter(r => !r.suggested_phase)
+  .map(r => r.project_key))
 
+// After a check every row carries what is missing, new projects included.
 const missingPhaseCount = computed(() =>
-  phaseSuggestions.value.filter(r => r.status === 'found' && r.phase_exists === false).length
+  phaseSuggestions.value.reduce((sum, r) => sum + (r.phases_missing?.length || 0), 0)
 )
 const missingBatchCount = computed(() =>
-  phaseSuggestions.value.reduce((sum, r) => r.status === 'found' ? sum + (r.batches_missing?.length || 0) : sum, 0)
+  phaseSuggestions.value.reduce((sum, r) => sum + (r.batches_missing?.length || 0), 0)
 )
-const hasMissingItems = computed(() => missingPhaseCount.value > 0 || missingBatchCount.value > 0)
+const hasAnythingToCreate = computed(() => newProjectCount.value > 0 || missingPhaseCount.value > 0 || missingBatchCount.value > 0)
 
 const createItemsLabel = computed(() => {
   const parts = []
+  if (newProjectCount.value) parts.push(t('unified.projectCreateCount', { count: newProjectCount.value }))
   if (missingPhaseCount.value) parts.push(t('unified.phaseCreateCount', { count: missingPhaseCount.value }))
   if (missingBatchCount.value) parts.push(t('unified.batchCreateCount', { count: missingBatchCount.value }))
   return parts.join(' + ')
@@ -440,64 +441,67 @@ async function parseSuperCsvFile(file) {
 
 const doCheck = () => { superParseError.value = ''; checkProjects(phaseSuggestions) }
 
-async function createProjects() {
-  creatingProjects.value = true
-  const newOnes = phaseSuggestions.value.filter(r => r.status === 'new')
+// One confirmed action: new projects (with all their phases, which also brings a
+// new superproject into being), then every missing phase and batch, then a
+// re-check. Each step is idempotent server-side, so a repeat creates nothing.
+async function createAll() {
+  creatingAll.value = true
+  createProjectResults.value = []
+  const rows = []
   try {
-    const res = await api.post('/api/projects/create', newOnes.map(p => ({
-      project_key: p.project_key,
-      superproject: p.superproject,
-      letter: p.letter,
-      description: p.description,
-      suggested_suffix: p.suggested_suffix,
-      phase: p.suggested_phase || '',
-    })))
-    createProjectResults.value = res.data
-    const byKey = {}
-    for (const r of res.data) {
-      byKey[r.project_key] = r.status === 'created' ? 'found' : r.status
-    }
-    phaseSuggestions.value = phaseSuggestions.value.map(p => ({
-      ...p,
-      status: byKey[p.project_key] || p.status,
-    }))
-  } catch (err) {
-    superParseError.value = apiErrorMessage(err)
-  } finally {
-    creatingProjects.value = false
-  }
-}
+    const uuidByKey = {}
+    for (const p of phaseSuggestions.value) if (p.project_uuid) uuidByKey[p.project_key] = p.project_uuid
 
-async function addPhasesAndBatches() {
-  addingPhasesBatches.value = true
-  const existing = phaseSuggestions.value.filter(r => r.status === 'found')
-  const batchDefs = []
-  for (const p of existing) {
-    const missing = new Set(p.batches_missing?.map(String) || [])
-    for (const b of p.batches || []) {
-      if (missing.has(String(b.number))) {
-        batchDefs.push({ project_key: p.project_key, batch_number: b.number, phase: b.phase || p.suggested_phase || '', stdlibs: b.stdlibs || [] })
+    const newOnes = phaseSuggestions.value.filter(r => r.status === 'new')
+    if (newOnes.length) {
+      const res = await api.post('/api/projects/create', newOnes.map(p => ({
+        project_key: p.project_key,
+        superproject: p.superproject,
+        letter: p.letter,
+        description: p.description,
+        suggested_suffix: p.suggested_suffix,
+        phase: p.suggested_phase || '',
+        phases: phasesOf(p),
+      })))
+      for (const r of res.data) {
+        if (r.data?.uuid) uuidByKey[r.project_key] = r.data.uuid
+        rows.push({ project_key: r.project_key, item: t('unified.project'), status: r.status, error: r.error || '' })
       }
     }
-  }
-  if (!batchDefs.length && !missingPhaseCount.value) {
-    addingPhasesBatches.value = false
-    return
-  }
-  try {
-    const res = await api.post('/api/batches/add-for-projects', { phase: existing[0]?.suggested_phase || '', batch_defs: batchDefs })
-    const results = res.data || []
-    const created = results.filter(r => r.status === 'created').length
-    const existed = results.filter(r => r.status === 'already_exists').length
-    const errors = results.filter(r => r.status === 'error').length
-    if (created) notify({ severity: 'success', summary: t('unified.created'), detail: t('unified.createdDetail', { created, existed }), life: 5000 })
-    if (errors) notify({ severity: 'error', summary: t('unified.error'), detail: t('unified.errorsDetail', { errors }), life: 8000 })
-    // Re-check so the UI updates to show phases/batches as existing
+
+    const phaseDefs = []
+    const batchDefs = []
+    for (const p of phaseSuggestions.value) {
+      const project_uuid = uuidByKey[p.project_key]
+      if (!project_uuid) continue // creation failed; reported above
+      for (const phase of p.phases_missing || []) phaseDefs.push({ project_key: p.project_key, project_uuid, phase })
+      const missing = new Set((p.batches_missing || []).map(String))
+      for (const b of p.batches || []) {
+        if (missing.has(String(b.number))) {
+          batchDefs.push({ project_key: p.project_key, project_uuid, batch_number: b.number, phase: b.phase || p.suggested_phase || '', stdlibs: b.stdlibs || [] })
+        }
+      }
+    }
+    if (phaseDefs.length || batchDefs.length) {
+      const res = await api.post('/api/batches/add-for-projects', { phase_defs: phaseDefs, batch_defs: batchDefs })
+      for (const r of res.data || []) {
+        const item = r.batch_number != null ? `${t('unified.batch')} ${r.batch_number}` : `${t('unified.phase')} ${r.phase ?? ''}`
+        rows.push({ project_key: r.project_key, item, status: r.status, error: r.error || '' })
+      }
+    }
+
+    createProjectResults.value = rows
+    const errors = rows.filter(r => r.status === 'error').length
+    const created = rows.length - errors - rows.filter(r => r.status === 'already_exists').length
+    if (created) notify({ severity: 'success', summary: t('unified.created'), detail: t('unified.createAllDetail', { created }), life: 5000 })
+    if (errors) notify({ severity: 'error', summary: t('unified.error'), detail: t('unified.createAllErrors', { errors }), life: 8000 })
+    // Re-check so the tags show what now exists.
     await checkProjects(phaseSuggestions)
   } catch (err) {
+    createProjectResults.value = rows
     superParseError.value = apiErrorMessage(err)
   } finally {
-    addingPhasesBatches.value = false
+    creatingAll.value = false
   }
 }
 
