@@ -247,6 +247,8 @@ app.post("/preview-import", async (c) => {
         identical: rowPreviews.filter((r) => r.status === "identical").length,
         errors: rowPreviews.filter((r) => r.status === "error").length,
       },
+      // /import refuses any push without this token, UUID mode included.
+      preview_token: issuePreviewToken(GATE.assemblyImport, assemblyGateInput(body)),
     });
   }
 

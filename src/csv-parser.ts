@@ -1,3 +1,5 @@
+import { suggestCanonicals } from "./lib/column-match.ts";
+
 const PROJECT_PATTERN = /^(\d+)-([A-Za-z])(?:-(.+))?$/;
 
 // Detect comma vs semicolon delimiter from the header line (outside quotes)
@@ -14,22 +16,13 @@ export function detectDelimiter(headerLine: string): "," | ";" {
   return semis > commas ? ";" : ",";
 }
 
+// canonical -> header, through the matcher the Trimble flow uses.
 function detectColumns(
   headers: string[],
   synonyms: Record<string, string[]>,
 ): Record<string, string> {
   const mapping: Record<string, string> = {};
-  const headersLower: Record<string, string> = {};
-  for (const h of headers) headersLower[h.trim().toLowerCase()] = h;
-
-  for (const [canonical, syns] of Object.entries(synonyms)) {
-    for (const syn of syns) {
-      if (syn.toLowerCase() in headersLower) {
-        mapping[canonical] = headersLower[syn.toLowerCase()];
-        break;
-      }
-    }
-  }
+  for (const [header, canonical] of Object.entries(suggestCanonicals(headers, synonyms))) mapping[canonical] = header;
   return mapping;
 }
 

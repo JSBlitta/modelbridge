@@ -70,3 +70,45 @@ export function buildBatchMatcher(batches: Record<string, unknown>[]) {
     return byNamePhase.get(`${raw}\u0000${phaseNorm}`) ?? null;
   };
 }
+
+// A project under a superproject is named <5 digits>-<category letter>[-<rest>].
+// Those first 7 characters identify it: 12654-A resolves to 12654-A-NorthEast Wing.
+// The letter must end the token, so 12654-AB is not 12654-A.
+export function projectPrefix(name: unknown): string | null {
+  const m = /^(\d{5}-[A-Za-z])(?![A-Za-z0-9])/.exec(String(name ?? "").trim());
+  return m ? m[1].toUpperCase() : null;
+}
+
+export type ProjectMatch =
+  | { project: Record<string, unknown> }
+  | { ambiguous: string[] }
+  | null;
+
+// Exact name (or project_number) first; then the 7-character prefix. Two existing
+// projects sharing a prefix resolve to neither: the caller must not guess, and
+// must not create a third.
+export function buildProjectMatcher(projects: Record<string, unknown>[]) {
+  const exact = new Map<string, Record<string, unknown>>();
+  const byPrefix = new Map<string, Record<string, unknown>[]>();
+  for (const p of projects) {
+    const name = String(p.name ?? "").trim();
+    const pnum = String(p.project_number ?? "").trim();
+    if (name && !exact.has(name)) exact.set(name, p);
+    if (pnum && !exact.has(pnum)) exact.set(pnum, p);
+    const pre = projectPrefix(name);
+    if (pre) byPrefix.set(pre, [...(byPrefix.get(pre) ?? []), p]);
+  }
+  return (...keys: unknown[]): ProjectMatch => {
+    for (const k of keys) {
+      const hit = exact.get(String(k ?? "").trim());
+      if (hit) return { project: hit };
+    }
+    for (const k of keys) {
+      const pre = projectPrefix(k);
+      const hits = pre ? byPrefix.get(pre) ?? [] : [];
+      if (hits.length === 1) return { project: hits[0] };
+      if (hits.length > 1) return { ambiguous: hits.map((h) => String(h.name ?? h.uuid)) };
+    }
+    return null;
+  };
+}

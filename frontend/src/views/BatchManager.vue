@@ -193,32 +193,34 @@
           />
         </div>
 
-        <div v-if="countHasRequiredMapping">
-          <Button label="Check &amp; Preview" icon="pi pi-search" class="btn-preview" @click="doCountPreview" :loading="countPreviewing" />
+        <PushGate
+          v-if="countParseResult"
+          :gate="countGate"
+          :check-label="$t('unified.previewBtn')"
+          :check-disabled="!countHasRequiredMapping"
+          :show-push="!countBlockers.length"
+          :confirm-label="`I confirm: write ${countSummary.new} new production count(s)`"
+          :push-label="$t('batchManager.executeImport')"
+          push-icon="pi pi-bolt" />
+
+        <div v-if="countGate.checked && countPreviewData" style="margin-top:0.75rem;display:flex;gap:0.75rem;flex-wrap:wrap;">
+          <span style="color:#15803d;font-weight:600;">{{ countSummary.new }} new</span>
+          <span style="color:#b45309;">{{ countSummary.kept }} kept</span>
+          <span style="color:#6b7280;">{{ countSummary.identical }} identical</span>
+          <span v-if="countSummary.blocked" style="color:#dc2626;font-weight:600;">{{ countSummary.blocked }} blocked</span>
+          <span v-if="countPreviewData.unresolved_batches?.length" style="color:#dc2626;">
+            {{ $t('unified.batchesNotFound', { batches: countPreviewData.unresolved_batches.join(', ') }) }}
+          </span>
         </div>
 
-        <div v-if="countPreviewData" style="margin-top:0.75rem;">
-          <div style="display:flex;gap:0.75rem;align-items:center;flex-wrap:wrap;margin-bottom:0.5rem;">
-            <span style="color:#15803d;font-weight:600;">{{ countPreviewData.new||0 }} new</span>
-            <span style="color:#b45309;font-weight:600;">{{ countPreviewData.updated||0 }} updated</span>
-            <span style="color:#6b7280;">{{ countPreviewData.skipped||0 }} skipped</span>
-            <span v-if="countPreviewData.errors" style="color:#dc2626;font-weight:600;">{{ countPreviewData.errors }} errors</span>
-          </div>
-          <div v-if="countCanExecute" style="margin-top:0.5rem;">
-            <div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.5rem;">
-              <Checkbox v-model="confirmCountImport" :binary="true" input-id="confirm-count-import" />
-              <label for="confirm-count-import" style="cursor:pointer;font-size:0.85rem;">
-                I confirm — import count data
-              </label>
-            </div>
-            <Button :label="$t('batchManager.executeImport')" icon="pi pi-bolt" severity="success"
-              @click="doCountImport" :loading="countImporting" :disabled="!confirmCountImport" />
-          </div>
-        </div>
+        <Message v-if="countParseResult && countBlockers.length && !countImportResults.length" severity="secondary" :closable="false" size="small" style="margin-top:0.75rem;">
+          <strong>{{ $t('pushBlock.title') }}</strong>
+          <ul style="margin:0.25rem 0 0 1.1rem;padding:0;"><li v-for="b in countBlockers" :key="b">{{ b }}</li></ul>
+        </Message>
 
         <div v-if="countImportResults.length" style="margin-top:0.75rem;">
           <div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:0.5rem;">
-            <span style="color:#15803d;font-weight:600;">{{ countImportResults.filter(r=>r.status==='updated').length }} updated</span>
+            <span style="color:#15803d;font-weight:600;">{{ countImportResults.filter(r=>r.status==='created').length }} written · {{ countImportResults.filter(r=>r.status==='skipped').length }} skipped</span>
             <span style="color:#dc2626;font-weight:600;">{{ countImportResults.filter(r=>r.status==='error').length }} errors</span>
           </div>
           <!-- Plain DataTable: only the Trimble flow uses components/SortFilterTable.vue (sortable, filter per column). Switch to it if this view is ever rewritten. -->
@@ -239,7 +241,13 @@ import { ref, computed } from 'vue'
 import { api } from '../api.js'
 import { useProduuzitProjects } from '../composables/useProduuzitProjects.js'
 import ColumnMapper from '../components/ColumnMapper.vue'
+import PushGate from '../components/PushGate.vue'
+import { usePushGate } from '../composables/usePushGate.js'
+import { importBlockers } from '../composables/useImportPreview.js'
+import { useI18n } from 'vue-i18n'
 import { useConfirm } from 'primevue/useconfirm'
+
+const { t } = useI18n()
 
 const confirm = useConfirm()
 
@@ -269,10 +277,7 @@ const selectedStdlibs = ref([])
 const countParseResult = ref(null)
 const countColumnMapping = ref({})
 const countPreviewData = ref(null)
-const countPreviewing = ref(false)
-const countImporting = ref(false)
 const countImportResults = ref([])
-const confirmCountImport = ref(false)
 
 function buildBatchName(n) {
   return String(n)
@@ -448,7 +453,7 @@ const countInitialMapping = computed(() => {
   for (const [canonical, csvCol] of Object.entries(countParseResult.value.col_map || {})) {
     if (canonical === 'design') m[csvCol] = 'design_name'
     else if (canonical === 'batch') m[csvCol] = 'batch_number'
-    else if (canonical === 'quantity' || canonical === 'count') m[csvCol] = 'quantity'
+    else if (canonical === 'count') m[csvCol] = 'count'
   }
   for (const [csvCol, target] of Object.entries(countParseResult.value.meta_suggestions || {})) {
     m[csvCol] = target
@@ -456,50 +461,66 @@ const countInitialMapping = computed(() => {
   return m
 })
 
-const countHasRequiredMapping = computed(() =>
-  countParseResult.value && selectedProject.value &&
-  Object.values(countColumnMapping.value).includes('design_name') &&
-  Object.values(countColumnMapping.value).includes('quantity')
-)
+// The server groups rows by batch, so the batch column is required too. With no
+// count column every design gets 1.
+const countHasRequiredMapping = computed(() => {
+  const targets = Object.values(countColumnMapping.value).flatMap(v => (Array.isArray(v) ? v : [v]))
+  return Boolean(countParseResult.value && selectedProject.value) && targets.includes('design_name') && targets.includes('batch_number')
+})
 
-const countCanExecute = computed(() =>
-  countPreviewData.value && ((countPreviewData.value.new || 0) > 0 || (countPreviewData.value.updated || 0) > 0)
-)
+// A count import always writes counts; that is its whole job.
+function countBody() {
+  return {
+    project_uuid: selectedProject.value,
+    column_mapping: countColumnMapping.value,
+    rows: countParseResult.value?.rows ?? [],
+    include_production_counts: true,
+    default_count: 1,
+  }
+}
+
+const countGate = usePushGate({
+  identity: () => [
+    selectedProject.value || '',
+    JSON.stringify(countColumnMapping.value),
+    countParseResult.value?.rows?.length ?? -1,
+    countParseResult.value?.headers?.join('|') ?? '',
+  ].join('::'),
+  check: async () => {
+    const res = await api.post('/api/assemblies/preview-import', countBody())
+    countPreviewData.value = res.data
+    return res.data
+  },
+  push: async (previewToken) => {
+    const res = await api.post('/api/assemblies/import', { ...countBody(), preview_token: previewToken })
+    countImportResults.value = res.data
+    countPreviewData.value = null
+    return res.data
+  },
+})
+
+const countSummary = computed(() => {
+  const s = { new: 0, kept: 0, identical: 0, blocked: 0 }
+  for (const bp of countPreviewData.value?.batch_previews || []) for (const k in s) s[k] += bp.summary?.[k] || 0
+  return s
+})
+
+const countBlockers = computed(() => importBlockers({
+  t, project: selectedProject.value, parsed: countParseResult.value, mapping: countColumnMapping.value,
+  preview: countGate.checked ? countPreviewData.value : null, includeCounts: true,
+}))
 
 async function onCountFileSelect(e) {
   const file = e.files?.[0]; if (!file) return
   const form = new FormData(); form.append('file', file)
   const res = await api.post('/api/assemblies/parse-csv', form)
-  countParseResult.value = res.data; countPreviewData.value = null; countImportResults.value = []; confirmCountImport.value = false
+  countParseResult.value = res.data; countPreviewData.value = null; countImportResults.value = []
 }
 
 function onCountMappingUpdated(m) {
-  countColumnMapping.value = m; countPreviewData.value = null; confirmCountImport.value = false
+  countColumnMapping.value = m; countPreviewData.value = null
 }
 
-async function doCountPreview() {
-  countPreviewing.value = true; countPreviewData.value = null; confirmCountImport.value = false
-  try {
-    const res = await api.post('/api/assemblies/preview-import', {
-      project_uuid: selectedProject.value,
-      column_mapping: countColumnMapping.value,
-      rows: countParseResult.value.rows,
-    })
-    countPreviewData.value = res.data
-  } finally { countPreviewing.value = false }
-}
-
-async function doCountImport() {
-  countImporting.value = true
-  try {
-    const res = await api.post('/api/assemblies/import', {
-      project_uuid: selectedProject.value,
-      column_mapping: countColumnMapping.value,
-      rows: countParseResult.value.rows,
-    })
-    countImportResults.value = res.data; countPreviewData.value = null
-  } finally { countImporting.value = false }
-}
 </script>
 
 <style scoped>

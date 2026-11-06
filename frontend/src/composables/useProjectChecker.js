@@ -41,6 +41,8 @@ export function useProjectChecker() {
           superproject_found: r.superproject_found,
           phase_exists: r.phase_exists,
           project_uuid: r.existing?.uuid || null,
+          project_name: r.existing?.name || '',
+          candidates: r.candidates || [],
           phases_missing: r.phases_missing || [],
           batches_found: r.batches_found || [],
           batches_missing: r.batches_missing || [],

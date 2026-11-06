@@ -5,6 +5,7 @@ import { GATE, issuePreviewToken, requirePreviewToken } from "../lib/push-gate.t
 import { compareBatches } from "../lib/idempotency.ts";
 import * as db from "../db.ts";
 import { logger } from "../logger.ts";
+import { buildProjectMatcher } from "../lib/produuzit-topology.ts";
 
 const app = new Hono();
 
@@ -160,14 +161,12 @@ app.post("/add-for-projects", async (c) => {
 
   // Resolve project_key -> uuid by name
   const allProjects = (await fetchAllPages("/company/projects/")) as Record<string, unknown>[];
-  const nameToUuid = new Map<string, string>();
-  for (const p of allProjects) {
-    const n = (p.name as string ?? "").trim();
-    if (n) nameToUuid.set(n, p.uuid as string);
-    // Also index by project_number
-    const pnum = (p.project_number as string ?? "").trim();
-    if (pnum) nameToUuid.set(pnum, p.uuid as string);
-  }
+  // Name, project_number, then the 7-character prefix (12654-A); ambiguous resolves to nothing.
+  const matchProject = buildProjectMatcher(allProjects);
+  const keyToUuid = (key: string) => {
+    const m = matchProject(key);
+    return m && "project" in m ? (m.project.uuid as string) : undefined;
+  };
 
   // Resolve stdlib names to UUIDs
   const allStdlibNames = new Set<string>();
@@ -199,7 +198,7 @@ app.post("/add-for-projects", async (c) => {
 
   const results: Record<string, unknown>[] = [];
   const resolveUuid = (d: { project_key: string; project_uuid?: string }) =>
-    (d.project_uuid && isUuid(d.project_uuid) ? d.project_uuid : undefined) ?? nameToUuid.get(String(d.project_key ?? "").trim());
+    (d.project_uuid && isUuid(d.project_uuid) ? d.project_uuid : undefined) ?? keyToUuid(String(d.project_key ?? "").trim());
 
   // Ensure a phase exists on a project, once per project+phase pair. Returns false on failure.
   async function ensurePhase(projectUuid: string, projectKey: string, phase: string): Promise<boolean> {

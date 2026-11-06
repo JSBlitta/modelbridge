@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import { apiGet, apiPost, apiPatch, fetchAllPages } from "../produuzit-client.ts";
 import { getConfig } from "../config.ts";
 import { boundedInt, isUuid } from "../lib/validate.ts";
+import { buildProjectMatcher } from "../lib/produuzit-topology.ts";
 
 const app = new Hono();
 
@@ -99,8 +100,7 @@ app.post("/:uuid/phases", async (c) => {
 app.post("/find-or-create", async (c) => {
   const projects = await c.req.json<ProjectDef[]>();
   const all = (await fetchAllPages("/company/projects/")) as Record<string, unknown>[];
-  const byName = new Map<string, Record<string, unknown>>();
-  for (const p of all) byName.set(p.name as string, p);
+  const match = buildProjectMatcher(all);
 
   // Determine which superproject numbers are already present in Produuzit
   const knownSuperprojects = new Set<string>();
@@ -113,13 +113,28 @@ app.post("/find-or-create", async (c) => {
   const results = await Promise.all(projects.map(async (p) => {
     const fullName = buildFullName(p);
     const lookupName = p.letter ? fullName : p.project_key;
-    const existing = byName.get(lookupName) ?? byName.get(fullName);
+    const found = match(lookupName, fullName, p.project_key);
     const superprojectFound = p.superproject ? knownSuperprojects.has(p.superproject) : null;
 
     const wanted = phasesOf(p);
     const specs = p.batch_specs ?? [];
     const specPhase = (spec: { phase: string }) => (spec.phase || p.phase || "").trim();
 
+    if (found && "ambiguous" in found) {
+      // Several existing projects share the 7-character prefix: report, never pick one.
+      return {
+        project_key: p.project_key,
+        status: "ambiguous",
+        existing: null,
+        candidates: found.ambiguous,
+        superproject_found: superprojectFound,
+        phase_exists: null as boolean | null,
+        phases_missing: [] as string[],
+        batches_found: [] as string[],
+        batches_missing: [] as string[],
+      };
+    }
+    const existing = found?.project;
     if (!existing) {
       // Nothing of a new project exists yet: every phase and batch is missing.
       return {
@@ -183,16 +198,20 @@ app.post("/create", async (c) => {
   const clientNameDefault = cfg.defaults.client_name;
 
   const all = (await fetchAllPages("/company/projects/")) as Record<string, unknown>[];
-  const byName = new Map<string, Record<string, unknown>>();
-  for (const p of all) byName.set(p.name as string, p);
+  const match = buildProjectMatcher(all);
 
   const results = [];
   for (const p of projects) {
     const fullName = buildFullName(p);
     const lookupName = p.letter ? fullName : p.project_key;
     const createName = lookupName;
-    if (byName.has(lookupName)) {
-      results.push({ project_key: p.project_key, status: "already_exists", data: byName.get(lookupName) });
+    const found = match(lookupName, fullName, p.project_key);
+    if (found && "ambiguous" in found) {
+      results.push({ project_key: p.project_key, status: "error", error: `Matches several projects: ${found.ambiguous.join(", ")}` });
+      continue;
+    }
+    if (found) {
+      results.push({ project_key: p.project_key, status: "already_exists", data: found.project });
       continue;
     }
 

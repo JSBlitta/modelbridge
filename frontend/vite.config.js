@@ -9,6 +9,8 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    // TrimbleImport imports the shared column matcher from ../src/lib.
+    fs: { allow: ['..'] },
     proxy: {
       '/api': 'http://localhost:3000'
     }

@@ -36,8 +36,10 @@
               <Tag v-if="row.superproject_found != null"
                    :severity="row.superproject_found ? 'success' : 'secondary'"
                    :value="row.superproject_found ? $t('unified.superprojectFound') : $t('unified.superprojectNew')" />
-              <Tag :severity="row.status === 'found' ? 'success' : 'secondary'"
-                   :value="row.status === 'found' ? $t('unified.projectFound') : $t('unified.projectNew')" />
+              <Tag v-if="row.status === 'ambiguous'" severity="danger"
+                   :value="$t('unified.projectAmbiguous', { names: (row.candidates || []).join(', ') })" />
+              <Tag v-else :severity="row.status === 'found' ? 'success' : 'secondary'"
+                   :value="row.status === 'found' ? $t('unified.projectFound') + (row.project_name && row.project_name !== row.project_key ? ': ' + row.project_name : '') : $t('unified.projectNew')" />
               <Tag v-if="row.phase_exists != null"
                    :severity="row.phase_exists ? 'success' : 'secondary'"
                    :value="row.phase_exists ? $t('unified.phaseExists', { phase: row.suggested_phase }) : $t('unified.phaseNew', { phase: row.suggested_phase })" />
@@ -96,7 +98,7 @@
     </Card>
 
     <!-- ASSEMBLY IMPORT -->
-    <Card v-if="project" class="mb-card">
+    <Card class="mb-card">
       <template #title>{{ $t('unified.assemblySection') }}</template>
       <template #content>
         <Message severity="info" :closable="false" size="small" style="margin-bottom:0.75rem;">
@@ -265,6 +267,11 @@
           </div>
         </div>
 
+        <Message v-if="pushBlockers.length && !importResults.length" severity="secondary" :closable="false" size="small" class="mt-sm">
+          <strong>{{ $t('pushBlock.title') }}</strong>
+          <ul style="margin:0.25rem 0 0 1.1rem;padding:0;"><li v-for="b in pushBlockers" :key="b">{{ b }}</li></ul>
+        </Message>
+
         <div v-if="importResults.length" class="mt-sm">
           <div style="display:flex;gap:1rem;flex-wrap:wrap;">
             <span v-if="!isUuidMode" class="text-new">{{ importResults.filter(r=>r.status==='created').length }} {{ $t('unified.created') }}</span>
@@ -306,7 +313,7 @@ import ConfirmationTable from '../components/ConfirmationTable.vue'
 import ConfirmedButton from '../components/ConfirmedButton.vue'
 import PushGate from '../components/PushGate.vue'
 import { usePushGate } from '../composables/usePushGate.js'
-import { useImportPreview } from '../composables/useImportPreview.js'
+import { useImportPreview, importBlockers } from '../composables/useImportPreview.js'
 import ColumnMapper from '../components/ColumnMapper.vue'
 
 // Project
@@ -397,9 +404,12 @@ const totalBlocked = computed(() => isUuidMode.value
   ? (previewData.value?.row_previews?.filter(r => r.status === 'error').length ?? 0)
   : (previewData.value?.batch_previews?.filter(b => b.blocked).reduce((a, b) => a + b.rows.length, 0) ?? 0))
 
-const canExecute = computed(() => isUuidMode.value
-  ? (previewData.value && !previewData.value.has_errors && totalChanged.value > 0)
-  : (previewData.value?.batch_previews?.some(bp => !bp.blocked && bp.summary.new > 0)))
+const pushBlockers = computed(() => importBlockers({
+  t, project: project.value, parsed: parseResult.value, mapping: columnMapping.value,
+  // A changed input (e.g. the counts toggle) voids the check: ask for a new one.
+  preview: importGate.checked ? previewData.value : null, includeCounts: includeProductionCounts.value,
+}))
+const canExecute = computed(() => Boolean(previewData.value) && !pushBlockers.value.length)
 
 function refreshProjects() { fetchProjects(true) }
 
