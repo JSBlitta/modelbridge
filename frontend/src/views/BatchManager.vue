@@ -199,7 +199,7 @@
           :check-label="$t('unified.previewBtn')"
           :check-disabled="!countHasRequiredMapping"
           :show-push="!countBlockers.length"
-          :confirm-label="`I confirm: write ${countSummary.new} new production count(s)`"
+          :confirm-label="`I confirm: write ${countSummary.new} new production count(s)` + designsSuffix(countPreviewData, $t)"
           :push-label="$t('batchManager.executeImport')"
           push-icon="pi pi-bolt" />
 
@@ -208,6 +208,9 @@
           <span style="color:#b45309;">{{ countSummary.kept }} kept</span>
           <span style="color:#6b7280;">{{ countSummary.identical }} identical</span>
           <span v-if="countSummary.blocked" style="color:#dc2626;font-weight:600;">{{ countSummary.blocked }} blocked</span>
+          <span v-if="countPreviewData.designs_to_create?.length" style="color:#b45309;">
+            {{ $t('pushBlock.designsToCreate', { designs: shortList(countPreviewData.designs_to_create) }) }}
+          </span>
           <span v-if="countPreviewData.unresolved_batches?.length" style="color:#dc2626;">
             {{ $t('unified.batchesNotFound', { batches: countPreviewData.unresolved_batches.join(', ') }) }}
           </span>
@@ -243,7 +246,7 @@ import { useProduuzitProjects } from '../composables/useProduuzitProjects.js'
 import ColumnMapper from '../components/ColumnMapper.vue'
 import PushGate from '../components/PushGate.vue'
 import { usePushGate } from '../composables/usePushGate.js'
-import { importBlockers } from '../composables/useImportPreview.js'
+import { importBlockers, shortList, designsSuffix } from '../composables/useImportPreview.js'
 import { useI18n } from 'vue-i18n'
 import { useConfirm } from 'primevue/useconfirm'
 

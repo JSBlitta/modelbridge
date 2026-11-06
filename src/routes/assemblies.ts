@@ -256,8 +256,9 @@ app.post("/preview-import", async (c) => {
 
   const byBatch = new Map<string, Record<string, string>[]>();
   const unresolvedBatches = new Set<string>();
-  const unresolvedDesigns = new Set<string>();
-  const createdDesigns = new Map<string, string>();
+  // The check writes nothing: a design that does not exist yet is listed here and
+  // created by /import, after the operator has confirmed this list.
+  const designsToCreate = new Set<string>();
   const batchById = new Map<string, Record<string, unknown>>();
   for (const b of batches) batchById.set(b.uuid as string, b);
   const existingCounts = await getProductionCounts(body.project_uuid);
@@ -282,21 +283,25 @@ app.post("/preview-import", async (c) => {
     const countMap = new Map<string, { design: string; design_name: string; phase: string; count: number }>();
     for (const row of rows) {
       const designName = designNameCol ? (cleanValue(row[designNameCol]) as string | null) : null;
-      const designUuid = designName ? await resolveDesignUuid(designsMap, body.project_uuid, designName, createdDesigns) : null;
-      if (designName && !designUuid) { unresolvedDesigns.add(designName); continue; }
-      if (!designUuid) continue;
+      if (!designName) continue;
+      const designUuid = designsMap.get(designName) ?? null;
+      // /import skips definitive batches before creating anything, so only list
+      // designs a push would actually create.
+      if (!designUuid && dbState !== "definitive") designsToCreate.add(designName);
       const count = countCol ? parseCount(cleanValue(row[countCol]), defaultCount) : defaultCount;
-      const key = `${batchPhase}|${designUuid}`;
+      // A new design has no uuid yet, and no count in Produuzit either.
+      const key = `${batchPhase}|${designUuid ?? "new:" + designName}`;
       const entry = countMap.get(key);
       if (entry) entry.count += count;
-      else countMap.set(key, { design: designUuid, design_name: designName || designUuid, phase: batchPhase, count });
+      else countMap.set(key, { design: designUuid ?? "", design_name: designName, phase: batchPhase, count });
     }
 
     const rowPreviews = [...countMap.values()].map((e) => {
       const existing = existingCounts.get(`${batchUuid}|${e.phase}|${e.design}`) ?? 0;
       return {
         design_name: e.design_name,
-        design_uuid: e.design,
+        design_uuid: e.design || null,
+        design_new: !e.design,
         phase: e.phase,
         ...previewCountRow(existing, e.count, dbState === "definitive"),
         changed_fields: [],
@@ -318,7 +323,7 @@ app.post("/preview-import", async (c) => {
   return c.json({
     batch_previews: batchPreviews,
     unresolved_batches: [...unresolvedBatches].sort(),
-    unresolved_designs: [...unresolvedDesigns].sort(),
+    designs_to_create: [...designsToCreate].sort(),
     no_client_order_id: !orderIdCol,
     warnings: [],
     production_counts_included: includeCounts,

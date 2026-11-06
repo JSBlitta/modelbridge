@@ -218,6 +218,8 @@ export default {
     definitive: 'Elke batch in het bestand is definitief (vergrendeld). Zet hem terug op voorlopig op de pagina Batches.',
     nothingNew: 'Niets nieuws: Produuzit heeft al een aantal voor elk design en elke batch in het bestand (aantallen worden eenmalig geschreven).',
     counts: 'Vink "Ook productieaantallen bijwerken" aan: zonder dat schrijft de push niets.',
+    designsToCreate: 'Nog niet in Produuzit, aangemaakt bij de push: {designs}',
+    confirmDesigns: ' en {count} nieuwe design(s) aanmaken',
   },
   batchManager: {
     title: 'Batch Beheer',

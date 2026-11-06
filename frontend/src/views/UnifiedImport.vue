@@ -214,8 +214,8 @@
             <Message v-if="previewData.unresolved_batches?.length" severity="error" :closable="false" size="small">
               {{ $t('unified.batchesNotFound', { batches: previewData.unresolved_batches.join(', ') }) }}
             </Message>
-            <Message v-if="previewData.unresolved_designs?.length" severity="error" :closable="false" size="small">
-              {{ $t('unified.designsNotFound', { designs: previewData.unresolved_designs.slice(0,5).join(', ') + (previewData.unresolved_designs.length>5?'\u2026':'') }) }}
+            <Message v-if="previewData.designs_to_create?.length" severity="warn" :closable="false" size="small">
+              {{ $t('pushBlock.designsToCreate', { designs: shortList(previewData.designs_to_create) }) }}
             </Message>
 
             <div v-for="bp in previewData.batch_previews" :key="bp.batch_uuid" class="batch-preview-row">
@@ -261,7 +261,7 @@
             <PushGate
               :gate="importGate"
               :show-check="false"
-              :confirm-label="$t('unified.confirmImport', { totalNew, totalChanged })"
+              :confirm-label="$t('unified.confirmImport', { totalNew, totalChanged }) + designsSuffix(previewData, $t)"
               :push-label="$t('unified.executeBtn')"
               push-icon="pi pi-bolt" />
           </div>
@@ -313,7 +313,7 @@ import ConfirmationTable from '../components/ConfirmationTable.vue'
 import ConfirmedButton from '../components/ConfirmedButton.vue'
 import PushGate from '../components/PushGate.vue'
 import { usePushGate } from '../composables/usePushGate.js'
-import { useImportPreview, importBlockers } from '../composables/useImportPreview.js'
+import { useImportPreview, importBlockers, shortList, designsSuffix } from '../composables/useImportPreview.js'
 import ColumnMapper from '../components/ColumnMapper.vue'
 
 // Project

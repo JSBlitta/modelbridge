@@ -53,3 +53,9 @@ export function importBlockers({ t, project, parsed, mapping, preview, includeCo
   if (!includeCounts) return [t('pushBlock.counts')]
   return []
 }
+
+export const shortList = (xs, n = 10) => xs.slice(0, n).join(', ') + (xs.length > n ? ` (+${xs.length - n})` : '')
+
+// Appended to a confirm label: the designs this push creates, so the tick covers them.
+export const designsSuffix = (preview, t) =>
+  preview?.designs_to_create?.length ? t('pushBlock.confirmDesigns', { count: preview.designs_to_create.length }) : ''

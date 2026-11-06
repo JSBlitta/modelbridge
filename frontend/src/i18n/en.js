@@ -218,6 +218,8 @@ export default {
     definitive: 'Every batch in the file is definitive (locked). Set it back to provisional on the Batches page.',
     nothingNew: 'Nothing new: Produuzit already has a count for every design and batch in the file (counts are written once).',
     counts: 'Tick "Also update production counts": without it the push writes nothing.',
+    designsToCreate: 'Not in Produuzit yet, created when you push: {designs}',
+    confirmDesigns: ' and create {count} new design(s)',
   },
   batchManager: {
     title: 'Batch Manager',
