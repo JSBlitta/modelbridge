@@ -360,13 +360,21 @@ const missingPhaseCount = computed(() =>
 const missingBatchCount = computed(() =>
   phaseSuggestions.value.reduce((sum, r) => sum + (r.batches_missing?.length || 0), 0)
 )
-const hasAnythingToCreate = computed(() => newProjectCount.value > 0 || missingPhaseCount.value > 0 || missingBatchCount.value > 0)
+// Batches the CSV links to a standard library. The server adds a missing link and
+// leaves one that is already there, so offering it again is harmless.
+const stdlibLinkCount = computed(() => {
+  const keys = new Set(stdlibsFromMapping().keys())
+  for (const p of phaseSuggestions.value) for (const b of p.batches || []) if (b.stdlibs?.length) keys.add(`${p.project_key}|${b.number}`)
+  return keys.size
+})
+const hasAnythingToCreate = computed(() => newProjectCount.value > 0 || missingPhaseCount.value > 0 || missingBatchCount.value > 0 || stdlibLinkCount.value > 0)
 
 const createItemsLabel = computed(() => {
   const parts = []
   if (newProjectCount.value) parts.push(t('unified.projectCreateCount', { count: newProjectCount.value }))
   if (missingPhaseCount.value) parts.push(t('unified.phaseCreateCount', { count: missingPhaseCount.value }))
   if (missingBatchCount.value) parts.push(t('unified.batchCreateCount', { count: missingBatchCount.value }))
+  if (stdlibLinkCount.value) parts.push(t('unified.stdlibLinkCount', { count: stdlibLinkCount.value }))
   return parts.join(' + ')
 })
 
@@ -462,11 +470,28 @@ const doCheck = async () => { superParseError.value = ''; await checkProjects(ph
 // One confirmed action: new projects (with all their phases, which also brings a
 // new superproject into being), then every missing phase and batch, then a
 // re-check. Each step is idempotent server-side, so a repeat creates nothing.
+// Standard-library cells per project and batch from the assembly CSV's own column
+// mapping, so a column mapped by hand counts, not only one the parser recognised.
+function stdlibsFromMapping() {
+  const out = new Map()
+  const colFor = (target) => Object.entries(columnMapping.value).find(([, v]) => (Array.isArray(v) ? v : [v]).includes(target))?.[0]
+  const sCol = colFor('stdlib'), bCol = colFor('batch_number'), pCol = colFor('project') || parseResult.value?.col_map?.project
+  if (!sCol || !bCol || !pCol) return out
+  for (const r of parseResult.value?.rows || []) {
+    const cell = String(r[sCol] ?? '').trim()
+    if (!cell) continue
+    const key = `${String(r[pCol] ?? '').trim()}|${String(r[bCol] ?? '').trim()}`
+    out.set(key, [...new Set([...(out.get(key) || []), cell])])
+  }
+  return out
+}
+
 async function createAll() {
   creatingAll.value = true
   createProjectResults.value = []
   const rows = []
   try {
+    const mappedStdlibs = stdlibsFromMapping()
     const uuidByKey = {}
     for (const p of phaseSuggestions.value) if (p.project_uuid) uuidByKey[p.project_key] = p.project_uuid
 
@@ -495,8 +520,11 @@ async function createAll() {
       for (const phase of p.phases_missing || []) phaseDefs.push({ project_key: p.project_key, project_uuid, phase })
       const missing = new Set((p.batches_missing || []).map(String))
       for (const b of p.batches || []) {
-        if (missing.has(String(b.number))) {
-          batchDefs.push({ project_key: p.project_key, project_uuid, batch_number: b.number, phase: b.phase || p.suggested_phase || '', stdlibs: b.stdlibs || [] })
+        const stdlibs = [...new Set([...(b.stdlibs || []), ...(mappedStdlibs.get(`${p.project_key}|${b.number}`) || [])])]
+        // An existing batch is sent too when the CSV links a standard library: the
+        // server adds a link that is missing and creates nothing else.
+        if (missing.has(String(b.number)) || stdlibs.length) {
+          batchDefs.push({ project_key: p.project_key, project_uuid, batch_number: b.number, phase: b.phase || p.suggested_phase || '', stdlibs })
         }
       }
     }

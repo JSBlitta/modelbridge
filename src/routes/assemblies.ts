@@ -18,6 +18,7 @@ import { GATE, issuePreviewToken, requirePreviewToken } from "../lib/push-gate.t
 import { boundedInt, isUuid } from "../lib/validate.ts";
 import { readUploadedText } from "../lib/upload-limits.ts";
 import { loadDesigns, loadBatches, buildBatchMatcher } from "../lib/produuzit-topology.ts";
+import { loadStdlibResolver, resolveStdlibs, stdlibDesigns } from "../lib/stdlib.ts";
 
 const app = new Hono();
 
@@ -83,6 +84,28 @@ function mapRow(
 
   if (Object.keys(clientMeta).length) mapped.client_meta = clientMeta;
   return { mapped, warnings };
+}
+
+// Where a row's design comes from, in this order: the standard libraries the row
+// names (column mapped to "stdlib": uuid, name or project number), the project's
+// own designs, then the standard libraries its batch or project links. Only a
+// design found nowhere is created, in the project, by /import.
+async function designFinder(projectUuid: string, columnMapping: ColumnMapping) {
+  const stdlibCol = findSource(columnMapping, "stdlib");
+  const resolveStdlib = stdlibCol ? await loadStdlibResolver() : null;
+  let projectLinks: string[] = [];
+  try {
+    const p = (await apiGet(`/company/projects/${projectUuid}/`)) as Record<string, any>;
+    projectLinks = [...(p.linked_stdlibs ?? []), ...(p.meta?.linked_stdlibs ?? [])].map(String);
+  } catch { /* no project links: the row's and the batch's still apply */ }
+  const inStdlibs = stdlibDesigns();
+  return async (row: Record<string, string>, batch: Record<string, any>, designName: string, own: Map<string, string>) => {
+    const named = stdlibCol && resolveStdlib ? resolveStdlibs([row[stdlibCol] ?? ""], resolveStdlib) : { uuids: [], unresolved: [] };
+    const hit = (await inStdlibs(designName, named.uuids))
+      ?? (own.has(designName) ? { uuid: own.get(designName)!, stdlib: null } : null)
+      ?? (await inStdlibs(designName, [...(batch?.meta?.linked_stdlibs ?? []), ...projectLinks].map(String)));
+    return { uuid: hit?.uuid ?? null, stdlib: hit?.stdlib ?? null, unresolvedStdlibs: named.unresolved };
+  };
 }
 
 // Resolve design name → uuid, creating the design in Produuzit when missing
@@ -263,6 +286,9 @@ app.post("/preview-import", async (c) => {
   for (const b of batches) batchById.set(b.uuid as string, b);
   const existingCounts = await getProductionCounts(body.project_uuid);
   const matchBatch = buildBatchMatcher(batches);
+  const findDesign = await designFinder(body.project_uuid, body.column_mapping);
+  const fromStdlib = new Set<string>();
+  const unknownStdlibs = new Set<string>();
 
   for (const row of body.rows) {
     const batchNum = batchNumberCol ? (row[batchNumberCol] ?? "") : "";
@@ -284,7 +310,10 @@ app.post("/preview-import", async (c) => {
     for (const row of rows) {
       const designName = designNameCol ? (cleanValue(row[designNameCol]) as string | null) : null;
       if (!designName) continue;
-      const designUuid = designsMap.get(designName) ?? null;
+      const found = await findDesign(row, batchInfo, designName, designsMap);
+      found.unresolvedStdlibs.forEach((v) => unknownStdlibs.add(v));
+      if (found.stdlib) fromStdlib.add(designName);
+      const designUuid = found.uuid;
       // /import skips definitive batches before creating anything, so only list
       // designs a push would actually create.
       if (!designUuid && dbState !== "definitive") designsToCreate.add(designName);
@@ -324,8 +353,12 @@ app.post("/preview-import", async (c) => {
     batch_previews: batchPreviews,
     unresolved_batches: [...unresolvedBatches].sort(),
     designs_to_create: [...designsToCreate].sort(),
+    designs_from_stdlib: [...fromStdlib].sort(),
     no_client_order_id: !orderIdCol,
-    warnings: [],
+    warnings: [
+      ...(unknownStdlibs.size ? [`Standard library not found: ${[...unknownStdlibs].sort().join(", ")}`] : []),
+      ...(fromStdlib.size ? [`Taken from a standard library, not created in the project: ${[...fromStdlib].sort().join(", ")}`] : []),
+    ],
     production_counts_included: includeCounts,
     default_count: defaultCount,
     preview_token: issuePreviewToken(GATE.assemblyImport, assemblyGateInput(body)),
@@ -432,6 +465,7 @@ app.post("/import", async (c) => {
 
   const results: Record<string, unknown>[] = [];
   const createdDesigns = new Map<string, string>();
+  const findDesign = await designFinder(body.project_uuid, body.column_mapping);
   const batchById = new Map<string, Record<string, unknown>>();
   for (const b of batches) batchById.set(b.uuid as string, b);
 
@@ -454,7 +488,8 @@ app.post("/import", async (c) => {
 
     for (const row of rows) {
       const designName = designNameCol ? (cleanValue(row[designNameCol]) as string | null) : null;
-      const designUuid = designName ? await resolveDesignUuid(designsMap, body.project_uuid, designName, createdDesigns) : null;
+      const found = designName ? await findDesign(row, batchInfo, designName, designsMap) : null;
+      const designUuid = found?.uuid ?? (designName ? await resolveDesignUuid(designsMap, body.project_uuid, designName, createdDesigns) : null);
       if (!designUuid) {
         results.push({ design_name: designName, batch: batchName, status: "error", reason: `Design '${designName}' not found in project` });
         continue;

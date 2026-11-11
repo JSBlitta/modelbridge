@@ -575,6 +575,7 @@ export default {
     foundProjectInfo: '1 project already exists in Produuzit. | {count} projects already exist in Produuzit.',
     phaseCreateCount: '0 phases | 1 phase | {count} phases',
     batchCreateCount: '0 batches | 1 batch | {count} batches',
+    stdlibLinkCount: 'standard library links for 1 batch | standard library links for {count} batches',
     confirmCreateItems: 'I confirm — create {items}',
     createAllBtn: 'Create everything in Produuzit',
     projectCreateCount: '0 projects | 1 project | {count} projects',

@@ -6,6 +6,7 @@ import { compareBatches } from "../lib/idempotency.ts";
 import * as db from "../db.ts";
 import { logger } from "../logger.ts";
 import { buildProjectMatcher } from "../lib/produuzit-topology.ts";
+import { loadStdlibResolver, resolveStdlibs } from "../lib/stdlib.ts";
 
 const app = new Hono();
 
@@ -64,39 +65,17 @@ app.post("/create", async (c) => {
   const existingBatches = (await fetchAllPages("/constructibles/batches/", { project: body.project_uuid })) as Record<string, unknown>[];
   const existingNames = new Set(existingBatches.map((b) => b.name as string));
 
-  // Resolve stdlib names -> UUIDs once for this request
-  const allNames = new Set<string>();
-  for (const b of body.batches) {
-    if (b.linked_stdlib_names?.length) for (const n of b.linked_stdlib_names) allNames.add(n);
-  }
-  const stdlibNameToUuid = new Map<string, string>();
-  if (allNames.size) {
-    try {
-      const stdlibProjects = (await fetchAllPages("/company/projects/", { standard_library: true })) as Record<string, unknown>[];
-      for (const p of stdlibProjects) {
-        const uuid = p.uuid as string;
-        if (!uuid) continue;
-        const name = (p.name as string ?? "").toLowerCase();
-        const pnum = (p.project_number as string ?? "").toLowerCase();
-        if (name) stdlibNameToUuid.set(name, uuid);
-        if (pnum) stdlibNameToUuid.set(pnum, uuid);
-      }
-    } catch (e) {
-      logger.warn("[batches/create] stdlib name resolution failed:", e);
-    }
-  }
+  // Standard libraries by uuid, name or project number, resolved once per request.
+  const wantsStdlibs = body.batches.some((b) => b.linked_stdlibs?.length || b.linked_stdlib_names?.length);
+  const resolveStdlib = wantsStdlibs ? await loadStdlibResolver() : () => undefined;
 
-  const results = [];
+  const results: Record<string, unknown>[] = [];
   for (const b of body.batches) {
-    let resolvedStdlibs = b.linked_stdlibs ?? null;
-    if ((!resolvedStdlibs?.length) && b.linked_stdlib_names?.length) {
-      resolvedStdlibs = b.linked_stdlib_names
-        .map((n) => {
-          const uuid = stdlibNameToUuid.get(n.toLowerCase());
-          if (!uuid) logger.warn(`[batches/create] stdlib not found: "${n}"`);
-          return uuid;
-        })
-        .filter((u): u is string => !!u);
+    const { uuids, unresolved } = resolveStdlibs([...(b.linked_stdlibs ?? []), ...(b.linked_stdlib_names ?? [])], resolveStdlib);
+    const resolvedStdlibs = uuids.length ? uuids : null;
+    if (unresolved.length) {
+      logger.warn(`[batches/create] stdlib not found for "${b.name}": ${unresolved.join(", ")}`);
+      results.push({ name: b.name, status: "error", error: `Standard library not found: ${unresolved.join(", ")}` });
     }
     if (existingNames.has(b.name)) {
       const match = existingBatches.find((e) => e.name === b.name) as Record<string, unknown> | undefined;
@@ -168,26 +147,8 @@ app.post("/add-for-projects", async (c) => {
     return m && "project" in m ? (m.project.uuid as string) : undefined;
   };
 
-  // Resolve stdlib names to UUIDs
-  const allStdlibNames = new Set<string>();
-  for (const b of batchDefs) {
-    if (b.stdlibs?.length) for (const s of b.stdlibs) allStdlibNames.add(s);
-  }
-  const stdlibNameToUuid = new Map<string, string>();
-  if (allStdlibNames.size) {
-    try {
-      const stdlibProjects = (await fetchAllPages("/company/projects/", { standard_library: true })) as Record<string, unknown>[];
-      for (const p of stdlibProjects) {
-        const uuid = p.uuid as string; if (!uuid) continue;
-        const name = (p.name as string ?? "").toLowerCase();
-        const pnum = (p.project_number as string ?? "").toLowerCase();
-        if (name) stdlibNameToUuid.set(name, uuid);
-        if (pnum) stdlibNameToUuid.set(pnum, uuid);
-      }
-    } catch (e) {
-      logger.warn("[batches/add-for-projects] stdlib name resolution failed:", e);
-    }
-  }
+  // Standard libraries by uuid, name or project number, resolved once per request.
+  const resolveStdlib = batchDefs.some((b) => b.stdlibs?.length) ? await loadStdlibResolver() : () => undefined;
 
   // Per-project caches. Without these the loop refetched the project and every
   // one of its batches once per batch_def — 50 defs on one project meant 100
@@ -263,21 +224,33 @@ app.post("/add-for-projects", async (c) => {
       projectBatches = (await fetchAllPages("/constructibles/batches/", { project: projectUuid })) as Record<string, unknown>[];
       batchCache.set(projectUuid, projectBatches);
     }
-    const existsForPhase = projectBatches.some(
+    const existing = projectBatches.find(
       (x) => String(x.name ?? "").trim() === batchName && String(x.phase ?? "").trim().toLowerCase() === b.phase.trim().toLowerCase()
     );
 
-    if (existsForPhase) {
-      results.push({ project_key: b.project_key, batch_number: batchName, status: "already_exists" });
-      continue;
+    const { uuids, unresolved } = resolveStdlibs(b.stdlibs ?? [], resolveStdlib);
+    const resolvedStdlibs = uuids.length ? uuids : null;
+    if (unresolved.length) {
+      results.push({ project_key: b.project_key, batch_number: batchName, status: "error", error: `Standard library not found: ${unresolved.join(", ")}` });
     }
 
-    // Resolve stdlibs
-    let resolvedStdlibs: string[] | null = null;
-    if (b.stdlibs?.length) {
-      resolvedStdlibs = b.stdlibs
-        .map((n) => stdlibNameToUuid.get(n.toLowerCase()))
-        .filter((u): u is string => !!u);
+    if (existing) {
+      // A batch made before its stdlib was known gets the link now, like /create does.
+      const meta = (existing.meta ?? {}) as Record<string, unknown>;
+      const had = ((meta.linked_stdlibs ?? []) as string[]).slice().sort();
+      if (uuids.length && JSON.stringify(had) !== JSON.stringify(uuids.slice().sort())) {
+        try {
+          await apiPatch(`/constructibles/batches/${existing.uuid}/`, { meta: { ...meta, linked_stdlibs: uuids } });
+          existing.meta = { ...meta, linked_stdlibs: uuids };
+          db.upsertBatch(existing.uuid as string, batchName, projectUuid, b.phase, uuids);
+          results.push({ project_key: b.project_key, batch_number: batchName, status: "updated_stdlibs" });
+        } catch (e) {
+          results.push({ project_key: b.project_key, batch_number: batchName, status: "error", error: `Could not link standard library: ${e instanceof Error ? e.message : String(e)}` });
+        }
+        continue;
+      }
+      results.push({ project_key: b.project_key, batch_number: batchName, status: "already_exists" });
+      continue;
     }
 
     // Create the batch

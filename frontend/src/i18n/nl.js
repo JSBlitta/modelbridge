@@ -575,6 +575,7 @@ export default {
     foundProjectInfo: '1 project bestaat al in Produuzit. | {count} projecten bestaan al in Produuzit.',
     phaseCreateCount: 'geen fasen | 1 fase | {count} fasen',
     batchCreateCount: 'geen batches | 1 batch | {count} batches',
+    stdlibLinkCount: 'standaardbibliotheek-koppeling voor 1 batch | standaardbibliotheek-koppelingen voor {count} batches',
     confirmCreateItems: 'Ik bevestig — {items} aanmaken',
     createAllBtn: 'Alles aanmaken in Produuzit',
     projectCreateCount: 'geen projecten | 1 project | {count} projecten',

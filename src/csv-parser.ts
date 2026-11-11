@@ -26,6 +26,20 @@ function detectColumns(
   return mapping;
 }
 
+// A stdlib cell holds a JSON array, one value (name, project number or uuid), or
+// several separated by , or |.
+export function parseStdlibCell(cell: unknown): string[] {
+  const s = String(cell ?? "").trim();
+  if (!s) return [];
+  if (s.startsWith("[")) {
+    try {
+      const arr = JSON.parse(s);
+      if (Array.isArray(arr)) return arr.map((v) => String(v).trim()).filter(Boolean);
+    } catch { /* not JSON: split below */ }
+  }
+  return s.split(/[,|]/).map((v) => v.trim()).filter(Boolean);
+}
+
 export function parseProjectCsv(
   text: string,
   synonyms: Record<string, string[]>,
@@ -67,14 +81,7 @@ export function parseProjectCsv(
       if (bv) {
         const num = parseInt(bv, 10);
         const batchNum = (!isNaN(num) && String(num) === bv) ? num : bv;
-        let stdlibs: string[] = [];
-        if (stdlibCol) {
-          const sv = (row[stdlibCol] ?? "").trim();
-          if (sv) {
-            try { stdlibs = JSON.parse(sv); } catch { /* ignore */ }
-            if (!Array.isArray(stdlibs)) stdlibs = [];
-          }
-        }
+        const stdlibs = stdlibCol ? parseStdlibCell(row[stdlibCol]) : [];
         projectGroups[projVal].batches.push({ number: batchNum, stdlibs, phase: rowPhase });
       }
     }
@@ -105,7 +112,10 @@ export function parseProjectCsv(
     const suggestedPhase = [...data.phases][0] ?? null;
     const seenNums = new Map<number | string, { stdlibs: string[]; phase: string }>();
     for (const b of data.batches) {
-      if (!seenNums.has(b.number)) seenNums.set(b.number, { stdlibs: b.stdlibs, phase: b.phase });
+      const seen = seenNums.get(b.number);
+      // Every row of a batch counts: the first one may leave the stdlib cell empty.
+      if (seen) seen.stdlibs = [...new Set([...seen.stdlibs, ...b.stdlibs])];
+      else seenNums.set(b.number, { stdlibs: [...b.stdlibs], phase: b.phase });
     }
     const batchNums = [...seenNums.entries()]
       .sort(([a], [b]) => {
