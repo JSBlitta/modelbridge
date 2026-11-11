@@ -1,0 +1,77 @@
+name: Release archive
+
+# Manual: Actions > Release archive > Run workflow (pick a branch, main by default).
+# Runs the same checks as setup.bat, then builds modelbridge-<commit>.7z with
+# scripts/pack-release.ts and attaches it to a GitHub release named after the
+# commit. On the production machine: stop the service, unpack the 7z over the app
+# folder, run setup.bat, start the service (see README "Release").
+
+on:
+  workflow_dispatch:
+    inputs:
+      skip_checks:
+        description: "Skip typecheck and tests (only for a commit that already passed them)"
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # Node 24 runs scripts/pack-release.ts directly (type stripping), so no Bun.
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            frontend/package-lock.json
+
+      - name: Install
+        if: ${{ !inputs.skip_checks }}
+        run: |
+          npm ci --no-audit --no-fund
+          npm ci --no-audit --no-fund --prefix frontend
+
+      - name: Typecheck and tests
+        if: ${{ !inputs.skip_checks }}
+        run: |
+          npx tsc --noEmit
+          npm test
+          npm test --prefix frontend
+          npm run build --prefix frontend
+
+      - name: Build archive
+        id: pack
+        run: |
+          command -v 7z || { sudo apt-get update -q && sudo apt-get install -y -q p7zip-full; }
+          sha=$(git rev-parse --short HEAD)
+          out="modelbridge-${sha}.7z"
+          node scripts/pack-release.ts "$out"
+          echo "file=$out" >> "$GITHUB_OUTPUT"
+          echo "tag=release-${sha}" >> "$GITHUB_OUTPUT"
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FILE: ${{ steps.pack.outputs.file }}
+          TAG: ${{ steps.pack.outputs.tag }}
+        run: |
+          # Running again on the same commit replaces the archive on its release.
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "$FILE" --clobber
+          else
+            gh release create "$TAG" "$FILE" --target "$GITHUB_SHA" --title "$TAG" \
+              --notes "$(git log -1 --format='%s%n%n%b' | sed '/^Co-Authored-By:/d;/^Claude-Session:/d')"
+          fi
+          echo "### $FILE" >> "$GITHUB_STEP_SUMMARY"
+          echo "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/tag/${TAG}" >> "$GITHUB_STEP_SUMMARY"

@@ -50,8 +50,12 @@ cd frontend && npm test          # node:test on frontend/src/**/*.test.mjs
 
 ## Release to the Windows target
 
-1. Commit. `pack-release.ts` refuses a dirty tree, so the archive always matches a commit.
-2. `bun scripts/pack-release.ts` (needs `7z` on PATH) writes `modelbridge-<commit>.7z`. It contains every file git tracks plus `release-manifest.txt`.
+1. Commit and push. `pack-release.ts` refuses a dirty tree, so the archive always matches a commit.
+2. Build the archive, either way:
+   - GitHub: Actions > **Release archive** > Run workflow. It runs the checks, then attaches `modelbridge-<commit>.7z` to a release `release-<commit>` (Releases page).
+   - Locally: `node scripts/pack-release.ts` (or `bun`; needs `7z` on PATH).
+
+   The archive holds every file git tracks plus `release-manifest.txt`.
 3. On the target: stop the service, unpack the 7z over the app folder, run `setup.bat`, start the service.
 
 `setup.bat` does, in order: check Node, `npm install`, prune files that left the release, frontend install and build (fails if `frontend-dist\index.html` is missing), typecheck and tests, then check `.env` (copies `.env.example` if absent and lists what to fill in). `tests.bat` reruns only the checks.
