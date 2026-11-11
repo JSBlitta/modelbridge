@@ -13,6 +13,10 @@ frontend-dist/
 
 # Documentation
 *.md
+!README.md
+!CLAUDE.md
+!HOSTING.md
+!REPORTING.md
 *.postman_collection.json
 Trimble-Connect-*.json
 
