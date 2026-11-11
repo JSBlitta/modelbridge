@@ -60,13 +60,25 @@ const rawConfigSchema = z.object({
 
 export type Config = z.infer<typeof rawConfigSchema>;
 
+// The client id and secret come from the environment (TRIMBLE_CLIENT_ID,
+// TRIMBLE_CLIENT_SECRET, the same variables the server reads from .env), so the
+// secret never sits in Configuration.json, which is in git.
+function withEnvCredentials(config: Config): Config {
+  const auth = config.trimbleConnectAuthorization;
+  auth.clientId = process.env.TRIMBLE_CLIENT_ID || auth.clientId;
+  auth.clientSecret = process.env.TRIMBLE_CLIENT_SECRET || auth.clientSecret;
+  if (!auth.clientSecret) throw new Error('TRIMBLE_CLIENT_SECRET is not set (in .env or the environment)');
+  return config;
+}
+
 export async function loadConfig(path = 'Configuration.json'): Promise<Config> {
+  try { process.loadEnvFile(); } catch { /* no .env: the environment alone counts */ }
   const content = await readFile(path, 'utf-8');
   const parsed = JSON.parse(content) as unknown;
-  return rawConfigSchema.parse(parsed);
+  return withEnvCredentials(rawConfigSchema.parse(parsed));
 }
 
 export function loadConfigSync(content: string): Config {
   const parsed = JSON.parse(content) as unknown;
-  return rawConfigSchema.parse(parsed);
+  return withEnvCredentials(rawConfigSchema.parse(parsed));
 }
