@@ -299,7 +299,7 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, watch, nextTick } from 'vue'
 import { useI18n } from 'vue-i18n'
 const { t } = useI18n()
 import { api, apiErrorMessage } from '../api.js'
@@ -404,11 +404,19 @@ const totalBlocked = computed(() => isUuidMode.value
   ? (previewData.value?.row_previews?.filter(r => r.status === 'error').length ?? 0)
   : (previewData.value?.batch_previews?.filter(b => b.blocked).reduce((a, b) => a + b.rows.length, 0) ?? 0))
 
-const pushBlockers = computed(() => importBlockers({
-  t, project: project.value, parsed: parseResult.value, mapping: columnMapping.value,
-  // A changed input (e.g. the counts toggle) voids the check: ask for a new one.
-  preview: importGate.checked ? previewData.value : null, includeCounts: includeProductionCounts.value,
-}))
+const pushBlockers = computed(() => {
+  // A CSV that names its project selects it once it exists; until then say what to do.
+  if (!project.value && parseResult.value?.col_map?.project && phaseSuggestions.value.length) {
+    return [phaseSuggestions.value.length > 1
+      ? t('unified.pickCsvProject', { count: phaseSuggestions.value.length })
+      : t('unified.createCsvProject')]
+  }
+  return importBlockers({
+    t, project: project.value, parsed: parseResult.value, mapping: columnMapping.value,
+    // A changed input (e.g. the counts toggle) voids the check: ask for a new one.
+    preview: importGate.checked ? previewData.value : null, includeCounts: includeProductionCounts.value,
+  })
+})
 const canExecute = computed(() => Boolean(previewData.value) && !pushBlockers.value.length)
 
 function refreshProjects() { fetchProjects(true) }
@@ -449,7 +457,7 @@ async function parseSuperCsvFile(file) {
   }
 }
 
-const doCheck = () => { superParseError.value = ''; checkProjects(phaseSuggestions) }
+const doCheck = async () => { superParseError.value = ''; await checkProjects(phaseSuggestions); selectCsvProject() }
 
 // One confirmed action: new projects (with all their phases, which also brings a
 // new superproject into being), then every missing phase and batch, then a
@@ -507,6 +515,7 @@ async function createAll() {
     if (errors) notify({ severity: 'error', summary: t('unified.error'), detail: t('unified.createAllErrors', { errors }), life: 8000 })
     // Re-check so the tags show what now exists.
     await checkProjects(phaseSuggestions)
+    await selectCsvProject()
   } catch (err) {
     createProjectResults.value = rows
     superParseError.value = apiErrorMessage(err)
@@ -522,9 +531,40 @@ async function onAsmFileSelect(e) {
     const res = await api.post('/api/assemblies/parse-csv', form)
     parseResult.value = res.data; previewData.value = null; importResults.value = []
   } catch (err) {
-    /* noop */
+    return
   }
+  // The CSV names its own project: check it in Produuzit (read-only) and select it,
+  // so nobody picks it by hand. Whatever is missing goes through "Create all" above.
+  if (!parseResult.value.col_map?.project) return
+  await parseSuperCsvFile(file)
+  if (!phaseSuggestions.value.length) return
+  await checkProjects(phaseSuggestions)
+  selectCsvProject()
 }
+
+// Select the CSV's project once it exists in Produuzit. A project picked by hand
+// stays; one selected from an earlier CSV is replaced.
+const projectFromCsv = ref(false)
+watch(project, (v, old) => { if (v !== old) projectFromCsv.value = false })
+async function selectCsvProject() {
+  if (project.value && !projectFromCsv.value) return
+  const found = phaseSuggestions.value.filter(r => r.project_uuid)
+  // Several projects in one file: the push goes per project, so the operator picks one.
+  if (phaseSuggestions.value.length !== 1 || found.length !== 1) return
+  if (!allProjects.value.some(p => p.uuid === found[0].project_uuid)) await fetchProjects(true)
+  project.value = found[0].project_uuid
+  await nextTick() // let the watch above clear the flag first, then claim it
+  projectFromCsv.value = true
+  await onProjectChange()
+}
+
+// With several projects in the file, only the selected project's rows go to Produuzit.
+const importRows = computed(() => {
+  const rows = parseResult.value?.rows ?? []
+  const col = parseResult.value?.col_map?.project
+  const key = phaseSuggestions.value.find(r => r.project_uuid && r.project_uuid === project.value)?.project_key
+  return col && key && phaseSuggestions.value.length > 1 ? rows.filter(r => String(r[col] ?? '').trim() === key) : rows
+})
 
 function onMappingUpdated(m) { columnMapping.value = m; previewData.value = null }
 
@@ -540,7 +580,7 @@ function importBody() {
   return {
     project_uuid: project.value,
     column_mapping: columnMapping.value,
-    rows: parseResult.value?.rows ?? [],
+    rows: importRows.value,
     include_production_counts: includeProductionCounts.value,
     default_count: Number(defaultCount.value) || 1,
   }
@@ -551,7 +591,7 @@ const importGate = usePushGate({
   identity: () => [
     project.value || '',
     JSON.stringify(columnMapping.value),
-    parseResult.value?.rows?.length ?? -1,
+    importRows.value.length,
     parseResult.value?.headers?.join('|') ?? '',
     includeProductionCounts.value ? '1' : '0',
     String(Number(defaultCount.value) || 1),

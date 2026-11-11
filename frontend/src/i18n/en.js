@@ -519,6 +519,8 @@ export default {
     downloadCsv: 'Download CSV',
     orCreateFromCsv: 'or create from CSV',
     noProjectColumn: 'No `project` column detected. This CSV may not be a superproject file.',
+    createCsvProject: "Project not in Produuzit yet: click \"Create everything in Produuzit\" above. It is selected here as soon as it exists.",
+    pickCsvProject: "This file names {count} projects: select the one to push at the top; only its rows are sent.",
     newProjects: '1 new project will be created in Produuzit. | {count} new projects will be created in Produuzit.',
     confirmCreateProjects: 'I confirm — create 1 project in Produuzit | I confirm — create {count} projects in Produuzit',
     noDesignName: 'No Design Name column mapped.',

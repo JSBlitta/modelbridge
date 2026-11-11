@@ -519,6 +519,8 @@ export default {
     downloadCsv: 'CSV Downloaden',
     orCreateFromCsv: 'of maak aan vanuit CSV',
     noProjectColumn: 'Geen `project`-kolom gevonden. Deze CSV is mogelijk geen superproject-bestand.',
+    createCsvProject: "Project staat nog niet in Produuzit: klik hierboven op \"Alles aanmaken in Produuzit\". Het wordt hier geselecteerd zodra het bestaat.",
+    pickCsvProject: "Dit bestand noemt {count} projecten: kies bovenaan welk project je pusht; alleen die regels gaan mee.",
     newProjects: '1 nieuw project wordt aangemaakt in Produuzit. | {count} nieuwe projecten worden aangemaakt in Produuzit.',
     confirmCreateProjects: 'Ik bevestig — maak 1 project aan in Produuzit | Ik bevestig — maak {count} projecten aan in Produuzit',
     noDesignName: 'Geen Design Name-kolom gekoppeld.',
